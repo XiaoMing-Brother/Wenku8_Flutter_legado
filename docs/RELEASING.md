@@ -6,7 +6,7 @@
 
 ## 个人仓库发布
 
-默认更新仓库为 `XiaoMing-Brother/Wenku8_Flutter`。需要在编译时覆盖时传入
+默认更新仓库为 `XiaoMing-Brother/Wenku8_Flutter_legado`。需要在编译时覆盖时传入
 `--dart-define=UPDATE_REPOSITORY=owner/repo`；该值是编译期常量，修改后必须重新构建。
 自定义仓库必须公开，并且不会使用旧镜像，客户端会直接访问 GitHub API。
 
@@ -19,7 +19,7 @@ APK 的 `versionName` 与 Release Tag 一致：
 flutter build apk --release --split-per-abi \
   --build-name=0.5.7.261118.1610 \
   --build-number=2026111816 \
-  --dart-define=UPDATE_REPOSITORY=XiaoMing-Brother/Wenku8_Flutter
+  --dart-define=UPDATE_REPOSITORY=XiaoMing-Brother/Wenku8_Flutter_legado
 ```
 
 Release Tag 使用 `v<完整版本>`，附件上传到该 Release，不能使用外部下载链接。

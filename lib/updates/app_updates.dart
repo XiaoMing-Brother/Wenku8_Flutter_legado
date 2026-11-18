@@ -12,7 +12,7 @@ import '../legacy_transport.dart';
 export 'current_release_content.dart'
     show currentReleaseNotes, publicReleaseNotes;
 
-const defaultUpdateRepository = 'XiaoMing-Brother/Wenku8_Flutter';
+const defaultUpdateRepository = 'XiaoMing-Brother/Wenku8_Flutter_legado';
 const mirroredUpdateRepository =
     'tdnou'
     'bob/Wenku8_Flutter';
