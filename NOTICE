@@ -55,7 +55,7 @@ Apache POI HWPF 5.5.1 and document dependency notices: assets/licenses/poi.txt.
 Android book-source bridge: this project implements a Legado-compatible rule
 subset locally and does not include Legado application source. OkHttp 4.12.0
 (Apache-2.0, Square, Inc.), JsonPath 2.9.0 (Apache-2.0, Jayway) and Rhino
-1.7.15 (MPL-2.0, Mozilla and contributors) retain their own licenses; full
+1.8.1 (MPL-2.0, Mozilla and contributors) retain their own licenses; full
 texts are in assets/licenses/okhttp.txt, json-path.txt and rhino.txt.
 
 0.5.0 source distribution: upstream library test suites and sample fixtures are omitted; runtime library sources and original licenses are retained.

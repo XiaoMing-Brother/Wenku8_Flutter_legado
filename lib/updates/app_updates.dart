@@ -124,7 +124,8 @@ class AppRelease {
       final url = Uri.tryParse(raw['browser_download_url']?.toString() ?? '');
       final size = raw['size'];
       if (name is! String ||
-          !name.startsWith('wenku8-${version.name}-') ||
+          !(name.startsWith('legado-wenku8-${version.name}-') ||
+              name.startsWith('wenku8-${version.name}-')) ||
           !const ['.apk', '.ipa', '.hap'].any(name.endsWith) ||
           url == null ||
           url.scheme != 'https' ||

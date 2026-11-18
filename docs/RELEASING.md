@@ -17,15 +17,24 @@ APK 的 `versionName` 与 Release Tag 一致：
 
 ```sh
 flutter build apk --release --split-per-abi \
+  --target-platform=android-arm64 \
   --build-name=0.5.7.261118.1707 \
   --build-number=2026111817 \
   --dart-define=UPDATE_REPOSITORY=XiaoMing-Brother/Wenku8_Flutter_legado
 ```
 
 Release Tag 使用 `v<完整版本>`，附件上传到该 Release，不能使用外部下载链接。
-Android 附件命名必须为 `wenku8-<完整版本>-<abi>.apk`，支持的 ABI 为
-`arm64-v8a`、`armeabi-v7a`、`x86_64`，另可提供 `universal`。附件大小不能超过
-300 MB；APK 的包名、`versionName`、`versionCode` 和签名必须与已安装版本兼容。
+Android 默认只构建 `arm64-v8a`，将输出文件
+`build/app/outputs/flutter-apk/app-arm64-v8a-release.apk` 重命名为
+`legado-wenku8-<完整版本>-arm64-v8a.apk` 后上传。只有明确需要老款 32 位设备、
+模拟器或通用包时，才额外构建 `armeabi-v7a`、`x86_64` 或 `universal`。
+附件大小不能超过 300 MB；APK 的包名、`versionName`、`versionCode` 和签名
+必须与已安装版本兼容。
+
+客户端同时接受 `legado-wenku8-` 与旧的 `wenku8-` 附件前缀。已安装的
+`0.5.7.261118.1707` 及更早构建只识别旧前缀，因此第一次切换到新名称时，
+需要同时上传一份旧前缀的 `arm64-v8a` 附件，或让用户手动安装一次新版。
+完成过渡后可以只保留 `legado-wenku8-` 名称。
 
 Android 的 `applicationId` 固定为 `legado.wenku`，Kotlin 源码命名空间仍为
 `org.mewx.wenku8_flutter`。从旧的 `org.mewx.wenku8_flutter.source_preview`

@@ -9,7 +9,7 @@
 
 赞助完全自愿，所有功能仍免费使用。
 
-[项目主页 →](https://mikufoxxx.github.io/Wenku8_Flutter/zh.html)
+[上游项目主页 →](https://mikufoxxx.github.io/Wenku8_Flutter/zh.html)
 
 <p align="center">
   <picture>
@@ -19,13 +19,12 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/mikufoxxx/Wenku8_Flutter/actions/workflows/flutter-ci.yml"><img src="https://github.com/mikufoxxx/Wenku8_Flutter/actions/workflows/flutter-ci.yml/badge.svg?branch=master&amp;event=push" alt="Source checks" /></a>
-  <a href="https://github.com/mikufoxxx/Wenku8_Flutter/releases/latest"><img src="https://img.shields.io/github/v/release/mikufoxxx/Wenku8_Flutter?style=flat-square&amp;logo=github&amp;color=blue" alt="Release" /></a>
-  <a href="https://github.com/mikufoxxx/Wenku8_Flutter/releases"><img src="https://img.shields.io/github/downloads/mikufoxxx/Wenku8_Flutter/total?style=flat-square&amp;label=GitHub%20Downloads&amp;color=brightgreen" alt="GitHub Release 下载量" /></a>
+  <a href="https://github.com/XiaoMing-Brother/Wenku8_Flutter_legado/actions/workflows/flutter-ci.yml"><img src="https://github.com/XiaoMing-Brother/Wenku8_Flutter_legado/actions/workflows/flutter-ci.yml/badge.svg?branch=master&amp;event=push" alt="Source checks" /></a>
+  <img src="https://img.shields.io/badge/Version-0.5.7.261118.1707-blue?style=flat-square" alt="Version 0.5.7.261118.1707" />
   <img src="https://img.shields.io/badge/Android-signed-3DDC84?style=flat-square&amp;logo=android&amp;logoColor=white" alt="Android · 正式签名" />
   <img src="https://img.shields.io/badge/iOS-self--sign-555555?style=flat-square&amp;logo=apple&amp;logoColor=white" alt="iOS · 自行签名" />
   <img src="https://img.shields.io/badge/HarmonyOS-self--sign-3157D5?style=flat-square" alt="HarmonyOS · 自行签名" />
-  <img src="https://img.shields.io/badge/Android_build-2277-65756E?style=flat-square" alt="Android build 2277" />
+  <img src="https://img.shields.io/badge/Android_build-2026111817-65756E?style=flat-square" alt="Android build 2026111817" />
   <a href="assets/licenses/GPL-3.0.txt"><img src="https://img.shields.io/badge/License-GPL--3.0-blue?style=flat-square&amp;logo=gnu&amp;logoColor=white" alt="GPL 3.0" /></a>
 </p>
 
@@ -56,7 +55,7 @@
 - **先选来源，再找书**：发现页列出已导入的书源，选择后可浏览来源自带的分类与榜单，或在来源内搜索。全局搜索会合并文库结果与已启用书源；搜索范围可选全部导入书源、分组或指定书源，只影响导入书源并会记住，不影响文库结果。
 - **搜索、详情、目录与正文**：Android 原生引擎解析规则并发起请求，Flutter 侧不重复解释规则；正文支持 `nextContentUrl` 多页拼接，封面和正文插图沿用书源的请求头与 Cookie。
 - **管理与换源**：支持按名称、链接、分组搜索，按启用状态或分组筛选，按导入顺序、名称、最近更新或启用状态排序，以及多选启用、停用、删除、导出和分组。在线书籍可跨来源检索同名书籍，可校验作者、按章节数排序，并按章节标题或序号保留阅读进度。
-- **规则覆盖**：CSS/jsoup 选择器、JSONPath、XPath、正则与 JavaScript（`@js:`），以及 `{{key}}`、`{{page}}`、`{{baseUrl}}`、请求头、POST 表单／JSON、Cookie 与编码检测。
+- **规则覆盖**：CSS/jsoup 选择器、JSONPath、XPath、正则与 JavaScript（`@js:`），`url` 选项可通过脚本改写最终请求地址，以及 `{{key}}`、`{{page}}`、`{{baseUrl}}`、请求头、POST 表单／JSON、Cookie 与编码检测。
 - **当前限制**：支持文字书源；音频、图片、视频书源会保留在列表中但不执行，下载型文件规则、漫画图片规则与书源调试器尚未接入；登录支持表单和应用内网页登录，弹窗、部分扫码或外部 App 回调仍可能不完整。[书源适配说明 →](docs/BOOK_SOURCES.md)
 - **安全边界**：书源规则中的 JavaScript 可以访问 Java 类并发起网络请求，请把书源当作可执行代码，只导入可信来源；用户书源允许 HTTP。
 
@@ -129,14 +128,14 @@
 
 ## 开发与参与
 
-欢迎通过 [Issues](https://github.com/mikufoxxx/Wenku8_Flutter/issues) 反馈问题，或通过 Pull Request 参与开发。反馈请附 App 版本、设备与系统版本和复现步骤。
+欢迎通过 Pull Request 参与开发；问题反馈可前往[上游 Issues](https://github.com/mikufoxxx/Wenku8_Flutter/issues)（本仓库未开启 Issues）。反馈请附 App 版本、设备与系统版本和复现步骤。
 
 <details>
 <summary><b>源码快照说明</b></summary>
 
-仓库提供部分实现供参考，包含未随快照提供的模块引用，不能独立构建，也不是 Release 安装包的完整对应源码。此前发行的安装包为完整功能版本；GitHub 自动生成的 Source code 压缩包不是安装包。
+仓库提供部分实现供参考，包含未随快照提供的模块引用，不能独立构建，也不是 Release 安装包的完整对应源码。上游此前发行的安装包为完整功能版本；本仓库已发布 Android Release，GitHub 自动生成的 Source code 压缩包不是安装包。
 
-[Source checks](https://github.com/mikufoxxx/Wenku8_Flutter/actions/workflows/flutter-ci.yml) 仅检查公开文件清单与上传边界，不构建或更改发行版。
+[Source checks](https://github.com/XiaoMing-Brother/Wenku8_Flutter_legado/actions/workflows/flutter-ci.yml) 仅检查公开文件清单与上传边界，不构建或更改发行版。
 
 [构建指南 →](docs/RELEASING.md)
 
@@ -159,11 +158,11 @@
 - **公开源码**：沿用仓库既有 [LICENSE](LICENSE) 与 [GPL v3 声明](assets/licenses/GPL-3.0.txt)。
 - **可下载字体**：遵循各自的 SIL OFL 1.1 许可。
 - **在线语音适配**：[rany2/edge-tts](https://github.com/rany2/edge-tts)，[LGPL v3](assets/licenses/edge-tts.txt)。
-- **书源引擎**：[OkHttp 4.12.0](https://square.github.io/okhttp/)（Apache-2.0）、[JsonPath 2.9.0](https://github.com/json-path/JsonPath)（Apache-2.0）与 [Rhino 1.7.15](https://github.com/mozilla/rhino)（MPL-2.0），详见[第三方组件说明](docs/THIRD_PARTY.md)。
+- **书源引擎**：[OkHttp 4.12.0](https://square.github.io/okhttp/)（Apache-2.0）、[JsonPath 2.9.0](https://github.com/json-path/JsonPath)（Apache-2.0）与 [Rhino 1.8.1](https://github.com/mozilla/rhino)（MPL-2.0），详见[第三方组件说明](docs/THIRD_PARTY.md)。
 
 [NOTICE](NOTICE) · [第三方组件说明](docs/THIRD_PARTY.md) · [LINUX DO 社区](https://linux.do/)
 
-## Star History
+## 上游项目 Star History
 
 <a href="https://www.star-history.com/?repos=mikufoxxx%2Fwenku8_flutter&type=date&releases=&legend=bottom-right">
   <picture>

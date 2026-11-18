@@ -36,7 +36,7 @@ Android 文档转换使用 [jsoup 1.23.2](https://jsoup.org/)（MIT，Jonathan H
 
 ### 书源引擎
 
-Android 书源适配层在 `android/app/src/main/kotlin/org/mewx/wenku8_flutter/booksource/` 中实现 Legado 书源规则的本地解析子集，不包含 Legado 应用源码，也不在 Flutter 侧解释规则。网络请求使用 [OkHttp 4.12.0](https://square.github.io/okhttp/)（Apache-2.0，Square, Inc.），JSON 路径使用 [JsonPath 2.9.0](https://github.com/json-path/JsonPath)（Apache-2.0，Jayway），脚本规则使用 [Rhino 1.7.15](https://github.com/mozilla/rhino)（MPL-2.0，Mozilla 及贡献者）。HTML 选择器复用已有的 jsoup。以上依赖的完整许可保存在 `assets/licenses/okhttp.txt`、`assets/licenses/json-path.txt` 和 `assets/licenses/rhino.txt`，并注册到应用开源许可页。
+Android 书源适配层在 `android/app/src/main/kotlin/org/mewx/wenku8_flutter/booksource/` 中实现 Legado 书源规则的本地解析子集，不包含 Legado 应用源码，也不在 Flutter 侧解释规则。网络请求使用 [OkHttp 4.12.0](https://square.github.io/okhttp/)（Apache-2.0，Square, Inc.），JSON 路径使用 [JsonPath 2.9.0](https://github.com/json-path/JsonPath)（Apache-2.0，Jayway），脚本规则使用 [Rhino 1.8.1](https://github.com/mozilla/rhino)（MPL-2.0，Mozilla 及贡献者）。HTML 选择器复用已有的 jsoup。以上依赖的完整许可保存在 `assets/licenses/okhttp.txt`、`assets/licenses/json-path.txt` 和 `assets/licenses/rhino.txt`，并注册到应用开源许可页。
 
 书源规则语义与 Legado/MD3 版本保持兼容，但本工程只接入文字/文件类型的搜索、详情、目录和正文链路；音频、图片、视频书源会保留导入但不执行。书源返回的内容、封面和插图归原站点及权利人所有，本工程不附带书源数据。
 
