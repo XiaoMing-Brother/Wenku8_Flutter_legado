@@ -33,8 +33,6 @@ else:
 (OUTPUT / '.nojekyll').touch()
 assets = OUTPUT / 'assets'
 assets.mkdir(exist_ok=True)
-for name in ['discovery.png', 'reader.png', 'settings.png',
-             'sponsor-en-light.svg', 'sponsor-en-dark.svg',
-             'sponsor-zh-light.svg', 'sponsor-zh-dark.svg']:
+for name in ['discovery.png', 'reader.png', 'settings.png']:
     shutil.copyfile(ROOT / 'docs/images' / name, assets / name)
 print(f'Built static project pages: {OUTPUT}')

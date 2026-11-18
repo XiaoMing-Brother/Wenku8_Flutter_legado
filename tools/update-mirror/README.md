@@ -1,10 +1,8 @@
 # 已停用的文库阅读更新镜像
 
-项目展示页迁至 GitHub Pages：<https://mikufoxxx.github.io/Wenku8_Flutter/>。页面仅展示项目、赞助与反馈入口，不提供下载、不自动查询发行版，也不使用 Worker。
+项目展示页迁至 GitHub Pages：<https://mikufoxxx.github.io/Wenku8_Flutter/>。页面仅展示项目与反馈入口，不提供下载、不自动查询发行版，也不使用 Worker。
 
 旧客户端仍会访问 `git.3952039.xyz` 的更新接口。2026-11-03 已收紧该主机的 Cloudflare WAF 白名单：只允许 GET／HEAD 访问 `/` 与 `/index.html`，这两个入口由边缘规则 301 跳转至 GitHub Pages；其他路径在 Worker 执行前阻断。旧镜像不再执行更新、下载或健康检查请求。仅将 Worker 内的响应改成 404 或 429 不能节省调用额度。其他主机和原有速率限制规则不变。
-
-首页的爱发电赞助卡片在 `worker.mjs` 的 `HOME` 模板中维护，链接固定为 <https://afdian.com/a/mikufoxxx>。赞助完全自愿，应用所有功能仍免费使用。
 
 ## 发布清单
 
