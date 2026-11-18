@@ -29,8 +29,8 @@ android {
     }
 
     defaultConfig {
-        // Public source previews must not replace an installed distribution.
-        applicationId = "org.mewx.wenku8_flutter.source_preview"
+        // Keep the published package identity stable across releases.
+        applicationId = "legado.wenku"
         minSdk = 26
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
