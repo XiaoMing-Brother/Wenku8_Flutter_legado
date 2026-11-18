@@ -4,13 +4,14 @@
 
 ### 本次更新
 
-- 应用内更新检查默认指向 `XiaoMing-Brother/Wenku8_Flutter_legado`，不再依赖旧镜像。
+- 应用内更新检查默认指向 `XiaoMing-Brother/Wenku8_Flutter`，不再依赖旧镜像。
 - 版本号支持 `0.5.7.261118.1610` 这类日期时间格式。
 - 发布 Android `arm64-v8a`、`armeabi-v7a`、`x86_64` 与 `universal` 安装包。
 
 ### 安装说明
 
 - 本构建使用当前开发签名。如与已安装版本签名不同，请先备份阅读记录，再卸载旧版后安装。
+- 本版安装包内嵌旧仓库名；仓库现已更名为 `XiaoMing-Brother/Wenku8_Flutter_legado`，后续自动更新请手动安装一次新仓库构建。
 - 升级前请备份重要书籍和阅读记录。
 
 
