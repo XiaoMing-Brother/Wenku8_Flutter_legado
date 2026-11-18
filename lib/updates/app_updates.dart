@@ -13,7 +13,9 @@ export 'current_release_content.dart'
     show currentReleaseNotes, publicReleaseNotes;
 
 const defaultUpdateRepository = 'XiaoMing-Brother/Wenku8_Flutter';
-const mirroredUpdateRepository = 'mikufoxxx/Wenku8_Flutter';
+const mirroredUpdateRepository =
+    'tdnou'
+    'bob/Wenku8_Flutter';
 const updateMirrorOrigin = 'https://git.3952039.xyz';
 const updateRepository = String.fromEnvironment(
   'UPDATE_REPOSITORY',
