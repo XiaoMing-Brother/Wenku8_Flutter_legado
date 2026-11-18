@@ -147,6 +147,7 @@
 感谢以下项目与贡献者。它们分别提供了产品方向、规则语义、交互参考或可复用组件；名称、代码与内容版权归各自作者所有。
 
 **原项目与参考实现**
+- [mikufoxxx/Wenku8_Flutter](https://github.com/mikufoxxx/Wenku8_Flutter)：原轻小说文库 Android 客户端，本项目的基座，主要是在该项目上添加的一系列功能。
 - [MewX/light-novel-library_Wenku8_Android](https://github.com/MewX/light-novel-library_Wenku8_Android)：原轻小说文库 Android 客户端，本项目的产品方向与功能参考。
 - [gedoor/legado](https://github.com/gedoor/legado)：阅读（Legado）书源规则体系的原始项目，本项目兼容其文字书源规则。
 - [HapeLee/legado-with-MD3](https://github.com/HapeLee/legado-with-MD3)：Legado 的 MD3 分支，书源规则语义与交互实现参考。

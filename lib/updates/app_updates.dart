@@ -12,41 +12,49 @@ import '../legacy_transport.dart';
 export 'current_release_content.dart'
     show currentReleaseNotes, publicReleaseNotes;
 
-const officialUpdateRepository = 'mikufoxxx/Wenku8_Flutter';
+const defaultUpdateRepository = 'XiaoMing-Brother/Wenku8_Flutter';
+const mirroredUpdateRepository = 'mikufoxxx/Wenku8_Flutter';
 const updateMirrorOrigin = 'https://git.3952039.xyz';
 const updateRepository = String.fromEnvironment(
   'UPDATE_REPOSITORY',
-  defaultValue: officialUpdateRepository,
+  defaultValue: defaultUpdateRepository,
 );
-const currentAppVersion = '0.5.6';
-const currentAppBuild = 2277;
+const currentAppVersion = '0.5.7.261118.1610';
+const currentAppBuild = 2026111816;
 
 class ReleaseVersion implements Comparable<ReleaseVersion> {
-  const ReleaseVersion(this.major, this.minor, this.patch, [this.build = 0]);
-  final int major, minor, patch, build;
+  const ReleaseVersion(this.parts, [this.build = 0]);
+  final List<int> parts;
+  final int build;
   static ReleaseVersion? parse(String value) {
     final match = RegExp(
-      r'^v?(\d+)\.(\d+)\.(\d+)(?:\+(\d+))?$',
+      r'^v?(\d+(?:\.\d+){2,4})(?:\+(\d+))?$',
     ).firstMatch(value);
     if (match == null) return null;
-    final parts = [for (var i = 1; i <= 4; i++) int.tryParse(match[i] ?? '0')];
-    if (parts.any((n) => n == null || n > 2100000000)) return null;
-    return ReleaseVersion(parts[0]!, parts[1]!, parts[2]!, parts[3]!);
+    final parts = <int>[];
+    for (final segment in match[1]!.split('.')) {
+      final number = int.tryParse(segment);
+      if (number == null || number > 2100000000) return null;
+      parts.add(number);
+    }
+    final build = int.tryParse(match[2] ?? '0');
+    if (build == null || build > 2100000000) return null;
+    return ReleaseVersion(List.unmodifiable(parts), build);
   }
 
-  String get name => '$major.$minor.$patch';
+  String get name => parts.join('.');
   @override
   int compareTo(ReleaseVersion other) {
-    for (final pair in [
-      (major, other.major),
-      (minor, other.minor),
-      (patch, other.patch),
-      (build, other.build),
-    ]) {
-      final result = pair.$1.compareTo(pair.$2);
+    final length = parts.length > other.parts.length
+        ? parts.length
+        : other.parts.length;
+    for (var index = 0; index < length; index++) {
+      final left = index < parts.length ? parts[index] : 0;
+      final right = index < other.parts.length ? other.parts[index] : 0;
+      final result = left.compareTo(right);
       if (result != 0) return result;
     }
-    return 0;
+    return build.compareTo(other.build);
   }
 }
 
@@ -61,9 +69,7 @@ class InstalledApp {
   final List<String> abis;
   ReleaseVersion? get releaseVersion {
     final parsed = ReleaseVersion.parse(version);
-    return parsed == null
-        ? null
-        : ReleaseVersion(parsed.major, parsed.minor, parsed.patch, build);
+    return parsed == null ? null : ReleaseVersion(parsed.parts, build);
   }
 }
 
@@ -162,10 +168,9 @@ class AppRelease {
   bool isNewerThan(InstalledApp app) {
     final installed = app.releaseVersion;
     if (installed == null) return false;
-    final semantic = ReleaseVersion(version.major, version.minor, version.patch)
-        .compareTo(
-          ReleaseVersion(installed.major, installed.minor, installed.patch),
-        );
+    final semantic = ReleaseVersion(
+      version.parts,
+    ).compareTo(ReleaseVersion(installed.parts));
     return semantic > 0 || (semantic == 0 && version.build > installed.build);
   }
 
@@ -627,7 +632,7 @@ class AppUpdates extends ChangeNotifier {
     mirror: _mirrorSource,
     original: _githubSource,
   );
-  bool get _usesMirror => updateRepository == officialUpdateRepository;
+  bool get _usesMirror => updateRepository == mirroredUpdateRepository;
   Uri get projectPage => _usesMirror
       ? Uri.parse(updateMirrorOrigin)
       : Uri.https('github.com', '/$updateRepository');

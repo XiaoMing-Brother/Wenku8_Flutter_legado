@@ -178,7 +178,12 @@ internal class BookSourceEngine(
         var lastError: Throwable? = null
         for (candidate in candidates) {
             try {
-                response = fetchResponse(source, http.requestSpec(source.key, candidate))
+                response = fetchResponse(
+                    source,
+                    http.requestSpec(source.key, candidate),
+                    key = keyword,
+                    page = page,
+                )
                 break
             } catch (error: Throwable) {
                 lastError = error
@@ -311,7 +316,12 @@ internal class BookSourceEngine(
         var lastError: Throwable? = null
         for (candidate in candidates) {
             try {
-                response = fetchResponse(source, http.requestSpec(source.key, candidate))
+                response = fetchResponse(
+                    source,
+                    http.requestSpec(source.key, candidate),
+                    key = keyword,
+                    page = page,
+                )
                 break
             } catch (error: Throwable) {
                 lastError = error
@@ -381,7 +391,11 @@ internal class BookSourceEngine(
         val book = BookData(bookUrl = bookUrl)
         val response = applyLoginCheck(
             source,
-            fetchResponse(source, http.requestSpec(source.key, bookUrl)),
+            fetchResponse(
+                source,
+                http.requestSpec(source.key, bookUrl),
+                book = book,
+            ),
             key = "",
             page = 1,
             book = book,
@@ -445,7 +459,11 @@ internal class BookSourceEngine(
         while (nextUrl.isNotBlank() && visited.add(nextUrl) && visited.size <= 20) {
             val response = applyLoginCheck(
                 source,
-                fetchResponse(source, http.requestSpec(source.key, nextUrl)),
+                fetchResponse(
+                    source,
+                    http.requestSpec(source.key, nextUrl),
+                    book = book,
+                ),
                 key = "",
                 page = 1,
                 book = book,
@@ -493,7 +511,12 @@ internal class BookSourceEngine(
             )
             val response = applyLoginCheck(
                 source,
-                fetchResponse(source, http.requestSpec(source.key, currentUrl)),
+                fetchResponse(
+                    source,
+                    http.requestSpec(source.key, currentUrl),
+                    book = book,
+                    chapter = chapter,
+                ),
                 key = "",
                 page = 1,
                 book = book,
@@ -964,12 +987,56 @@ internal class BookSourceEngine(
     private fun analyzer(source: BookSource): BookSourceAnalyzer =
         BookSourceAnalyzer(source, http, js)
 
-    private fun fetchResponse(source: BookSource, spec: RequestSpec): BookSourceResponse =
-        http.fetch(
+    private fun fetchResponse(
+        source: BookSource,
+        spec: RequestSpec,
+        key: String = "",
+        page: Int = 1,
+        book: BookData? = null,
+        chapter: ChapterData? = null,
+    ): BookSourceResponse {
+        val resolved = applyRequestJs(source, spec, key, page, book, chapter)
+        return http.fetch(
             source,
-            spec,
+            resolved,
             allowUnsuccessful = source.loginCheckJs?.isNotBlank() == true,
         )
+    }
+
+    /**
+     * Legado 的 URL 选项允许用 `js` 改写最终请求地址。脚本中的 `result`
+     * 是去掉选项后的当前地址，返回值会作为新的地址继续请求。
+     */
+    private fun applyRequestJs(
+        source: BookSource,
+        spec: RequestSpec,
+        key: String,
+        page: Int,
+        book: BookData?,
+        chapter: ChapterData?,
+    ): RequestSpec {
+        val script = spec.option.js?.trim().orEmpty()
+        if (script.isEmpty()) return spec
+        val value = js.eval(
+            script,
+            JsEnv(
+                source = source,
+                analyzer = analyzer(source),
+                content = spec.url,
+                baseUrl = source.key,
+                key = key,
+                page = page,
+                book = book,
+                chapter = chapter,
+                variables = variables,
+            ),
+        )
+        val option = spec.option.copy(js = null)
+        val url = value?.toString()?.trim().orEmpty()
+        if (value == null) return spec.copy(option = option)
+        if (url.isEmpty()) throw IllegalStateException("书源请求脚本没有返回地址")
+        return spec.copy(url = http.resolve(source.key, url), option = option)
+    }
 
     private fun requireSource(key: String): BookSource =
         sources[key] ?: throw IllegalArgumentException("书源不存在，请重新导入")

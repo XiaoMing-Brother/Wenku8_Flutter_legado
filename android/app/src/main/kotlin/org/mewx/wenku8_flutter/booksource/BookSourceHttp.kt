@@ -19,6 +19,7 @@ internal data class UrlOption(
     val headers: Map<String, String>,
     val body: String?,
     val charset: String?,
+    val js: String? = null,
 )
 
 internal data class RequestSpec(val url: String, val option: UrlOption)
@@ -264,6 +265,7 @@ internal class BookSourceHttp(
             headers = headers,
             body = json.opt("body")?.takeUnless { it == JSONObject.NULL }?.toString(),
             charset = json.optString("charset").trim().ifEmpty { null },
+            js = json.optString("js").trim().ifEmpty { null },
         )
     }
 
