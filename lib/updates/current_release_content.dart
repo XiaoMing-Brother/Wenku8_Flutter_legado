@@ -13,16 +13,14 @@ const releaseProjectNotice =
 const releaseRightsNotice =
     '小说、封面和插图归各自权利人所有。请仅使用有权访问的内容，遵守来源网站规则，不得绕过访问限制、破解 DRM，或未经许可传播、出售内容。';
 const releaseReadingNotice = '**在线内容以轻小说文库开放状态为准，不提供因版权限制而停止开放的在线书籍阅读。**';
-const releaseMaintenanceNotice = '项目以稳定维护为主，后续非必要不再发版。';
-const _interruption = '修复听书被通知等短暂打断后，可能无法恢复播放的问题。';
-const _cache = '修复本地书籍在线听书时，临时缓存被清理后可能出现“缓存失败”的问题。';
-const _retry = '优化在线语音的断线重试；加载失败时保留当前段落，避免跳过正文。';
-const _resources = '修复连续听书时音频资源累积的问题，改善长时间使用的内存占用与流畅度。';
-const _changes = [_interruption, _cache, _retry, _resources];
-const _androidInstall = '**Android**：直接覆盖更新，不要先卸载旧版。';
-const _iosInstall = '**iOS**：提供未签名包，主应用与小组件均需自行签名。';
-const _harmonyInstall = '**HarmonyOS**：提供未签名包，需自行签名后安装。';
-const _legacyInstall = '**iOS／HarmonyOS 0.5.0 用户**：请先手动更新一次。';
+const releaseMaintenanceNotice = '本构建为个人发布版，后续更新以当前仓库的 Release 为准。';
+const _updateSource = '应用内更新检查默认指向当前项目仓库，不再依赖旧镜像。';
+const _versionFormat = '版本号支持“主版本.次版本.修订号.日期.时间”格式。';
+const _packages = '提供 Android arm64-v8a、armeabi-v7a、x86_64 与 universal 安装包。';
+const _changes = [_updateSource, _versionFormat, _packages];
+const _androidInstall = '**Android**：同签名版本可直接覆盖更新；签名不同请先备份再卸载旧版。';
+const _iosInstall = '**iOS**：本次未提供 IPA。';
+const _harmonyInstall = '**HarmonyOS**：本次未提供 HAP。';
 const _backup = '升级、整理存储或同步前，请先备份重要书籍和阅读记录。';
 const publicReleaseNotes =
     '''
@@ -42,10 +40,9 @@ $releaseReadingNotice
 
 ### 本次更新
 
-- $_interruption
-- $_cache
-- $_retry
-- $_resources
+- $_updateSource
+- $_versionFormat
+- $_packages
 
 ### 后续维护
 
@@ -56,7 +53,6 @@ $releaseMaintenanceNotice
 - $_androidInstall
 - $_iosInstall
 - $_harmonyInstall
-- $_legacyInstall
 
 $_backup
 ''';
@@ -84,7 +80,6 @@ const currentReleaseSections = [
     _androidInstall,
     _iosInstall,
     _harmonyInstall,
-    _legacyInstall,
     _backup,
   ]),
 ];
