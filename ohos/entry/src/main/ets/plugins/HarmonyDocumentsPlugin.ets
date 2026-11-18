@@ -125,6 +125,7 @@ export default class HarmonyDocumentsPlugin implements FlutterPlugin, MethodCall
         result.success(selected.photoUris.length ? await this.stage(selected.photoUris[0], 'pickImage') : null); return;
       }
       case 'pickBooks':
+      case 'pickBookSource':
       case 'pickDictionaryFiles':
       case 'pickBook':
       case 'pickTextReference':
@@ -133,6 +134,7 @@ export default class HarmonyDocumentsPlugin implements FlutterPlugin, MethodCall
         const view = new picker.DocumentViewPicker(this.context);
         const options = new picker.DocumentSelectOptions();
         options.maxSelectNumber = call.method === 'pickDictionaryFiles' ? 64 : call.method === 'pickBooks' ? 500 : 1;
+        if (call.method === 'pickBookSource') { options.fileSuffixFilters = ['书源|.json,.txt']; }
         if (call.method === 'pickFont') { options.fileSuffixFilters = ['字体|.ttf,.otf,.ttc']; }
         if (call.method === 'pickDictionaryFiles') {
           options.fileSuffixFilters = ['词典|.mdx,.mdd,.mobi,.ifo,.idx,.gz,.dict,.dz,.syn,.zip'];
@@ -316,7 +318,10 @@ export default class HarmonyDocumentsPlugin implements FlutterPlugin, MethodCall
     if (kind === 'pickDictionaryFiles' && !/\.(mdx|mdd|mobi|ifo|idx(?:\.gz)?|dict(?:\.dz)?|syn|zip)$/i.test(name)) {
       throw new Error('请选择 MDX、MDD、MOBI 词典、StarDict 文件或 ZIP 词典包');
     }
-    const maximum = kind === 'pickDictionaryFiles' ? 512 * 1024 * 1024 : kind === 'pickImage' ? 20 * 1024 * 1024 : kind === 'pickFont' ? 32 * 1024 * 1024 : bookByteLimit(name);
+    if (kind === 'pickBookSource' && !/\.(json|txt)$/i.test(name)) {
+      throw new Error('请选择书源 JSON 文件');
+    }
+    const maximum = kind === 'pickDictionaryFiles' ? 512 * 1024 * 1024 : kind === 'pickImage' ? 20 * 1024 * 1024 : kind === 'pickFont' ? 32 * 1024 * 1024 : kind === 'pickBookSource' ? 128 * 1024 * 1024 : bookByteLimit(name);
     const input = await fs.open(uri, fs.OpenMode.READ_ONLY);
     let output: string | null = null;
     try {

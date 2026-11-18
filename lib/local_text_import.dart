@@ -107,12 +107,12 @@ Stream<({String text, int heading, int start, int end})> _classified(
   Future<List<({String text, int heading, int start, int end})>> match() async {
     final matches = await matcher.classify([
       for (final line in batch)
-        line.heading && line.text.length <= 90 ? line.text : '',
+        line.heading && line.text.trim().length <= 90 ? line.text : '',
     ]);
     return [
       for (var i = 0; i < batch.length; i++)
         (
-          text: batch[i].text,
+          text: batch[i].text.trim(),
           heading: matches[i],
           start: batch[i].start,
           end: batch[i].end,
@@ -125,7 +125,7 @@ Stream<({String text, int heading, int start, int end})> _classified(
       final text = line.text.trim();
       if (text.isEmpty) continue;
       batch.add((
-        text: text,
+        text: line.text,
         heading: line.heading,
         start: line.start,
         end: line.end,

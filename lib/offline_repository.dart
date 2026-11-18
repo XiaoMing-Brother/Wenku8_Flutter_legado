@@ -5,6 +5,9 @@ import 'package:flutter/foundation.dart';
 
 import 'catalog.dart';
 import 'book_search.dart';
+import 'book_sources/book_source_images.dart';
+import 'book_sources/book_source_library.dart';
+import 'book_sources/library_sources_repository.dart';
 import 'offline_cache.dart';
 import 'local_books.dart';
 import 'network_status.dart';
@@ -71,7 +74,10 @@ class _ChapterRequest {
 /// Adds persistent offline reading without changing the remote request contract.
 /// Download notifications are independent of appearance/reader state updates.
 class OfflineNovelRepository extends FrameChangeNotifier
-    implements NovelRepository, ProgressiveTagCatalogue {
+    implements
+        NovelRepository,
+        ProgressiveTagCatalogue,
+        ProgressiveNovelSearch {
   OfflineNovelRepository({
     required this.remote,
     required this.cache,
@@ -80,8 +86,9 @@ class OfflineNovelRepository extends FrameChangeNotifier
     Future<Uint8List> Function(String url)? illustrationRequest,
   }) : _illustrationRequest =
            illustrationRequest ??
-           ((url) =>
-               LegacyTransport.illustration(url, cacheForViewing: false)) {
+           ((url) => BookSourceImages.isMarker(url)
+               ? BookSourceImages.loadMarker(url)
+               : LegacyTransport.illustration(url, cacheForViewing: false)) {
     cache.addListener(_cacheChanged);
     local?.addListener(_cacheChanged);
   }
@@ -91,6 +98,13 @@ class OfflineNovelRepository extends FrameChangeNotifier
   final LocalBookStore? local;
   final NetworkStatus? network;
   final Future<Uint8List> Function(String url) _illustrationRequest;
+  BookSourceLibrary? get bookSources {
+    final source = remote;
+    if (source is LibrarySourcesRepository) return source.bookSources;
+    if (source is BookSourceLibrary) return source as BookSourceLibrary;
+    return null;
+  }
+
   bool get offline => network?.offline ?? false;
   bool availableOffline(int id) =>
       local?.book(id) != null || (cache.book(id)?.cachedCount ?? 0) > 0;
@@ -150,6 +164,8 @@ class OfflineNovelRepository extends FrameChangeNotifier
   @override
   Future<List<Novel>> search(String query) => remote.search(query);
   @override
+  Future<void> cancelSearch() => remote.cancelSearch();
+  @override
   Future<NovelPage> browse({
     NovelSort sort = NovelSort.lastUpdate,
     int page = 1,
@@ -197,6 +213,34 @@ class OfflineNovelRepository extends FrameChangeNotifier
           )
           .toList(),
       page,
+    );
+  }
+
+  @override
+  Future<NovelPage> searchFilteredPageProgressively(
+    String query, {
+    BookSearchField field = BookSearchField.all,
+    int page = 1,
+    bool refresh = false,
+    bool Function()? current,
+    NovelSearchProgressCallback? onProgress,
+  }) {
+    final source = remote;
+    if (!offline && source is ProgressiveNovelSearch) {
+      return (source as ProgressiveNovelSearch).searchFilteredPageProgressively(
+        query,
+        field: field,
+        page: page,
+        refresh: refresh,
+        current: current,
+        onProgress: onProgress,
+      );
+    }
+    return searchFilteredPage(
+      query,
+      field: field,
+      page: page,
+      refresh: refresh,
     );
   }
 
@@ -414,6 +458,40 @@ class OfflineNovelRepository extends FrameChangeNotifier
       return;
     }
     await _remember(novel, cache.epochFor(novel.id));
+  }
+
+  Future<Novel> switchSource(Novel current, Novel candidate) async {
+    if (isLocalBook(current.id)) {
+      throw const FormatException('本地书籍不支持换源');
+    }
+    if (offline) {
+      throw const FormatException('当前无网络连接，无法换源');
+    }
+    final library = bookSources;
+    if (library == null) {
+      throw const FormatException('当前版本未启用书源，无法换源');
+    }
+    final switched = await library.switchSource(current, candidate);
+    _known[switched.id] = switched;
+    _offlineDirectories.remove(switched.id);
+    final job = _jobs[switched.id];
+    if (job?.active == true) job!.phase = DownloadPhase.cancelled;
+    _jobs.remove(switched.id);
+    _illustrationRepairs.removeWhere((key) => key.$1 == switched.id);
+    // Old bodies belong to the previous source. Clearing them prevents a
+    // coincidentally reused chapter URL from serving the wrong text.
+    Object? cacheFailure;
+    try {
+      await cache.removeBook(switched.id);
+    } catch (error) {
+      // The identity switch is already committed. Keep it visible instead of
+      // reporting failure and leaving the UI on the old source.
+      cacheFailure = error;
+    }
+    await rememberDirectory(switched);
+    cacheError = cacheFailure;
+    _changed(switched.id);
+    return switched;
   }
 
   static bool _sameDirectory(List<NovelChapter> a, List<NovelChapter> b) {

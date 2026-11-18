@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:isolate';
 import 'local_import_options.dart';
+import 'txt_toc_rules/txt_toc_rule_engine.dart';
 
 const localHeadingNone = 0, localHeadingVolume = 1, localHeadingChapter = 2;
 
@@ -126,20 +127,19 @@ class LocalTextRuleMatcher {
 void _ruleWorker((SendPort, Map<String, Object>) job) {
   final (reply, raw) = job;
   final options = LocalImportOptions.fromJson(raw);
-  final chapter = RegExp(
+  final chapter = compileTxtTocRegExp(
     options.customToc ? options.chapterRule : defaultLocalChapterRule,
-    caseSensitive: false,
   );
   final volumeText = options.customToc
       ? options.volumeRule
       : defaultLocalVolumeRule;
-  final volume = volumeText.isEmpty
-      ? null
-      : RegExp(volumeText, caseSensitive: false);
+  final volume = volumeText.isEmpty ? null : compileTxtTocRegExp(volumeText);
   int classify(String line) {
-    if (line.isEmpty || line.length > 90) return localHeadingNone;
+    if (line.trim().isEmpty || line.trim().length > 90) {
+      return localHeadingNone;
+    }
     final candidate = options.customToc
-        ? line
+        ? '\n$line'
         : defaultLocalHeadingCandidate(line);
     return volume?.hasMatch(candidate) == true
         ? localHeadingVolume
@@ -162,10 +162,10 @@ Future<List<({String title, bool volume})>> previewLocalDirectory(
   Duration timeout = const Duration(seconds: 2),
 }) async {
   if (sample.length > 20000) throw const FormatException('预览文字最多 20000 个字符');
-  final lines = sample
-      .split(RegExp(r'\r\n?|\n'))
-      .map((line) => line.trim())
-      .toList();
+  final sourceLines = sample.split(RegExp(r'\r\n?|\n'));
+  final lines = options.customToc
+      ? sourceLines
+      : [for (final line in sourceLines) line.trim()];
   final matcher = await LocalTextRuleMatcher.start(options, timeout: timeout);
   try {
     final matches = await matcher.classify(lines);
@@ -174,8 +174,8 @@ Future<List<({String title, bool volume})>> previewLocalDirectory(
         if (matches[i] != localHeadingNone)
           (
             title: options.customToc
-                ? lines[i]
-                : defaultLocalHeadingCandidate(lines[i]),
+                ? lines[i].trim()
+                : defaultLocalHeadingCandidate(lines[i].trim()),
             volume: matches[i] == localHeadingVolume,
           ),
     ];

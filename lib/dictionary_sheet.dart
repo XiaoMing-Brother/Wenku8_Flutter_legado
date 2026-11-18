@@ -9,6 +9,8 @@ import 'app_interactions.dart';
 import 'feature_pages.dart' show confirmNovelAction;
 import 'book_documents.dart';
 import 'dictionary_store.dart';
+import 'dict_rules/dict_rule_store.dart';
+import 'dict_rules/dict_rules_page.dart';
 import 'reader_text_picker.dart';
 
 String _formatLabel(String format) => switch (format) {
@@ -23,6 +25,7 @@ Future<void> showReaderDictionarySheet({
   required BuildContext context,
   required String word,
   DictionaryStore? store,
+  DictRuleStore? ruleStore,
   bool reduceMotion = false,
   ReaderTextSegmentProvider? segmentProvider,
   Widget Function(Widget)? surfaceWrapper,
@@ -35,6 +38,7 @@ Future<void> showReaderDictionarySheet({
   builder: (_) => DictionaryLookupSheet(
     word: word,
     store: store ?? DictionaryStore.shared,
+    ruleStore: ruleStore ?? DictRuleStore.shared,
     reduceMotion: reduceMotion,
     segmentProvider: segmentProvider,
   ),
@@ -61,11 +65,13 @@ class DictionaryLookupSheet extends StatefulWidget {
     super.key,
     required this.word,
     required this.store,
+    this.ruleStore,
     this.reduceMotion = false,
     this.segmentProvider,
   });
   final String word;
   final DictionaryStore store;
+  final DictRuleStore? ruleStore;
   final bool reduceMotion;
   final ReaderTextSegmentProvider? segmentProvider;
   @override
@@ -86,10 +92,16 @@ class _DictionaryLookupSheetState extends State<DictionaryLookupSheet> {
   bool _managing = false, _pendingLibraryChange = false;
   String? _error;
   List<DictionaryLookupGroup> _groups = const [];
+  List<DictRuleLookupGroup> _ruleGroups = const [];
+  String? _ruleError;
+
+  DictRuleStore get _ruleStore => widget.ruleStore ?? DictRuleStore.shared;
+
   @override
   void initState() {
     super.initState();
     widget.store.addListener(_libraryChanged);
+    _ruleStore.addListener(_ruleLibraryChanged);
     _initializeSelection();
   }
 
@@ -193,6 +205,11 @@ class _DictionaryLookupSheetState extends State<DictionaryLookupSheet> {
     _search();
   }
 
+  void _ruleLibraryChanged() {
+    if (_managing || _picking || _initializing) return;
+    _search();
+  }
+
   Future<void> _search() async {
     if (_picking || _initializing) return;
     final query = _query.text.trim();
@@ -205,18 +222,35 @@ class _DictionaryLookupSheetState extends State<DictionaryLookupSheet> {
     setState(() {
       _busy = true;
       _error = null;
+      _ruleError = null;
     });
     try {
       await widget.store.load();
       if (!mounted || generation != _generation) return;
-      final groups = await widget.store.lookup(
+      final local = widget.store.lookup(
         query,
         session: _session ??= widget.store.createLookupSession(),
         generation: generation,
       );
+      final online = () async {
+        try {
+          await _ruleStore.load();
+          final groups = await _ruleStore.lookupAll(query);
+          return (groups: groups, error: null);
+        } catch (error) {
+          return (
+            groups: const <DictRuleLookupGroup>[],
+            error: _message(error),
+          );
+        }
+      }();
+      final groups = await local;
+      final rules = await online;
       if (mounted && generation == _generation) {
         setState(() {
           _groups = groups;
+          _ruleGroups = rules.groups;
+          _ruleError = rules.error;
           _loaded = true;
           _resultsQuery = query;
         });
@@ -258,6 +292,7 @@ class _DictionaryLookupSheetState extends State<DictionaryLookupSheet> {
   void dispose() {
     _cancelPendingLookup();
     widget.store.removeListener(_libraryChanged);
+    _ruleStore.removeListener(_ruleLibraryChanged);
     _query.dispose();
     super.dispose();
   }
@@ -339,9 +374,18 @@ class _DictionaryLookupSheetState extends State<DictionaryLookupSheet> {
         onPressed: _search,
       );
     }
-    if (_loaded && widget.store.dictionaries.isEmpty) {
+    final localMatched = _groups
+        .where((group) => group.definitions.isNotEmpty || group.error != null)
+        .toList();
+    final onlineMatched = _ruleGroups
+        .where((group) => group.text.trim().isNotEmpty || group.error != null)
+        .toList();
+    if (_loaded &&
+        widget.store.dictionaries.isEmpty &&
+        _ruleGroups.isEmpty &&
+        _ruleError == null) {
       return _DictionaryEmpty(
-        message: '导入自己的 MDX/MDD、StarDict 或 MOBI 词典后，即可离线查词。',
+        message: '导入 MDX/MDD、StarDict 或 MOBI 离线词典，或添加字典规则后，即可在阅读时查词。',
         action: '导入词典',
         onPressed: _manage,
       );
@@ -349,123 +393,180 @@ class _DictionaryLookupSheetState extends State<DictionaryLookupSheet> {
     if (_query.text.trim().isEmpty) {
       return const Center(child: AppText('输入一个词语或短语'));
     }
-    if (_groups.isEmpty) {
+    if (_groups.isEmpty && _ruleGroups.isEmpty && _ruleError == null) {
       return _DictionaryEmpty(
         message: '还没有启用的词典',
         action: '管理词典',
         onPressed: _manage,
       );
     }
-    final matched = _groups
-        .where((group) => group.definitions.isNotEmpty || group.error != null)
-        .toList();
-    if (matched.isEmpty) {
+    if (localMatched.isEmpty && onlineMatched.isEmpty && _ruleError == null) {
       return _DictionaryEmpty(
-        message: '已查询 ${_groups.length} 部词典，未找到这个词条。',
+        message: '已查询 ${_groups.length + _ruleGroups.length} 部词典，未找到这个词条。',
         action: '管理词典',
         onPressed: _manage,
       );
     }
-    return ListView.builder(
+    final emptyLocal = _groups.length - localMatched.length;
+    final emptyOnline = _ruleGroups.length - onlineMatched.length;
+    final notices = [
+      if (emptyLocal > 0) '$emptyLocal 部离线词典',
+      if (emptyOnline > 0) '$emptyOnline 条字典规则',
+    ];
+    return ListView(
       key: const ValueKey('dictionary-aggregate-results'),
-      itemCount: matched.length + 1,
-      itemBuilder: (context, index) {
-        if (index == matched.length) {
-          final empty = _groups.length - matched.length;
-          return Padding(
+      children: [
+        for (final group in localMatched) _localGroup(context, group),
+        if (_ruleError != null)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 20),
+            child: ContentPanel(
+              child: Row(
+                children: [
+                  const ArchiveIcon(
+                    CupertinoIcons.exclamationmark_circle,
+                    size: 20,
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: AppText(
+                      _ruleError!,
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.error,
+                        height: 1.5,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        for (final group in onlineMatched) _onlineGroup(context, group),
+        if (notices.isNotEmpty)
+          Padding(
             padding: const EdgeInsets.symmetric(vertical: 16),
             child: AppText(
-              empty > 0 ? '另有 $empty 部词典未找到该词条' : '以上结果均来自本地词典',
+              '另有 ${notices.join('、')}未找到该词条',
               style: TextStyle(
                 fontSize: 12,
                 color: Theme.of(context).colorScheme.onSurfaceVariant,
               ),
             ),
-          );
-        }
-        final group = matched[index];
-        final rank = _groups.indexOf(group) + 1;
-        return Padding(
-          padding: const EdgeInsets.only(bottom: 24),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              ArchiveSection(
-                title: group.dictionary.name,
-                code:
-                    '${rank.toString().padLeft(2, '0')} / ${_formatLabel(group.dictionary.format).toUpperCase()}',
-              ),
-              const SizedBox(height: 14),
-              if (group.error case final error?)
-                AppText(
-                  error,
-                  style: TextStyle(
-                    color: Theme.of(context).colorScheme.error,
-                    height: 1.5,
-                  ),
-                ),
-              for (final definition in group.definitions) ...[
-                if (definition.word != _query.text.trim())
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 8),
-                    child: AppText(
-                      definition.word,
-                      style: const TextStyle(fontWeight: FontWeight.w600),
-                    ),
-                  ),
-                SelectableText(
-                  definition.text.isEmpty ? '该词条没有可显示的文字。' : definition.text,
-                  style: const TextStyle(fontSize: 15, height: 1.7),
-                ),
-                for (final image in definition.images)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 12),
-                    child: Image.memory(
-                      image,
-                      fit: BoxFit.contain,
-                      gaplessPlayback: true,
-                      errorBuilder: (_, _, _) => const AppText('这张词典图片无法显示'),
-                    ),
-                  ),
-                if (definition.resourceWarning)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 8),
-                    child: AppText(
-                      group.dictionary.format == 'mobi'
-                          ? 'MOBI 词典暂以文字显示释义，内嵌图片未显示。'
-                          : '部分图片未能读取，请导入或检查同名 MDD 资源包。',
-                      style: TextStyle(
-                        fontSize: 12,
-                        height: 1.5,
-                        color: Theme.of(context).colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                  ),
-                if (definition.related.isNotEmpty)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 12),
-                    child: Wrap(
-                      spacing: 8,
-                      runSpacing: 4,
-                      children: definition.related
-                          .map(
-                            (word) => TextButton(
-                              onPressed: () {
-                                _query.text = word;
-                                _search();
-                              },
-                              child: AppText(word),
-                            ),
-                          )
-                          .toList(),
-                    ),
-                  ),
-                const SizedBox(height: 16),
-              ],
-            ],
           ),
-        );
-      },
+      ],
+    );
+  }
+
+  Widget _localGroup(BuildContext context, DictionaryLookupGroup group) {
+    final rank = _groups.indexOf(group) + 1;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          ArchiveSection(
+            title: group.dictionary.name,
+            code:
+                '${rank.toString().padLeft(2, '0')} / ${_formatLabel(group.dictionary.format).toUpperCase()}',
+          ),
+          const SizedBox(height: 14),
+          if (group.error case final error?)
+            AppText(
+              error,
+              style: TextStyle(
+                color: Theme.of(context).colorScheme.error,
+                height: 1.5,
+              ),
+            ),
+          for (final definition in group.definitions) ...[
+            if (definition.word != _query.text.trim())
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: AppText(
+                  definition.word,
+                  style: const TextStyle(fontWeight: FontWeight.w600),
+                ),
+              ),
+            SelectableText(
+              definition.text.isEmpty ? '该词条没有可显示的文字。' : definition.text,
+              style: const TextStyle(fontSize: 15, height: 1.7),
+            ),
+            for (final image in definition.images)
+              Padding(
+                padding: const EdgeInsets.only(top: 12),
+                child: Image.memory(
+                  image,
+                  fit: BoxFit.contain,
+                  gaplessPlayback: true,
+                  errorBuilder: (_, _, _) => const AppText('这张词典图片无法显示'),
+                ),
+              ),
+            if (definition.resourceWarning)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: AppText(
+                  group.dictionary.format == 'mobi'
+                      ? 'MOBI 词典暂以文字显示释义，内嵌图片未显示。'
+                      : '部分图片未能读取，请导入或检查同名 MDD 资源包。',
+                  style: TextStyle(
+                    fontSize: 12,
+                    height: 1.5,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ),
+            if (definition.related.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 12),
+                child: Wrap(
+                  spacing: 8,
+                  runSpacing: 4,
+                  children: definition.related
+                      .map(
+                        (word) => TextButton(
+                          onPressed: () {
+                            _query.text = word;
+                            _search();
+                          },
+                          child: AppText(word),
+                        ),
+                      )
+                      .toList(),
+                ),
+              ),
+            const SizedBox(height: 16),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _onlineGroup(BuildContext context, DictRuleLookupGroup group) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          ArchiveSection(
+            title: group.rule.name,
+            code: '${_ruleGroups.indexOf(group) + 1} / ONLINE DICT',
+          ),
+          const SizedBox(height: 14),
+          if (group.error case final error?)
+            AppText(
+              error,
+              style: TextStyle(
+                color: Theme.of(context).colorScheme.error,
+                height: 1.5,
+              ),
+            )
+          else
+            SelectableText(
+              group.text.trim().isEmpty ? '该词条没有可显示的文字。' : group.text,
+              style: const TextStyle(fontSize: 15, height: 1.7),
+            ),
+        ],
+      ),
     );
   }
 }
@@ -535,15 +636,50 @@ class _DictionaryManagementSheetState extends State<DictionaryManagementSheet> {
   Future<void> _remove(UserDictionary dictionary) async {
     if (!await confirmNovelAction(
           context,
-          title: '移除“${dictionary.name}”？',
-          message: '只删除应用词典库中的副本和索引，原始词典文件保留。',
-          confirmLabel: '移除词典',
+          title: '删除词典？',
+          message: '「${dictionary.name}」只会从应用词典库移除副本和索引，原始词典文件保留。',
+          confirmLabel: '删除词典',
           reduceMotion: widget.reduceMotion,
         ) ||
         !mounted) {
       return;
     }
     await _perform(() => widget.store.remove(dictionary.id));
+  }
+
+  Future<void> _openDictionaryMenu(
+    BuildContext anchor,
+    UserDictionary dictionary,
+  ) async {
+    final action = await showGlassMenu<String>(
+      context: anchor,
+      reduceMotion: widget.reduceMotion,
+      builder: (menu) => Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          GlassMenuItem(
+            label: '重命名词典',
+            icon: CupertinoIcons.pencil,
+            order: 0,
+            onPressed: () => Navigator.pop(menu, 'rename'),
+          ),
+          GlassMenuItem(
+            label: '删除词典',
+            icon: CupertinoIcons.trash,
+            order: 1,
+            onPressed: () => Navigator.pop(menu, 'delete'),
+          ),
+        ],
+      ),
+    );
+    if (!mounted) return;
+    switch (action) {
+      case 'rename':
+        await _rename(dictionary);
+      case 'delete':
+        await _remove(dictionary);
+    }
   }
 
   Future<void> _rename(UserDictionary dictionary) async {
@@ -553,7 +689,7 @@ class _DictionaryManagementSheetState extends State<DictionaryManagementSheet> {
       reduceMotion: widget.reduceMotion,
       maxHeight: 340,
       builder: (sheet) => Padding(
-        padding: const EdgeInsets.all(24),
+        padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -625,6 +761,29 @@ class _DictionaryManagementSheetState extends State<DictionaryManagementSheet> {
               ],
             ),
           ),
+          const SizedBox(height: 4),
+          GlassTextButton(
+            key: const ValueKey('dictionary-online-rules'),
+            onPressed: _busy
+                ? null
+                : () => pushNovelPage<void>(
+                    context,
+                    DictRulesPage(
+                      store: DictRuleStore.shared,
+                      reduceMotion: widget.reduceMotion,
+                    ),
+                    reduceMotion: widget.reduceMotion,
+                    slot: ('dictionary', 'online-rules'),
+                  ),
+            child: const Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                ArchiveIcon(CupertinoIcons.globe, size: 17),
+                SizedBox(width: 8),
+                AppText('在线字典规则'),
+              ],
+            ),
+          ),
           if (_error case final error?)
             Padding(
               padding: const EdgeInsets.only(top: 12),
@@ -640,8 +799,12 @@ class _DictionaryManagementSheetState extends State<DictionaryManagementSheet> {
           const SizedBox(height: 10),
           Expanded(
             child: widget.store.dictionaries.isEmpty
-                ? const Center(
-                    child: AppText('尚未导入词典', style: TextStyle(height: 1.6)),
+                ? ContentNotice(
+                    icon: CupertinoIcons.book,
+                    title: '还没有词典',
+                    message: '导入 MDX/MDD、StarDict 或 MOBI 离线词典后，即可在阅读时离线查词。',
+                    onRetry: _busy ? null : _import,
+                    actionLabel: '导入词典',
                   )
                 : ReorderableListView.builder(
                     key: const ValueKey('dictionary-priority-list'),
@@ -658,35 +821,28 @@ class _DictionaryManagementSheetState extends State<DictionaryManagementSheet> {
                     ),
                     itemBuilder: (context, index) {
                       final item = widget.store.dictionaries[index];
-                      return Container(
+                      return Padding(
                         key: ValueKey(item.id),
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        decoration: BoxDecoration(
-                          border: Border(
-                            bottom: BorderSide(
-                              color: Theme.of(context).dividerColor,
-                            ),
-                          ),
-                        ),
-                        child: Row(
-                          children: [
-                            ReorderableDragStartListener(
-                              index: index,
-                              enabled: !_busy,
-                              child: Padding(
-                                padding: const EdgeInsets.only(right: 12),
-                                child: Semantics(
-                                  label: '拖动调整${item.name}的优先级',
-                                  child: const ArchiveIcon(
-                                    CupertinoIcons.line_horizontal_3,
-                                    size: 18,
+                        padding: const EdgeInsets.only(bottom: 14),
+                        child: ContentPanel(
+                          onTap: _busy ? null : () => _rename(item),
+                          child: Row(
+                            children: [
+                              ReorderableDragStartListener(
+                                index: index,
+                                enabled: !_busy,
+                                child: Padding(
+                                  padding: const EdgeInsets.only(right: 12),
+                                  child: Semantics(
+                                    label: '拖动调整${item.name}的优先级',
+                                    child: const ArchiveIcon(
+                                      CupertinoIcons.line_horizontal_3,
+                                      size: 18,
+                                    ),
                                   ),
                                 ),
                               ),
-                            ),
-                            Expanded(
-                              child: InkWell(
-                                onTap: _busy ? null : () => _rename(item),
+                              Expanded(
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
@@ -695,16 +851,17 @@ class _DictionaryManagementSheetState extends State<DictionaryManagementSheet> {
                                       maxLines: 2,
                                       overflow: TextOverflow.ellipsis,
                                       style: const TextStyle(
-                                        fontSize: 15,
                                         fontWeight: FontWeight.w600,
                                       ),
                                     ),
                                     const SizedBox(height: 6),
                                     AppText(
                                       '${index + 1} · ${_formatLabel(item.format)} · ${item.source.entries} 词条',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
                                       style: TextStyle(
                                         fontSize: 12,
-                                        height: 1.5,
+                                        height: 1.4,
                                         color: Theme.of(
                                           context,
                                         ).colorScheme.onSurfaceVariant,
@@ -712,9 +869,11 @@ class _DictionaryManagementSheetState extends State<DictionaryManagementSheet> {
                                     ),
                                     AppText(
                                       '${_size(item.bytes)} · ${item.enabled ? '已启用' : '已停用'}${item.resources.isEmpty ? '' : ' · ${item.resources.length} 个资源包'}',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
                                       style: TextStyle(
                                         fontSize: 12,
-                                        height: 1.5,
+                                        height: 1.4,
                                         color: Theme.of(
                                           context,
                                         ).colorScheme.onSurfaceVariant,
@@ -723,32 +882,33 @@ class _DictionaryManagementSheetState extends State<DictionaryManagementSheet> {
                                   ],
                                 ),
                               ),
-                            ),
-                            const SizedBox(width: 8),
-                            Semantics(
-                              label: '启用${item.name}',
-                              child: AppControls.toggle(
-                                context,
-                                value: item.enabled,
-                                onChanged: _busy
-                                    ? null
-                                    : (value) => _perform(
-                                        () => widget.store.setEnabled(
-                                          item.id,
-                                          value,
+                              const SizedBox(width: 8),
+                              Semantics(
+                                label: '启用${item.name}',
+                                child: AppControls.toggle(
+                                  context,
+                                  value: item.enabled,
+                                  onChanged: _busy
+                                      ? null
+                                      : (value) => _perform(
+                                          () => widget.store.setEnabled(
+                                            item.id,
+                                            value,
+                                          ),
                                         ),
-                                      ),
+                                ),
                               ),
-                            ),
-                            ArchiveIconButton(
-                              tooltip: '移除${item.name}',
-                              onPressed: _busy ? null : () => _remove(item),
-                              icon: const ArchiveIcon(
-                                CupertinoIcons.trash,
-                                size: 18,
+                              GlassMenuAnchor(
+                                child: Builder(
+                                  builder: (anchor) => CompactRowMenuButton(
+                                    label: '${item.name} 更多操作',
+                                    onPressed: () =>
+                                        _openDictionaryMenu(anchor, item),
+                                  ),
+                                ),
                               ),
-                            ),
-                          ],
+                            ],
+                          ),
                         ),
                       );
                     },

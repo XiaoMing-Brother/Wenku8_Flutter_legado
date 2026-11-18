@@ -336,6 +336,19 @@ class BookDocuments {
     return value == null ? null : BookDocumentSelection.fromMap(value);
   }
 
+  /// Picks and copies a Legado book source JSON document into app cache.
+  Future<BookDocumentSelection?> pickBookSource() async {
+    final value = await channel.invokeMapMethod<String, dynamic>(
+      'pickBookSource',
+    );
+    return value == null
+        ? null
+        : BookDocumentSelection(
+            name: value['name'] as String,
+            path: value['path'] as String,
+          );
+  }
+
   Future<BookDocumentSelection?> pickOriginalReference() async {
     final value = await channel.invokeMapMethod<String, dynamic>(
       'pickOriginalReference',

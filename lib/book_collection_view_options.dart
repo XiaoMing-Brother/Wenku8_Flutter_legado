@@ -35,6 +35,7 @@ class BookCollectionViewOptions extends StatelessWidget {
     this.gridViewport,
     this.target = BookCollectionViewTarget.all,
     this.onShowLayoutOptions,
+    this.allowShelfOnly = false,
   });
 
   final BookCollectionMode mode;
@@ -52,8 +53,10 @@ class BookCollectionViewOptions extends StatelessWidget {
   final bool reduceMotion;
   final BookCollectionViewTarget target;
   final VoidCallback? onShowLayoutOptions;
+  final bool allowShelfOnly;
 
   static IconData iconFor(BookCollectionMode mode) => switch (mode) {
+    BookCollectionMode.shelf => CupertinoIcons.rectangle_grid_1x2,
     BookCollectionMode.list => CupertinoIcons.list_bullet,
     BookCollectionMode.shelfList => CupertinoIcons.rectangle_grid_1x2,
     BookCollectionMode.shelfGrid => CupertinoIcons.rectangle_grid_2x2,
@@ -79,7 +82,14 @@ class BookCollectionViewOptions extends StatelessWidget {
           label: '布局',
           value: mode,
           options: {
-            for (final value in BookCollectionMode.values) value: value.label,
+            for (final value in [
+              if (allowShelfOnly) BookCollectionMode.shelf,
+              BookCollectionMode.shelfList,
+              BookCollectionMode.shelfGrid,
+              BookCollectionMode.list,
+              BookCollectionMode.grid,
+            ])
+              value: value.label,
           },
           optionName: (value) => value.storageValue,
           leading: (value) => ArchiveIcon(iconFor(value), size: 16),
@@ -242,7 +252,7 @@ class BookShelfContentOptions extends StatelessWidget {
     crossAxisAlignment: CrossAxisAlignment.stretch,
     children: [
       if (showHeader)
-        const ArchiveSection(title: '立体书架筛选', code: 'UPPER / FILTER'),
+      const ArchiveSection(title: '立体书架筛选', code: 'SHELF / FILTER'),
       if (showFollow) ...[
         const SizedBox(height: 16),
         _ShelfToggle(

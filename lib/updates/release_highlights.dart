@@ -1,5 +1,4 @@
 import 'package:flutter/cupertino.dart';
-import 'package:flutter/material.dart';
 
 import '../app_ui.dart';
 import '../app_interactions.dart';
@@ -73,36 +72,22 @@ Future<bool> showInstalledReleaseNotes(
     if (!context.mounted) return false;
   }
   final installed = updates?.installed;
-  final appearance = GlassAppearance.of(context);
   final reduced = MediaQuery.disableAnimationsOf(context);
-  final completed =
-      await Navigator.of(context, rootNavigator: true).push<bool>(
-        _ReleaseDetailsRoute(
-          barrierDismissible: !automatic,
-          barrierLabel: '关闭更新说明',
-          barrierColor: Colors.black.withValues(alpha: .16),
-          transitionDuration: reduced ? Duration.zero : NovelMotion.enter,
-          transitionBuilder: (context, animation, secondary, child) =>
-              GlassOverlayTransition(
-                animation: animation,
-                kind: GlassOverlayKind.sheet,
-                reduceMotion: reduced,
-                child: child,
-              ),
-          pageBuilder: (context, _, _) => GlassAppearance(
-            blur: appearance.blur,
-            opacity: appearance.opacity,
-            child: PopScope(
-              canPop: !automatic,
-              child: _ReleaseDetails(
-                version: installed?.version ?? currentAppVersion,
-                build: installed?.build ?? currentAppBuild,
-              ),
-            ),
-          ),
-        ),
-      ) ==
-      true;
+  final completed = await showJellySheet<bool>(
+    context: context,
+    barrierLabel: '关闭更新说明',
+    reduceMotion: reduced,
+    maxWidth: 520,
+    maxHeight: 640,
+    guardDragDismiss: automatic,
+    builder: (_) => PopScope(
+      canPop: !automatic,
+      child: _ReleaseDetails(
+        version: installed?.version ?? currentAppVersion,
+        build: installed?.build ?? currentAppBuild,
+      ),
+    ),
+  ) == true;
   if (completed && installed != null && updates != null) {
     try {
       await updates.rememberReleaseNotes(installed);
@@ -111,18 +96,6 @@ Future<bool> showInstalledReleaseNotes(
     }
   }
   return completed;
-}
-
-class _ReleaseDetailsRoute extends RawDialogRoute<bool>
-    with AppHapticModalBarrier<bool> {
-  _ReleaseDetailsRoute({
-    required super.pageBuilder,
-    required super.barrierDismissible,
-    required super.barrierLabel,
-    required super.barrierColor,
-    required super.transitionDuration,
-    required super.transitionBuilder,
-  });
 }
 
 class _ReleaseDetails extends StatefulWidget {
@@ -204,122 +177,84 @@ class _ReleaseDetailsState extends State<_ReleaseDetails> {
   );
 
   @override
-  Widget build(BuildContext context) => Material(
-    type: MaterialType.transparency,
-    child: SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
-        child: Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 520, maxHeight: 640),
-            child: GlassOverlaySurface(
-              key: const ValueKey('installed-release-details'),
-              child: Padding(
-                padding: const EdgeInsets.all(22),
+  Widget build(BuildContext context) => Padding(
+    key: const ValueKey('installed-release-details'),
+    padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        ArchiveSection(
+          key: const ValueKey('release-details-progress'),
+          title: '本版更新',
+          code: 'RELEASE / NOTES',
+          subtitle:
+              '版本 ${widget.version} · 构建 ${widget.build} · 第 ${_page + 1}/${_sections.length} 页',
+        ),
+        const SizedBox(height: 16),
+        Expanded(
+          child: NotificationListener<ScrollNotification>(
+            onNotification: (notification) {
+              if (notification.depth != 0) return false;
+              if (notification is ScrollStartNotification) {
+                _userPaging = notification.dragDetails != null;
+              } else if (notification is ScrollEndNotification) {
+                _userPaging = false;
+              }
+              return false;
+            },
+            child: PageView.builder(
+              key: const ValueKey('release-details-pages'),
+              controller: _pages,
+              itemCount: _sections.length,
+              onPageChanged: (page) {
+                if (_userPaging && page != _page) {
+                  AppHaptics.play(context, HapticCue.pageTurn);
+                }
+                setState(() => _page = page);
+              },
+              itemBuilder: (context, index) => SingleChildScrollView(
+                padding: const EdgeInsets.only(bottom: 12),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    ArchiveCode(
-                      'RELEASE / ${widget.version} · ${widget.build}',
-                    ),
-                    const SizedBox(height: 10),
-                    Row(
-                      children: [
-                        const Expanded(
-                          child: AppText(
-                            '本版更新',
-                            style: TextStyle(
-                              fontSize: 24,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ),
-                        AppText(
-                          '${_page + 1}/${_sections.length}',
-                          key: const ValueKey('release-details-progress'),
-                          style: const TextStyle(fontSize: 12),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 18),
-                    Expanded(
-                      child: NotificationListener<ScrollNotification>(
-                        onNotification: (notification) {
-                          if (notification.depth != 0) return false;
-                          if (notification is ScrollStartNotification) {
-                            _userPaging = notification.dragDetails != null;
-                          } else if (notification is ScrollEndNotification) {
-                            _userPaging = false;
-                          }
-                          return false;
-                        },
-                        child: PageView.builder(
-                          key: const ValueKey('release-details-pages'),
-                          controller: _pages,
-                          itemCount: _sections.length,
-                          onPageChanged: (page) {
-                            if (_userPaging && page != _page) {
-                              AppHaptics.play(context, HapticCue.pageTurn);
-                            }
-                            setState(() => _page = page);
-                          },
-                          itemBuilder: (context, index) =>
-                              SingleChildScrollView(
-                                padding: const EdgeInsets.only(bottom: 12),
-                                child: Column(
-                                  crossAxisAlignment:
-                                      CrossAxisAlignment.stretch,
-                                  children: [
-                                    AppText(
-                                      _sections[index].title,
-                                      key: ValueKey('release-section-$index'),
-                                      style: const TextStyle(
-                                        fontSize: 19,
-                                        fontWeight: FontWeight.w600,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 14),
-                                    for (final item in _sections[index].items)
-                                      Padding(
-                                        padding: const EdgeInsets.only(
-                                          bottom: 16,
-                                        ),
-                                        child: ReleaseNotes(
-                                          item == currentReleaseSourcePolicy
-                                              ? '> **$item**'
-                                              : index == 0
-                                              ? item
-                                              : '- $item',
-                                          style: TextStyle(
-                                            fontSize:
-                                                item ==
-                                                    currentReleaseSourcePolicy
-                                                ? 16
-                                                : 14,
-                                            fontWeight:
-                                                item ==
-                                                    currentReleaseSourcePolicy
-                                                ? FontWeight.w700
-                                                : FontWeight.normal,
-                                            height: 1.75,
-                                          ),
-                                        ),
-                                      ),
-                                  ],
-                                ),
-                              ),
-                        ),
+                    AppText(
+                      _sections[index].title,
+                      key: ValueKey('release-section-$index'),
+                      style: const TextStyle(
+                        fontSize: 19,
+                        fontWeight: FontWeight.w600,
                       ),
                     ),
-                    const SizedBox(height: 12),
-                    _navigation(context),
+                    const SizedBox(height: 14),
+                    for (final item in _sections[index].items)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 16),
+                        child: ReleaseNotes(
+                          item == currentReleaseSourcePolicy
+                              ? '> **$item**'
+                              : index == 0
+                              ? item
+                              : '- $item',
+                          style: TextStyle(
+                            fontSize: item == currentReleaseSourcePolicy
+                                ? 16
+                                : 14,
+                            fontWeight: item == currentReleaseSourcePolicy
+                                ? FontWeight.w700
+                                : FontWeight.normal,
+                            height: 1.75,
+                          ),
+                        ),
+                      ),
                   ],
                 ),
               ),
             ),
           ),
         ),
-      ),
+        const SizedBox(height: 12),
+        _navigation(context),
+      ],
     ),
   );
 }

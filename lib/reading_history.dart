@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'app_ui.dart';
 import 'app_interactions.dart';
 import 'catalog.dart';
+import 'feature_pages.dart';
 import 'library_state.dart';
 import 'offline_repository.dart';
 
@@ -53,105 +54,88 @@ class _ReadingHistoryPageState extends State<ReadingHistoryPage> {
   }
 
   @override
-  Widget build(BuildContext context) => Scaffold(
-    body: Atmosphere(
-      child: GlassHeaderLayout(
-        header: ArchiveHeaderBar(
-          leading: GlassIconButton(
-            icon: CupertinoIcons.back,
-            label: '返回',
-            onPressed: () => Navigator.pop(context),
+  Widget build(BuildContext context) => ArchiveFeaturePage(
+    title: '阅读历史',
+    code: 'ARCHIVE / READING LOG',
+    actions: [
+      GlassMenuAnchor(
+        child: Builder(
+          builder: (anchor) => GlassIconButton(
+            icon: CupertinoIcons.trash,
+            label: '清空阅读历史',
+            onPressed: () => _clear(anchor),
           ),
-          title: const ArchiveRouteTitle(
-            title: '阅读历史',
-            code: 'ARCHIVE / READING LOG',
-          ),
-          actions: [
-            GlassMenuAnchor(
-              child: Builder(
-                builder: (anchor) => GlassIconButton(
-                  icon: CupertinoIcons.trash,
-                  label: '清空阅读历史',
-                  onPressed: () => _clear(anchor),
-                ),
-              ),
-            ),
-          ],
-        ),
-        body: AnimatedBuilder(
-          animation: widget.state.historyChanges,
-          builder: (context, _) {
-            final ids = widget.state.readingHistoryIds;
-            return ListView.builder(
-              key: const PageStorageKey('reading-history'),
-              padding: EdgeInsets.fromLTRB(
-                24,
-                MediaQuery.paddingOf(context).top +
-                    FrostedHeader.toolbarHeight +
-                    20,
-                24,
-                MediaQuery.paddingOf(context).bottom + 28,
-              ),
-              itemCount: ids.length + 1,
-              itemBuilder: (context, index) {
-                if (index == 0) {
-                  return Padding(
-                    padding: const EdgeInsets.only(bottom: 22),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        sectionHeader(context, '最近阅读', '${ids.length} 本书'),
-                        const SizedBox(height: 12),
-                        const AppText(
-                          '未收藏的作品也会记录。移除历史只隐藏记录，书架、续读进度和离线缓存保留。',
-                          style: TextStyle(fontSize: 13, height: 1.7),
-                        ),
-                        if (ids.isEmpty) ...[
-                          const SizedBox(height: 30),
-                          const AppText('暂无阅读历史'),
-                        ],
-                      ],
-                    ),
-                  );
-                }
-                final id = ids[index - 1];
-                final known = _known(id);
-                return FutureBuilder<Novel?>(
-                  key: ValueKey('history-resolve-$id'),
-                  initialData: known,
-                  future: known == null
-                      ? _requests.putIfAbsent(id, () => _request(id))
-                      : _requests[id],
-                  builder: (context, snapshot) => LoadedContentSequence(
-                    generation: (known ?? snapshot.data)?.id,
-                    child:
-                        known == null &&
-                            snapshot.data == null &&
-                            snapshot.connectionState != ConnectionState.done
-                        ? const Padding(
-                            padding: EdgeInsets.only(bottom: 12),
-                            child: SizedBox(
-                              height: 108,
-                              child: LoadingSkeleton(
-                                layout: SkeletonLayout.history,
-                                label: '正在载入阅读历史',
-                              ),
-                            ),
-                          )
-                        : LoadedContentItem(
-                            index: index - 1,
-                            placeholder: const LoadingSkeleton(
-                              layout: SkeletonLayout.history,
-                            ),
-                            child: _row(context, id, known ?? snapshot.data),
-                          ),
-                  ),
-                );
-              },
-            );
-          },
         ),
       ),
+    ],
+    child: AnimatedBuilder(
+      animation: widget.state.historyChanges,
+      builder: (context, _) {
+        final ids = widget.state.readingHistoryIds;
+        if (ids.isEmpty) {
+          return const ContentNotice(
+            icon: CupertinoIcons.clock,
+            title: '还没有阅读历史',
+            message: '打开书籍阅读后，会在这里记录章节与进度。',
+          );
+        }
+        return ListView.separated(
+          key: const PageStorageKey('reading-history'),
+          padding: featurePadding(context),
+          itemCount: ids.length + 1,
+          separatorBuilder: (_, index) =>
+              SizedBox(height: index == 0 ? 16 : 14),
+          itemBuilder: (context, index) {
+            if (index == 0) {
+              return const Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  ArchiveSection(
+                    title: '最近阅读',
+                    code: 'ARCHIVE / RECENT',
+                    subtitle: '未收藏的作品也会记录',
+                  ),
+                  SizedBox(height: 10),
+                  AppText(
+                    '移除历史只隐藏记录，书架、续读进度和离线缓存保留。',
+                    style: TextStyle(fontSize: 13, height: 1.7),
+                  ),
+                ],
+              );
+            }
+            final id = ids[index - 1];
+            final known = _known(id);
+            return FutureBuilder<Novel?>(
+              key: ValueKey('history-resolve-$id'),
+              initialData: known,
+              future: known == null
+                  ? _requests.putIfAbsent(id, () => _request(id))
+                  : _requests[id],
+              builder: (context, snapshot) => LoadedContentSequence(
+                generation: (known ?? snapshot.data)?.id,
+                child:
+                    known == null &&
+                        snapshot.data == null &&
+                        snapshot.connectionState != ConnectionState.done
+                    ? const SizedBox(
+                        height: 108,
+                        child: LoadingSkeleton(
+                          layout: SkeletonLayout.history,
+                          label: '正在载入阅读历史',
+                        ),
+                      )
+                    : LoadedContentItem(
+                        index: index - 1,
+                        placeholder: const LoadingSkeleton(
+                          layout: SkeletonLayout.history,
+                        ),
+                        child: _row(context, id, known ?? snapshot.data),
+                      ),
+              ),
+            );
+          },
+        );
+      },
     ),
   );
 
@@ -161,74 +145,67 @@ class _ReadingHistoryPageState extends State<ReadingHistoryPage> {
     final chapter = novel == null
         ? widget.state.chapterFor(id)
         : widget.state.chapterForNovel(novel);
-    return Padding(
+    final muted = Theme.of(context).colorScheme.onSurfaceVariant;
+    return ContentPanel(
       key: ValueKey('history-book-$id'),
-      padding: const EdgeInsets.only(bottom: 12),
-      child: ContentPanel(
-        onTap: () => widget.onOpen(context, id, novel),
-        child: Row(
-          children: [
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  AppText(
-                    title,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontWeight: FontWeight.w600),
-                  ),
-                  const SizedBox(height: 7),
-                  AppText(
-                    '第 ${chapter + 1} 章${position == null ? '' : ' · 本章 ${(position.fraction * 100).round()}%'}',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  AppText(
-                    _readingTime(position?.updatedAt ?? 0),
-                    style: const TextStyle(fontSize: 12),
-                  ),
-                  if (novel == null) ...[
-                    const SizedBox(height: 8),
-                    GlassTextButton(
-                      onPressed: () => setState(() {
-                        _requests[id] = _request(id);
-                      }),
-                      child: const AppText('重试载入书名'),
-                    ),
-                  ],
-                ],
-              ),
-            ),
-            const SizedBox(width: 12),
-            GlassMenuAnchor(
-              child: Builder(
-                builder: (anchor) => GlassIconButton(
-                  icon: CupertinoIcons.ellipsis,
-                  label: '$title阅读记录操作',
-                  onPressed: () => _remove(anchor, id),
+      onTap: () => widget.onOpen(context, id, novel),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                AppText(
+                  title,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontWeight: FontWeight.w600),
                 ),
+                const SizedBox(height: 7),
+                AppText(
+                  '第 ${chapter + 1} 章${position == null ? '' : ' · 本章 ${(position.fraction * 100).round()}%'}',
+                  style: TextStyle(fontSize: 12, height: 1.4, color: muted),
+                ),
+                const SizedBox(height: 4),
+                AppText(
+                  _readingTime(position?.updatedAt ?? 0),
+                  style: TextStyle(fontSize: 12, height: 1.4, color: muted),
+                ),
+                if (novel == null) ...[
+                  const SizedBox(height: 8),
+                  GlassTextButton(
+                    onPressed: () => setState(() {
+                      _requests[id] = _request(id);
+                    }),
+                    child: const AppText('重试载入书名'),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          const SizedBox(width: 12),
+          GlassMenuAnchor(
+            child: Builder(
+              builder: (anchor) => CompactRowMenuButton(
+                label: '$title阅读记录操作',
+                onPressed: () => _remove(anchor, id),
               ),
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
 
   Future<void> _remove(BuildContext context, int id) async {
-    final remove = await showGlassMenu<bool>(
-      context: context,
+    final remove = await confirmNovelAction(
+      context,
+      title: '删除阅读历史？',
+      message: '这条记录会从阅读历史中移除，书架、续读进度和离线缓存保留。',
+      confirmLabel: '删除阅读历史',
       reduceMotion: widget.state.reduceMotion,
-      builder: (menu) => GlassMenuItem(
-        label: '移除这条历史',
-        onPressed: () => Navigator.pop(menu, true),
-      ),
     );
-    if (!mounted || remove != true) return;
+    if (!mounted || !remove) return;
     try {
       await widget.state.hideReadingHistory(id);
       if (!mounted) return;
@@ -245,25 +222,14 @@ class _ReadingHistoryPageState extends State<ReadingHistoryPage> {
   }
 
   Future<void> _clear(BuildContext context) async {
-    final clear = await showGlassMenu<bool>(
-      context: context,
+    final clear = await confirmNovelAction(
+      context,
+      title: '删除全部阅读历史？',
+      message: '所有阅读历史会从本机阅读历史库移除，书架、续读进度和离线缓存保留。',
+      confirmLabel: '删除全部阅读历史',
       reduceMotion: widget.state.reduceMotion,
-      builder: (menu) => Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          GlassMenuItem(
-            label: '清空历史，保留进度',
-            onPressed: () => Navigator.pop(menu, true),
-          ),
-          GlassMenuItem(
-            order: 1,
-            label: '保留阅读历史',
-            onPressed: () => Navigator.pop(menu, false),
-          ),
-        ],
-      ),
     );
-    if (!mounted || clear != true) return;
+    if (!mounted || !clear) return;
     try {
       await widget.state.clearReadingHistory();
     } catch (_) {

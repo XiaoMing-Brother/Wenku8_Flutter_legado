@@ -26,6 +26,7 @@ import 'discovery_shelf_query.dart';
 import 'reader_underline.dart';
 import 'reading_activity.dart';
 import 'reading_moments.dart';
+import 'pending_book.dart';
 
 final backupPreferenceKeys = <String>{
   'theme',
@@ -85,6 +86,7 @@ final _recordKey = RegExp(
 bool isLibraryRecordKey(String key) =>
     key == ReadingActivityStore.preferenceKey ||
     key == ReadingMomentsStore.preferenceKey ||
+    key == pendingBooksPreferenceKey ||
     backupPreferenceKeys.contains(key) ||
     _listKeys.contains(key) ||
     (_recordKey.hasMatch(key) &&
@@ -310,6 +312,11 @@ Map<String, Object> _validateRecords(Map<String, dynamic> input) {
         throw const FormatException('阅读活动记录格式有误');
       }
       output[key] = ReadingActivityStore.validateRecord(value);
+    } else if (key == pendingBooksPreferenceKey) {
+      if (value is! String || value.length > maxPendingBooksBytes) {
+        throw const FormatException('待匹配书籍记录格式有误');
+      }
+      output[key] = encodePendingBooks(decodePendingBooks(value));
     } else if (key.startsWith('chapter_') || key.startsWith('shelf_added_')) {
       if (value is! int ||
           value < 0 ||

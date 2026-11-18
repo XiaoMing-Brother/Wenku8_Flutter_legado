@@ -6,6 +6,7 @@ import 'app_ui.dart';
 import 'app_interactions.dart';
 import 'catalog.dart';
 import 'cloud_sources.dart';
+import 'feature_pages.dart';
 import 'offline_cache.dart' show formatCacheBytes;
 
 typedef ImportCloudBook = Future<Novel> Function(String name, String path);
@@ -44,8 +45,57 @@ class CloudLibraryPage extends StatelessWidget {
         ),
         reduceMotion: reduceMotion,
       );
+
+  Future<void> _openConnectionMenu(
+    BuildContext anchor,
+    CloudSourceKind kind,
+  ) async {
+    final action = await showGlassMenu<String>(
+      context: anchor,
+      reduceMotion: reduceMotion,
+      builder: (menu) => Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          GlassMenuItem(
+            label: '修改连接',
+            icon: CupertinoIcons.pencil,
+            order: 0,
+            onPressed: () => Navigator.pop(menu, 'edit'),
+          ),
+          GlassMenuItem(
+            label: '删除连接',
+            icon: CupertinoIcons.trash,
+            order: 1,
+            onPressed: () => Navigator.pop(menu, 'delete'),
+          ),
+        ],
+      ),
+    );
+    if (!anchor.mounted || action == null) return;
+    if (action == 'edit') {
+      await _edit(anchor, kind);
+      return;
+    }
+    final confirmed = await confirmNovelAction(
+      anchor,
+      title: '删除网盘连接？',
+      message: '「${kind.label}」的连接会从本机移除，已导入的书籍和网盘原文件保留。',
+      confirmLabel: '删除网盘连接',
+      reduceMotion: reduceMotion,
+    );
+    if (!confirmed || !anchor.mounted) return;
+    try {
+      await settings.save(kind, null);
+    } catch (error) {
+      if (anchor.mounted) {
+        showNovelFeedback(anchor, cloudFailureMessage(error));
+      }
+    }
+  }
+
   @override
-  Widget build(BuildContext context) => _CloudScaffold(
+  Widget build(BuildContext context) => ArchiveFeaturePage(
     title: '网盘导入',
     code: 'LOCAL / CLOUD SOURCES',
     child: AnimatedBuilder(
@@ -53,7 +103,7 @@ class CloudLibraryPage extends StatelessWidget {
       builder: (context, _) => Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const ArchiveSection(title: '网盘来源', code: 'BOOKS / DOCUMENTS'),
+          const ArchiveSection(title: '网盘来源', code: 'CLOUD / SOURCES'),
           const SizedBox(height: 12),
           const AppText(
             '浏览网盘，选择书籍后导入本机。导入完成即可离线阅读。',
@@ -84,12 +134,23 @@ class CloudLibraryPage extends StatelessWidget {
                           ),
                         ),
                       ),
-                      ArchiveIcon(
-                        kind != CloudSourceKind.quark
-                            ? CupertinoIcons.cloud
-                            : CupertinoIcons.folder,
-                        size: 22,
-                      ),
+                      if (settings[kind] != null)
+                        GlassMenuAnchor(
+                          child: Builder(
+                            builder: (anchor) => CompactRowMenuButton(
+                              label: '${kind.label} 连接操作',
+                              onPressed: () =>
+                                  _openConnectionMenu(anchor, kind),
+                            ),
+                          ),
+                        )
+                      else
+                        ArchiveIcon(
+                          kind != CloudSourceKind.quark
+                              ? CupertinoIcons.cloud
+                              : CupertinoIcons.folder,
+                          size: 22,
+                        ),
                     ],
                   ),
                   const SizedBox(height: 10),
@@ -107,6 +168,8 @@ class CloudLibraryPage extends StatelessWidget {
                           ? config.endpoint.host
                           : '已保存本机连接',
                       style: TextStyle(
+                        fontSize: 12,
+                        height: 1.4,
                         color: Theme.of(context).colorScheme.onSurfaceVariant,
                       ),
                     ),
@@ -116,30 +179,6 @@ class CloudLibraryPage extends StatelessWidget {
                       icon: CupertinoIcons.folder_open,
                       label: '浏览书籍',
                       onPressed: () => _browse(context, config),
-                    ),
-                    Wrap(
-                      spacing: 12,
-                      children: [
-                        GlassTextButton(
-                          onPressed: () => _edit(context, kind),
-                          child: const AppText('修改连接'),
-                        ),
-                        GlassTextButton(
-                          onPressed: () async {
-                            try {
-                              await settings.save(kind, null);
-                            } catch (e) {
-                              if (context.mounted) {
-                                showNovelFeedback(
-                                  context,
-                                  cloudFailureMessage(e),
-                                );
-                              }
-                            }
-                          },
-                          child: const AppText('移除连接'),
-                        ),
-                      ],
                     ),
                   ] else
                     GlassPillButton(
@@ -155,7 +194,7 @@ class CloudLibraryPage extends StatelessWidget {
                 ],
               ),
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 14),
           ],
         ],
       ),
@@ -327,7 +366,7 @@ class _CloudConnectionPageState extends State<CloudConnectionPage> {
     ),
   );
   @override
-  Widget build(BuildContext context) => _CloudScaffold(
+  Widget build(BuildContext context) => ArchiveFeaturePage(
     title: widget.syncConnection
         ? 'S3 云端同步'
         : '连接 ${widget.kind == CloudSourceKind.webdav
@@ -697,23 +736,16 @@ class _CloudBookBrowserState extends State<CloudBookBrowser> {
     onPopInvokedWithResult: (didPop, _) {
       if (!didPop && !_committing) _up();
     },
-    child: _CloudScaffold(
+    child: ArchiveFeaturePage(
       title: widget.config.label,
       code: 'LOCAL / FILE BROWSER',
       onBack: _folders.length > 1 ? _up : null,
-      sliverBody: LoadedContentSequence(
+      child: LoadedContentSequence(
         generation: _folders.last.id,
         child: CustomScrollView(
           slivers: [
             SliverPadding(
-              padding: EdgeInsets.fromLTRB(
-                24,
-                MediaQuery.paddingOf(context).top +
-                    FrostedHeader.toolbarHeight +
-                    20,
-                24,
-                0,
-              ),
+              padding: featurePadding(context).copyWith(bottom: 0),
               sliver: SliverToBoxAdapter(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -793,10 +825,11 @@ class _CloudBookBrowserState extends State<CloudBookBrowser> {
                       const BookRowSkeleton(label: '正在读取网盘目录'),
                     if (!_loading && _error == null && _entries.isEmpty)
                       const Padding(
-                        padding: EdgeInsets.symmetric(vertical: 32),
-                        child: AppText(
-                          '这个目录没有可导入的书籍。',
-                          textAlign: TextAlign.center,
+                        padding: EdgeInsets.only(top: 24),
+                        child: ContentNotice(
+                          icon: CupertinoIcons.folder,
+                          title: '这个目录没有可导入的书籍',
+                          message: '返回上级目录，或刷新后再试。',
                         ),
                       ),
                   ],
@@ -813,79 +846,77 @@ class _CloudBookBrowserState extends State<CloudBookBrowser> {
                     key: ValueKey(('cloud-entry', entry.id)),
                     index: index,
                     child: Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 5),
-                      child: Row(
-                        children: [
-                          ArchiveIcon(
-                            entry.folder
-                                ? CupertinoIcons.folder
-                                : CupertinoIcons.doc_text,
-                            size: 24,
-                          ),
-                          const SizedBox(width: 14),
-                          Expanded(
-                            child: JellyTapSurface(
-                              onTap: _importing || _loading
-                                  ? null
-                                  : () => entry.folder
-                                        ? _enter(entry)
-                                        : _import([entry]),
-                              child: Padding(
-                                padding: const EdgeInsets.symmetric(
-                                  vertical: 14,
-                                ),
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
+                      padding: const EdgeInsets.only(bottom: 14),
+                      child: ContentPanel(
+                        onTap: _importing || _loading
+                            ? null
+                            : () => entry.folder
+                                  ? _enter(entry)
+                                  : _import([entry]),
+                        child: Row(
+                          children: [
+                            ArchiveIcon(
+                              entry.folder
+                                  ? CupertinoIcons.folder
+                                  : CupertinoIcons.doc_text,
+                              size: 24,
+                            ),
+                            const SizedBox(width: 14),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  AppText(
+                                    entry.name,
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                  if (!entry.folder)
                                     AppText(
-                                      entry.name,
-                                      style: const TextStyle(
-                                        fontSize: 16,
-                                        height: 1.5,
+                                      _imported.contains(entry.id)
+                                          ? '已导入'
+                                          : entry.size > 0
+                                          ? formatCacheBytes(entry.size)
+                                          : '大小未知',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        height: 1.4,
+                                        color: Theme.of(
+                                          context,
+                                        ).colorScheme.onSurfaceVariant,
                                       ),
                                     ),
-                                    if (!entry.folder)
-                                      AppText(
-                                        _imported.contains(entry.id)
-                                            ? '已导入'
-                                            : entry.size > 0
-                                            ? formatCacheBytes(entry.size)
-                                            : '大小未知',
-                                        style: TextStyle(
-                                          fontSize: 12,
-                                          height: 1.6,
-                                          color: Theme.of(
-                                            context,
-                                          ).colorScheme.onSurfaceVariant,
-                                        ),
-                                      ),
-                                  ],
-                                ),
+                                ],
                               ),
                             ),
-                          ),
-                          if (entry.folder)
-                            const ArchiveIcon(
-                              CupertinoIcons.chevron_forward,
-                              size: 16,
-                            )
-                          else
-                            GlassIconButton(
-                              icon: _selected.containsKey(entry.id)
-                                  ? CupertinoIcons.checkmark_circle_fill
-                                  : CupertinoIcons.circle,
-                              label: '选择 ${entry.name}',
-                              onPressed: _importing
-                                  ? null
-                                  : () => setState(() {
-                                      if (_selected.containsKey(entry.id)) {
-                                        _selected.remove(entry.id);
-                                      } else {
-                                        _selected[entry.id] = entry;
-                                      }
-                                    }),
-                            ),
-                        ],
+                            if (entry.folder)
+                              const ArchiveIcon(
+                                CupertinoIcons.chevron_forward,
+                                size: 16,
+                              )
+                            else
+                              GlassIconButton(
+                                icon: _selected.containsKey(entry.id)
+                                    ? CupertinoIcons.checkmark_circle_fill
+                                    : CupertinoIcons.circle,
+                                label: '选择 ${entry.name}',
+                                onPressed: _importing
+                                    ? null
+                                    : () => setState(() {
+                                        if (_selected.containsKey(entry.id)) {
+                                          _selected.remove(entry.id);
+                                        } else {
+                                          _selected[entry.id] = entry;
+                                        }
+                                      }),
+                              ),
+                          ],
+                        ),
                       ),
                     ),
                   );
@@ -916,47 +947,6 @@ class _CloudBookBrowserState extends State<CloudBookBrowser> {
             ),
           ],
         ),
-      ),
-    ),
-  );
-}
-
-class _CloudScaffold extends StatelessWidget {
-  const _CloudScaffold({
-    required this.title,
-    required this.code,
-    this.child,
-    this.sliverBody,
-    this.onBack,
-  });
-  final String title, code;
-  final Widget? child, sliverBody;
-  final VoidCallback? onBack;
-  @override
-  Widget build(BuildContext context) => Scaffold(
-    body: Atmosphere(
-      child: GlassHeaderLayout(
-        header: ArchiveHeaderBar(
-          leading: GlassIconButton(
-            icon: CupertinoIcons.back,
-            label: '返回',
-            onPressed: onBack ?? () => Navigator.maybePop(context),
-          ),
-          title: ArchiveRouteTitle(title: title, code: code),
-        ),
-        body:
-            sliverBody ??
-            SingleChildScrollView(
-              padding: EdgeInsets.fromLTRB(
-                24,
-                MediaQuery.paddingOf(context).top +
-                    FrostedHeader.toolbarHeight +
-                    20,
-                24,
-                MediaQuery.paddingOf(context).bottom + 32,
-              ),
-              child: child,
-            ),
       ),
     ),
   );

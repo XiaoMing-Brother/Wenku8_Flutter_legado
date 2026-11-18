@@ -240,7 +240,7 @@ class _ReaderAnnotationEditorState extends State<ReaderAnnotationEditor> {
           context: context,
           reduceMotion: widget.state.reduceMotion,
           builder: (sheet) => SingleChildScrollView(
-            padding: const EdgeInsets.all(24),
+            padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
@@ -251,7 +251,7 @@ class _ReaderAnnotationEditorState extends State<ReaderAnnotationEditor> {
                 const SizedBox(height: 12),
                 const AppText(
                   '仅调整所选片段，其他片段与隐藏文字保持不变。',
-                  style: TextStyle(fontSize: 12, height: 1.6),
+                  style: TextStyle(fontSize: 12, height: 1.4),
                 ),
                 const SizedBox(height: 12),
                 for (final (index, range) in _ranges.indexed)
@@ -377,9 +377,9 @@ class _ReaderAnnotationEditorState extends State<ReaderAnnotationEditor> {
         _saving ||
         !await confirmNovelAction(
           context,
-          title: '删除这条${mark.kindLabel}与批注？',
-          message: '原书和阅读进度不会改变。',
-          confirmLabel: '删除记录',
+          title: '删除${mark.kindLabel}？',
+          message: '这条${mark.kindLabel}与批注会从本机移除，原书和阅读进度不会改变。',
+          confirmLabel: '删除${mark.kindLabel}',
           reduceMotion: widget.state.reduceMotion,
         )) {
       return;

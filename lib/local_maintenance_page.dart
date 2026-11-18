@@ -1,4 +1,5 @@
 import 'package:flutter/cupertino.dart';
+import 'package:flutter/material.dart';
 import 'app_ui.dart';
 import 'archive_progress.dart';
 import 'feature_pages.dart';
@@ -125,12 +126,13 @@ class _LocalMaintenancePageState extends State<LocalMaintenancePage> {
                 children: [
                   ArchiveSection(
                     title: '${widget.selected.length} 本书',
-                    code: '保留原书与阅读记录',
+                    code: 'LOCAL / TASKS',
+                    subtitle: '保留原书与阅读记录',
                   ),
                   const SizedBox(height: 16),
                   for (final task in LocalMaintenanceTask.values)
                     Padding(
-                      padding: const EdgeInsets.only(bottom: 12),
+                      padding: const EdgeInsets.only(bottom: 14),
                       child: ContentPanel(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -163,7 +165,13 @@ class _LocalMaintenancePageState extends State<LocalMaintenancePage> {
                             const SizedBox(height: 8),
                             AppText(
                               _descriptions[task]!,
-                              style: const TextStyle(fontSize: 12, height: 1.6),
+                              style: TextStyle(
+                                fontSize: 12,
+                                height: 1.4,
+                                color: Theme.of(
+                                  context,
+                                ).colorScheme.onSurfaceVariant,
+                              ),
                             ),
                           ],
                         ),
@@ -208,7 +216,13 @@ class _LocalMaintenancePageState extends State<LocalMaintenancePage> {
                                         : _results.any((r) => r.failed)
                                         ? '${_results.where((r) => r.failed).length} 项未完成'
                                         : '已完成'} · 释放 ${formatCacheBytes(_freed)}',
-                              style: const TextStyle(fontSize: 12, height: 1.6),
+                              style: TextStyle(
+                                fontSize: 12,
+                                height: 1.4,
+                                color: Theme.of(
+                                  context,
+                                ).colorScheme.onSurfaceVariant,
+                              ),
                             ),
                           ],
                         ),
@@ -217,7 +231,10 @@ class _LocalMaintenancePageState extends State<LocalMaintenancePage> {
                   ),
                   if (_results.isNotEmpty) ...[
                     const SizedBox(height: 24),
-                    const ArchiveSection(title: '处理结果', code: 'RESULTS'),
+                    const ArchiveSection(
+                      title: '处理结果',
+                      code: 'LOCAL / RESULTS',
+                    ),
                     const SizedBox(height: 12),
                   ],
                 ],
@@ -225,13 +242,13 @@ class _LocalMaintenancePageState extends State<LocalMaintenancePage> {
             ),
           ),
           SliverPadding(
-            padding: const EdgeInsets.fromLTRB(24, 0, 24, 28),
+            padding: featurePadding(context).copyWith(top: 0),
             sliver: SliverList.builder(
               itemCount: _results.length,
               itemBuilder: (context, index) {
                 final result = _results[index];
                 return Padding(
-                  padding: const EdgeInsets.only(bottom: 12),
+                  padding: const EdgeInsets.only(bottom: 14),
                   child: ContentPanel(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -245,7 +262,13 @@ class _LocalMaintenancePageState extends State<LocalMaintenancePage> {
                         const SizedBox(height: 6),
                         AppText(
                           result.message,
-                          style: const TextStyle(fontSize: 12, height: 1.6),
+                          style: TextStyle(
+                            fontSize: 12,
+                            height: 1.4,
+                            color: Theme.of(
+                              context,
+                            ).colorScheme.onSurfaceVariant,
+                          ),
                         ),
                       ],
                     ),

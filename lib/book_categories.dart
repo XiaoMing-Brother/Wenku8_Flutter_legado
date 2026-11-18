@@ -39,10 +39,9 @@ Future<void> showBookCategories(
                 children: [
                   Expanded(
                     child: GlassTextButton(
+                      selected: entry.key == selected,
                       onPressed: () => Navigator.pop(sheet, entry.key),
-                      child: AppText(
-                        '${entry.key == selected ? '✓  ' : ''}${entry.value}',
-                      ),
+                      child: AppText(entry.value),
                     ),
                   ),
                   if (!entry.key.startsWith('_')) ...[
@@ -137,14 +136,16 @@ Future<void> showBookCategories(
         ),
       );
     } else if (result.startsWith('delete:')) {
+      final id = result.substring(7);
+      final name = organization.groups[id] ?? '这个分类';
       if (await confirmNovelAction(
         context,
-        title: '删除这个分类？',
-        message: '书籍会回到未分类，原书与阅读记录保留。',
+        title: '删除分类？',
+        message: '「$name」中的书籍会回到未分类，原书与阅读记录保留。',
         confirmLabel: '删除分类',
         reduceMotion: reduceMotion,
       )) {
-        await organization.removeGroup(result.substring(7));
+        await organization.removeGroup(id);
       }
     } else {
       await organization.select(result, shelf: shelf);
@@ -182,10 +183,9 @@ Future<String?> chooseBookCategory(
           ...organization.groups,
         }.entries)
           GlassTextButton(
+            selected: current.length == 1 && current.single == entry.key,
             onPressed: () => Navigator.pop(sheet, entry.key),
-            child: AppText(
-              '${current.length == 1 && current.single == entry.key ? '✓  ' : ''}${entry.value}',
-            ),
+            child: AppText(entry.value),
           ),
         const SizedBox(height: 12),
         GlassPillButton(

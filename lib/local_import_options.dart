@@ -10,12 +10,13 @@ const defaultLocalVolumeRule =
 class LocalImportOptions {
   const LocalImportOptions({
     this.customToc = false,
+    this.autoTocRule = false,
     this.chapterRule = defaultLocalChapterRule,
     this.volumeRule = defaultLocalVolumeRule,
     this.autoTitles = true,
     this.inlineEpubImages = false,
   });
-  final bool customToc, autoTitles;
+  final bool customToc, autoTocRule, autoTitles;
 
   /// Stored directory semantics, not a global display option. Missing in old
   /// sync bundles means the original one-spine-item-per-chapter layout.
@@ -23,8 +24,9 @@ class LocalImportOptions {
   final String chapterRule, volumeRule;
   static const preferenceKey = 'localImportOptions.v1';
 
-  bool get isDefault => !customToc && autoTitles && !inlineEpubImages;
-  LocalImportOptions get effective => customToc
+  bool get isDefault =>
+      !customToc && !autoTocRule && autoTitles && !inlineEpubImages;
+  LocalImportOptions get effective => customToc || autoTocRule
       ? this
       : LocalImportOptions(
           autoTitles: autoTitles,
@@ -32,13 +34,29 @@ class LocalImportOptions {
         );
   LocalImportOptions withEpubImageLayout(bool inline) => LocalImportOptions(
     customToc: customToc,
+    autoTocRule: autoTocRule,
     chapterRule: chapterRule,
     volumeRule: volumeRule,
     autoTitles: autoTitles,
     inlineEpubImages: inline,
   );
+  LocalImportOptions withTocRule(String chapter, String volume) =>
+      LocalImportOptions(
+        customToc: true,
+        chapterRule: chapter,
+        volumeRule: volume,
+        autoTitles: autoTitles,
+        inlineEpubImages: inlineEpubImages,
+      );
+  LocalImportOptions withoutAutoTocRule() => LocalImportOptions(
+    chapterRule: chapterRule,
+    volumeRule: volumeRule,
+    autoTitles: autoTitles,
+    inlineEpubImages: inlineEpubImages,
+  );
   Object get identity => (
     customToc,
+    autoTocRule,
     autoTitles,
     customToc ? chapterRule : '',
     customToc ? volumeRule : '',
@@ -46,18 +64,20 @@ class LocalImportOptions {
   );
   Object get directoryIdentity => (
     customToc,
+    autoTocRule,
     customToc ? chapterRule : '',
     customToc ? volumeRule : '',
     inlineEpubImages,
   );
 
   Map<String, Object> toJson() => {
-    'version': inlineEpubImages ? 2 : 1,
+    'version': inlineEpubImages || autoTocRule ? 2 : 1,
     'customToc': customToc,
+    if (autoTocRule) 'autoTocRule': true,
     'chapterRule': chapterRule,
     'volumeRule': volumeRule,
     'autoTitles': autoTitles,
-    if (inlineEpubImages) 'inlineEpubImages': true,
+    if (inlineEpubImages || autoTocRule) 'inlineEpubImages': inlineEpubImages,
   };
   String encode() => jsonEncode(toJson());
   factory LocalImportOptions.decode(String? value) => value == null
@@ -71,18 +91,22 @@ class LocalImportOptions {
         value['customToc'] is! bool ||
         value['autoTitles'] is! bool ||
         value['chapterRule'] is! String ||
-        value['volumeRule'] is! String) {
+        value['volumeRule'] is! String ||
+        value['autoTocRule'] != null && value['autoTocRule'] is! bool) {
       throw const FormatException('导入目录设置格式有误');
     }
     final chapter = value['chapterRule'] as String,
         volume = value['volumeRule'] as String;
+    final autoTocRule = value['autoTocRule'] == true;
     if (chapter.length > 1024 ||
         volume.length > 1024 ||
-        (value['customToc'] == true && chapter.trim().isEmpty)) {
+        (value['customToc'] == true && chapter.trim().isEmpty) ||
+        (value['customToc'] == true && autoTocRule)) {
       throw const FormatException('请填写章节表达式，每条最多 1024 个字符');
     }
     return LocalImportOptions(
       customToc: value['customToc'],
+      autoTocRule: autoTocRule,
       chapterRule: chapter,
       volumeRule: volume,
       autoTitles: value['autoTitles'],

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'book_search.dart';
 import 'book_navigation.dart';
+import 'book_sources/book_source_reference.dart';
 export 'book_navigation.dart';
 
 /// A source-neutral book model shared by the Android legacy API and local tests.
@@ -18,6 +19,7 @@ class Novel {
     this.lastUpdate,
     this.chapterCount = 0,
     this.navigation,
+    this.source,
   });
 
   final int id;
@@ -32,6 +34,7 @@ class Novel {
   final String? lastUpdate;
   final int chapterCount;
   final BookNavigation? navigation;
+  final BookSourceRef? source;
 
   /// Public directory rows can target any preserved reading section. A resource
   /// missing from the authored TOC remains reachable by normal page turns.
@@ -155,6 +158,7 @@ class Novel {
     lastUpdate: lastUpdate,
     chapterCount: chapterCount,
     navigation: navigation,
+    source: source,
   );
 
   Novel withChapters(List<NovelChapter> items) => Novel(
@@ -170,6 +174,7 @@ class Novel {
     lastUpdate: lastUpdate,
     chapterCount: items.length,
     navigation: navigation,
+    source: source,
   );
 
   Map<String, Object?> toSnapshot() => {
@@ -184,6 +189,7 @@ class Novel {
     'lastUpdate': lastUpdate,
     'chapterCount': chapters.isNotEmpty ? chapters.length : chapterCount,
     if (navigation != null) 'navigation': navigation!.toJson(),
+    if (source != null) 'source': source!.toJson(),
   };
 
   factory Novel.fromSnapshot(Map<String, dynamic> value) {
@@ -212,6 +218,9 @@ class Novel {
       navigation: value['navigation'] == null
           ? null
           : BookNavigation.fromJson(value['navigation']),
+      source: value['source'] == null
+          ? null
+          : BookSourceRef.fromJson(value['source']),
     );
   }
 }
@@ -235,6 +244,8 @@ class NovelChapter {
     this.id = 0,
     this.volumeId = 0,
     this.volumeTitle = '',
+    this.sourceUrl,
+    this.sourceNextUrl,
   });
 
   final String title;
@@ -242,6 +253,8 @@ class NovelChapter {
   final int id;
   final int volumeId;
   final String volumeTitle;
+  final String? sourceUrl;
+  final String? sourceNextUrl;
 }
 
 /// Contiguous volume ranges keep the original, flat chapter indices stable.
@@ -285,6 +298,10 @@ abstract class NovelRepository {
   Future<Novel> detail(Novel novel);
   Future<List<NovelChapter>> chapters(int id);
   Future<String> chapterContent(int novelId, NovelChapter chapter);
+
+  /// Stops repository work that is no longer visible to the user. Repositories
+  /// without cancellable work keep the default no-op.
+  Future<void> cancelSearch() async {}
 
   Future<NovelPage> browse({
     NovelSort sort = NovelSort.lastUpdate,
@@ -348,6 +365,43 @@ bool sameNovelAuthor(String a, String b) {
   return key(a).isNotEmpty && key(a) == key(b);
 }
 
+/// Removes the author suffix some sources append to their book names.
+String sourceSearchTitle(String value) {
+  final cleaned = value
+      .replaceAll(RegExp(r'\s+作\s*者.*$'), '')
+      .replaceAll(RegExp(r'\s+\S+\s+著\s*$'), '')
+      .trim();
+  return cleaned.isEmpty ? value.trim() : cleaned;
+}
+
+/// Search rules usually expect the bare title, without the decorative
+/// brackets that some sources keep in their displayed name.
+String sourceSearchKeyword(String value) => sourceSearchTitle(
+  value,
+).replaceAll(RegExp(r'^[《〈「『\s]+|[》〉」』\s]+$'), '').trim();
+
+String sourceSearchTitleKey(String value) => sourceSearchKeyword(
+  value,
+).replaceAll(RegExp(r'[\s\u3000]+'), '').toLowerCase();
+
+String sourceAuthorName(String value) => value
+    .replaceAll(RegExp(r'^\s*作\s*者[:：\s]+'), '')
+    .replaceAll(RegExp(r'[\s\/|]+著\s*$'), '')
+    .trim();
+
+/// Source results often decorate authors as "作者：xxx" or "xxx 著", or
+/// concatenate co-authors. Keep the comparison tolerant without changing the
+/// stricter author grouping used by the rest of the library.
+bool sameSourceAuthor(String a, String b) {
+  String key(String name) => sourceAuthorName(
+    name,
+  ).replaceAll(RegExp(r'[\s\u3000]+'), '').toLowerCase();
+  final left = key(a);
+  final right = key(b);
+  if (left.isEmpty || right.isEmpty) return left == right;
+  return left == right || left.contains(right) || right.contains(left);
+}
+
 enum NovelSort {
   lastUpdate('最近更新', 'lastupdate'),
   postDate('最新入库', 'postdate'),
@@ -375,6 +429,7 @@ class NovelPage {
     this.totalPages,
     this.totalItems,
     this.searchFailures = const {},
+    this.sourceFailures = const {},
   });
   final List<Novel> items;
   final int page;
@@ -385,6 +440,9 @@ class NovelPage {
   /// Callers may complete these fields through another source; presentation
   /// exposes the missing scope, never the underlying response or exception.
   final Map<BookSearchField, Object> searchFailures;
+
+  /// A failed external source must not hide successful results from others.
+  final Map<String, Object> sourceFailures;
   bool get hasMore =>
       totalPages == null ? items.isNotEmpty : page < totalPages!;
 
@@ -403,6 +461,34 @@ class NovelPage {
       totalItems: items.length,
     );
   }
+}
+
+class NovelSearchProgress {
+  const NovelSearchProgress({
+    required this.items,
+    required this.completedSources,
+    required this.totalSources,
+  });
+
+  final List<Novel> items;
+  final int completedSources;
+  final int totalSources;
+}
+
+typedef NovelSearchProgressCallback =
+    void Function(NovelSearchProgress progress);
+
+/// Lets a search publish results while the remaining sources are still being
+/// queried. The final [NovelPage] keeps the existing repository contract.
+abstract interface class ProgressiveNovelSearch {
+  Future<NovelPage> searchFilteredPageProgressively(
+    String query, {
+    BookSearchField field = BookSearchField.all,
+    int page = 1,
+    bool refresh = false,
+    bool Function()? current,
+    NovelSearchProgressCallback? onProgress,
+  });
 }
 
 class DemoNovelRepository extends NovelRepository {

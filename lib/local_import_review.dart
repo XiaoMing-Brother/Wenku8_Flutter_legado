@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 import 'app_interactions.dart';
 import 'app_ui.dart';
+import 'feature_pages.dart';
 import 'library_state.dart';
 import 'local_books.dart';
 import 'local_import_batch.dart';
@@ -108,252 +109,222 @@ class _LocalImportReviewState extends State<LocalImportReview> {
   @override
   Widget build(BuildContext context) => PopScope<void>(
     canPop: !_busy,
-    child: Scaffold(
-      body: Atmosphere(
-        child: GlassHeaderLayout(
-          header: ArchiveHeaderBar(
-            leading: GlassIconButton(
-              icon: CupertinoIcons.back,
-              label: '返回',
-              onPressed: _busy ? null : () => Navigator.pop(context),
-            ),
-            title: const ArchiveRouteTitle(
-              title: '导入完成',
-              code: 'LOCAL / IMPORT',
-            ),
-          ),
-          body: Center(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 760),
-              child: ListView(
-                padding: EdgeInsets.fromLTRB(
-                  24,
-                  MediaQuery.paddingOf(context).top +
-                      FrostedHeader.toolbarHeight +
-                      24,
-                  24,
-                  MediaQuery.paddingOf(context).bottom + 32,
+    child: ArchiveFeaturePage(
+      title: '导入完成',
+      code: 'LOCAL / IMPORT RESULT',
+      canPop: !_busy,
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 760),
+          child: ListView(
+            padding: featurePadding(context),
+            children: [
+              AppText(
+                widget.report.summary,
+                style: const TextStyle(fontSize: 17, height: 1.6),
+              ),
+              if (_groups.isNotEmpty) ...[
+                const SizedBox(height: 24),
+                const ArchiveSection(title: '同系列分卷', code: 'REVIEW / MERGE'),
+                const SizedBox(height: 12),
+                const AppText(
+                  '确认后合并为一本书，也可以保留各卷独立显示。',
+                  style: TextStyle(height: 1.7),
                 ),
-                children: [
-                  AppText(
-                    widget.report.summary,
-                    style: const TextStyle(fontSize: 17, height: 1.6),
-                  ),
-                  if (_groups.isNotEmpty) ...[
-                    const SizedBox(height: 24),
-                    const ArchiveSection(
-                      title: '同系列分卷',
-                      code: 'REVIEW / MERGE',
-                    ),
-                    const SizedBox(height: 12),
-                    const AppText(
-                      '确认后合并为一本书，也可以保留各卷独立显示。',
-                      style: TextStyle(height: 1.7),
-                    ),
-                    for (final group in _groups)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 18),
-                        child: ContentPanel(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                for (final group in _groups)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 18),
+                    child: ContentPanel(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Row(
                             children: [
-                              Row(
-                                children: [
-                                  Expanded(
-                                    child: AppText(
-                                      group.title,
-                                      style: const TextStyle(
-                                        fontSize: 17,
-                                        height: 1.6,
-                                      ),
-                                    ),
-                                  ),
-                                  const SizedBox(width: 12),
-                                  if (_done.contains(group.seed))
-                                    const ArchiveIcon(
-                                      CupertinoIcons.checkmark_circle,
-                                    )
-                                  else
-                                    Semantics(
-                                      label: '合并 ${group.title}',
-                                      child: AppControls.toggle(
-                                        context,
-                                        key: ValueKey(
-                                          'import-group-${group.seed}',
-                                        ),
-                                        value: _selected.contains(group.seed),
-                                        onChanged: _busy || group.needsTarget
-                                            ? null
-                                            : (value) => setState(() {
-                                                if (value) {
-                                                  _selected.add(group.seed);
-                                                } else {
-                                                  _selected.remove(group.seed);
-                                                }
-                                              }),
-                                      ),
-                                    ),
-                                ],
-                              ),
-                              const SizedBox(height: 12),
-                              AppText(
-                                '${group.volumes.length} 卷${group.targetId == null ? '' : ' · 加入已有合订本'}',
-                                style: TextStyle(
-                                  color: Theme.of(
-                                    context,
-                                  ).colorScheme.onSurfaceVariant,
-                                ),
-                              ),
-                              const SizedBox(height: 8),
-                              for (final volume in group.volumes)
-                                Padding(
-                                  padding: const EdgeInsets.only(bottom: 6),
-                                  child: AppText(
-                                    '${volume.title} · ${widget.books.book(volume.bookId)!.title}',
-                                    style: const TextStyle(
-                                      fontSize: 13,
-                                      height: 1.6,
-                                    ),
-                                  ),
-                                ),
-                              if (_errors[group.seed] case final error?)
-                                AppText(
-                                  error,
-                                  style: TextStyle(
-                                    color: Theme.of(context).colorScheme.error,
+                              Expanded(
+                                child: AppText(
+                                  group.title,
+                                  style: const TextStyle(
+                                    fontSize: 17,
                                     height: 1.6,
                                   ),
                                 ),
-                              if (!_done.contains(group.seed))
-                                GlassTextButton(
-                                  key: ValueKey('import-edit-${group.seed}'),
-                                  onPressed: _busy ? null : () => _edit(group),
-                                  child: AppText(
-                                    group.needsTarget
-                                        ? '选择合订本并确认'
-                                        : '调整书名与分卷顺序',
+                              ),
+                              const SizedBox(width: 12),
+                              if (_done.contains(group.seed))
+                                const ArchiveIcon(
+                                  CupertinoIcons.checkmark_circle,
+                                )
+                              else
+                                Semantics(
+                                  label: '合并 ${group.title}',
+                                  child: AppControls.toggle(
+                                    context,
+                                    key: ValueKey('import-group-${group.seed}'),
+                                    value: _selected.contains(group.seed),
+                                    onChanged: _busy || group.needsTarget
+                                        ? null
+                                        : (value) => setState(() {
+                                            if (value) {
+                                              _selected.add(group.seed);
+                                            } else {
+                                              _selected.remove(group.seed);
+                                            }
+                                          }),
                                   ),
                                 ),
                             ],
                           ),
-                        ),
-                      ),
-                  ],
-                  if (widget.report.notices.isNotEmpty) ...[
-                    const SizedBox(height: 28),
-                    const ArchiveSection(
-                      title: '已导入 · 需要了解',
-                      code: 'IMPORT / NOTICE',
-                    ),
-                    for (final (index, notice) in widget.report.notices.indexed)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 12),
-                        child: ContentPanel(
-                          key: ValueKey('import-notice-$index'),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: [
-                              AppText(
-                                notice.name,
+                          const SizedBox(height: 12),
+                          AppText(
+                            '${group.volumes.length} 卷${group.targetId == null ? '' : ' · 加入已有合订本'}',
+                            style: TextStyle(
+                              color: Theme.of(
+                                context,
+                              ).colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          for (final volume in group.volumes)
+                            Padding(
+                              padding: const EdgeInsets.only(bottom: 6),
+                              child: AppText(
+                                '${volume.title} · ${widget.books.book(volume.bookId)!.title}',
                                 style: const TextStyle(
-                                  fontSize: 14,
-                                  height: 1.5,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                              const SizedBox(height: 10),
-                              AppText(
-                                notice.message,
-                                style: TextStyle(
                                   fontSize: 13,
                                   height: 1.6,
-                                  color: Theme.of(
-                                    context,
-                                  ).colorScheme.onSurfaceVariant,
                                 ),
                               ),
-                            ],
-                          ),
-                        ),
+                            ),
+                          if (_errors[group.seed] case final error?)
+                            AppText(
+                              error,
+                              style: TextStyle(
+                                color: Theme.of(context).colorScheme.error,
+                                height: 1.6,
+                              ),
+                            ),
+                          if (!_done.contains(group.seed))
+                            GlassTextButton(
+                              key: ValueKey('import-edit-${group.seed}'),
+                              onPressed: _busy ? null : () => _edit(group),
+                              child: AppText(
+                                group.needsTarget ? '选择合订本并确认' : '调整书名与分卷顺序',
+                              ),
+                            ),
+                        ],
                       ),
-                  ],
-                  if (widget.report.failures.isNotEmpty) ...[
-                    const SizedBox(height: 28),
-                    const ArchiveSection(
-                      title: '未导入的文件',
-                      code: 'IMPORT / RETRY',
                     ),
-                    for (final (index, failure)
-                        in widget.report.failures.indexed)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 12),
-                        child: ContentPanel(
-                          key: ValueKey('import-failure-$index'),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: [
-                              Row(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  const ArchiveIcon(
-                                    CupertinoIcons.doc_text,
-                                    size: 20,
-                                  ),
-                                  const SizedBox(width: 12),
-                                  Expanded(
-                                    child: AppText(
-                                      failure.name,
-                                      style: const TextStyle(
-                                        fontSize: 14,
-                                        height: 1.5,
-                                        fontWeight: FontWeight.w600,
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 12),
-                              AppText(
-                                failure.message,
-                                style: TextStyle(
-                                  fontSize: 13,
-                                  height: 1.6,
-                                  color: Theme.of(
-                                    context,
-                                  ).colorScheme.onSurfaceVariant,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                  ],
-                  const SizedBox(height: 28),
-                  GlassPillButton(
-                    key: const ValueKey('import-confirm-merge'),
-                    icon: CupertinoIcons.checkmark,
-                    label: _busy
-                        ? '正在合并'
-                        : _selected.isEmpty
-                        ? '完成'
-                        : '确认合并 ${_selected.length} 个系列',
-                    onPressed: _busy
-                        ? null
-                        : _selected.isEmpty
-                        ? () => Navigator.pop(context)
-                        : _merge,
                   ),
-                  if (_selected.isNotEmpty) ...[
-                    const SizedBox(height: 12),
-                    GlassTextButton(
-                      key: const ValueKey('import-keep-separate'),
-                      onPressed: _busy ? null : () => Navigator.pop(context),
-                      child: const AppText('暂不合并'),
+              ],
+              if (widget.report.notices.isNotEmpty) ...[
+                const SizedBox(height: 28),
+                const ArchiveSection(
+                  title: '已导入 · 需要了解',
+                  code: 'IMPORT / NOTICE',
+                ),
+                for (final (index, notice) in widget.report.notices.indexed)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 12),
+                    child: ContentPanel(
+                      key: ValueKey('import-notice-$index'),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          AppText(
+                            notice.name,
+                            style: const TextStyle(
+                              fontSize: 14,
+                              height: 1.5,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          const SizedBox(height: 10),
+                          AppText(
+                            notice.message,
+                            style: TextStyle(
+                              fontSize: 13,
+                              height: 1.6,
+                              color: Theme.of(
+                                context,
+                              ).colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
-                  ],
-                ],
+                  ),
+              ],
+              if (widget.report.failures.isNotEmpty) ...[
+                const SizedBox(height: 28),
+                const ArchiveSection(title: '未导入的文件', code: 'IMPORT / RETRY'),
+                for (final (index, failure) in widget.report.failures.indexed)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 12),
+                    child: ContentPanel(
+                      key: ValueKey('import-failure-$index'),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const ArchiveIcon(
+                                CupertinoIcons.doc_text,
+                                size: 20,
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: AppText(
+                                  failure.name,
+                                  style: const TextStyle(
+                                    fontSize: 14,
+                                    height: 1.5,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 12),
+                          AppText(
+                            failure.message,
+                            style: TextStyle(
+                              fontSize: 13,
+                              height: 1.6,
+                              color: Theme.of(
+                                context,
+                              ).colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+              ],
+              const SizedBox(height: 28),
+              GlassPillButton(
+                key: const ValueKey('import-confirm-merge'),
+                icon: CupertinoIcons.checkmark,
+                label: _busy
+                    ? '正在合并'
+                    : _selected.isEmpty
+                    ? '完成'
+                    : '确认合并 ${_selected.length} 个系列',
+                onPressed: _busy
+                    ? null
+                    : _selected.isEmpty
+                    ? () => Navigator.pop(context)
+                    : _merge,
               ),
-            ),
+              if (_selected.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                GlassTextButton(
+                  key: const ValueKey('import-keep-separate'),
+                  onPressed: _busy ? null : () => Navigator.pop(context),
+                  child: const AppText('暂不合并'),
+                ),
+              ],
+            ],
           ),
         ),
       ),

@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 
 import 'app_ui.dart';
 import 'app_interactions.dart';
+import 'book_sources/book_source_images.dart';
 import 'local_platform.dart';
 import 'legacy_transport.dart';
 import 'local_book_media.dart';
@@ -263,6 +264,9 @@ class ReaderIllustrationCache {
           ? await input
           : url.startsWith('wenku-local:')
           ? await LocalBookMedia.load(url)
+          : BookSourceImages.isMarker(url)
+          ? await offlineReader?.call(url) ??
+                await BookSourceImages.loadMarker(url)
           : await offlineReader?.call(url) ?? await _request(url);
       if (bytes.isEmpty || bytes.length > 8 * 1024 * 1024) {
         throw const FormatException('插图大小无效');

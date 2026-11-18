@@ -6,7 +6,7 @@ import 'app_typography.dart';
 import 'app_ui.dart';
 import 'archive_progress.dart';
 import 'book_documents.dart';
-import 'feature_pages.dart' show confirmNovelAction;
+import 'feature_pages.dart';
 import 'font_download.dart';
 import 'library_state.dart';
 import 'user_fonts.dart';
@@ -127,9 +127,9 @@ class _FontSettingsPageState extends State<FontSettingsPage> {
   Future<void> _delete(UserFont font) async {
     if (!await confirmNovelAction(
       context,
-      title: '移除这款字体？',
-      message: '已使用这款字体的位置会恢复默认，原始字体文件不会删除。',
-      confirmLabel: '移除字体',
+      title: '删除字体？',
+      message: '「${font.name}」会从本机字体库移除，已使用它的位置恢复默认，原始字体文件不会删除。',
+      confirmLabel: '删除字体',
       reduceMotion: widget.state.reduceMotion,
     )) {
       return;
@@ -140,15 +140,35 @@ class _FontSettingsPageState extends State<FontSettingsPage> {
   Future<void> _deleteDownloaded(DownloadableFont font) async {
     if (!await confirmNovelAction(
       context,
-      title: '删除已下载的${font.name}？',
+      title: '删除字体？',
       message:
-          '释放约 ${(font.bytes / 1048576).toStringAsFixed(1)} MiB 空间。使用这款字体的位置恢复默认，以后可重新下载。',
+          '「${font.name}」会释放约 ${(font.bytes / 1048576).toStringAsFixed(1)} MiB 空间；使用它的位置恢复默认，以后可重新下载。',
       confirmLabel: '删除字体',
       reduceMotion: widget.state.reduceMotion,
     )) {
       return;
     }
     await _perform(() => widget.state.removeUserFont(font.id));
+  }
+
+  Future<void> _openPageActions(BuildContext anchor) async {
+    final action = await showGlassMenu<String>(
+      context: anchor,
+      reduceMotion: widget.state.reduceMotion,
+      builder: (menu) => Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          GlassMenuItem(
+            label: '导入字体',
+            icon: CupertinoIcons.plus,
+            order: 0,
+            onPressed: () => Navigator.pop(menu, 'import'),
+          ),
+        ],
+      ),
+    );
+    if (mounted && action == 'import' && !busy) await _import();
   }
 
   Widget _selection({required bool reader}) {
@@ -280,117 +300,121 @@ class _FontSettingsPageState extends State<FontSettingsPage> {
       widget.state.readerSettingsChanges,
       widget.state.fonts,
     ]),
-    builder: (context, _) => Scaffold(
-      body: Atmosphere(
-        child: GlassHeaderLayout(
-          header: ArchiveHeaderBar(
-            leading: GlassIconButton(
-              icon: CupertinoIcons.back,
-              label: '返回',
-              onPressed: () => Navigator.pop(context),
+    builder: (context, _) => ArchiveFeaturePage(
+      title: '字体',
+      code: 'TYPE / FONTS',
+      actions: [
+        GlassMenuAnchor(
+          child: Builder(
+            builder: (anchor) => GlassIconButton(
+              key: const ValueKey('import-font'),
+              icon: CupertinoIcons.plus,
+              label: '字体操作',
+              onPressed: busy ? null : () => _openPageActions(anchor),
             ),
-            title: const ArchiveRouteTitle(
-              title: '字体',
-              code: 'TYPE / PERSONALIZE',
-            ),
-            actions: [
-              GlassIconButton(
-                key: const ValueKey('import-font'),
-                icon: CupertinoIcons.plus,
-                label: '导入字体',
-                onPressed: busy ? null : _import,
-              ),
-            ],
           ),
-          body: Align(
-            alignment: Alignment.topCenter,
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 680),
-              child: ListView(
-                cacheExtent: 0,
-                padding: EdgeInsets.fromLTRB(
-                  24,
-                  MediaQuery.paddingOf(context).top +
-                      FrostedHeader.toolbarHeight +
-                      20,
-                  24,
-                  MediaQuery.paddingOf(context).bottom + 36,
+        ),
+      ],
+      child: Align(
+        alignment: Alignment.topCenter,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 680),
+          child: ListView(
+            cacheExtent: 0,
+            padding: featurePadding(context),
+            children: [
+              if (!widget.readerOnly) ...[
+                _selection(reader: false),
+                const SizedBox(height: 16),
+              ],
+              _selection(reader: true),
+              const SizedBox(height: 10),
+              AppText(
+                '右上角可导入 TTF、OTF 字体，单款 32 MiB 以内。',
+                style: TextStyle(
+                  fontSize: 12,
+                  height: 1.6,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
                 ),
-                children: [
-                  if (!widget.readerOnly) ...[
-                    _selection(reader: false),
-                    const SizedBox(height: 16),
-                  ],
-                  _selection(reader: true),
-                  const SizedBox(height: 10),
-                  AppText(
-                    '右上角可导入 TTF、OTF 字体，单款 32 MiB 以内。',
+              ),
+              const SizedBox(height: 28),
+              const ArchiveSection(title: '可下载字体', code: 'TYPE / DOWNLOAD'),
+              const SizedBox(height: 14),
+              for (final font in downloadableFonts)
+                _DownloadableFontRow(
+                  key: ValueKey('downloadable-font-${font.id}'),
+                  font: font,
+                  fonts: widget.state.fonts,
+                  busy: busy,
+                  reduceMotion: widget.state.reduceMotion,
+                  onDownload: () =>
+                      _perform(() => widget.state.downloadReadingFont(font.id)),
+                  onDelete: () => _deleteDownloaded(font),
+                ),
+              if (widget.state.fonts.fonts.isNotEmpty) ...[
+                const SizedBox(height: 28),
+                const ArchiveSection(title: '我的字体', code: 'TYPE / INSTALLED'),
+                const SizedBox(height: 14),
+              ],
+              if ((error ?? widget.state.fontError) case final message?)
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  child: AppText(
+                    message,
                     style: TextStyle(
-                      fontSize: 12,
-                      height: 1.6,
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      color: Theme.of(context).colorScheme.error,
                     ),
                   ),
-                  const SizedBox(height: 28),
-                  const ArchiveSection(title: '可下载字体', code: 'TYPE / DOWNLOAD'),
-                  const SizedBox(height: 14),
-                  for (final font in downloadableFonts)
-                    _DownloadableFontRow(
-                      key: ValueKey('downloadable-font-${font.id}'),
-                      font: font,
-                      fonts: widget.state.fonts,
-                      busy: busy,
-                      reduceMotion: widget.state.reduceMotion,
-                      onDownload: () => _perform(
-                        () => widget.state.downloadReadingFont(font.id),
-                      ),
-                      onDelete: () => _deleteDownloaded(font),
-                    ),
-                  if (widget.state.fonts.fonts.isNotEmpty) ...[
-                    const SizedBox(height: 28),
-                    const ArchiveSection(title: '我的字体', code: 'TTF / OTF'),
-                    const SizedBox(height: 14),
-                  ],
-                  if ((error ?? widget.state.fontError) case final message?)
-                    Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 16),
-                      child: AppText(
-                        message,
-                        style: TextStyle(
-                          color: Theme.of(context).colorScheme.error,
+                ),
+              if (widget.state.fontError != null)
+                GlassTextButton(
+                  onPressed: busy
+                      ? null
+                      : () => _perform(widget.state.loadFonts),
+                  child: const AppText('重试读取字体'),
+                ),
+              for (final font in widget.state.fonts.fonts)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 14),
+                  child: ContentPanel(
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: AppText(
+                            font.name,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontWeight: FontWeight.w600),
+                          ),
                         ),
-                      ),
-                    ),
-                  if (widget.state.fontError != null)
-                    GlassTextButton(
-                      onPressed: busy
-                          ? null
-                          : () => _perform(widget.state.loadFonts),
-                      child: const AppText('重试读取字体'),
-                    ),
-                  for (final font in widget.state.fonts.fonts)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 12),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: AppText(
-                              font.name,
-                              style: const TextStyle(height: 1.6),
+                        const SizedBox(width: 12),
+                        GlassMenuAnchor(
+                          child: Builder(
+                            builder: (anchor) => CompactRowMenuButton(
+                              label: '${font.name} 更多操作',
+                              onPressed: () async {
+                                final action = await showGlassMenu<String>(
+                                  context: anchor,
+                                  reduceMotion: widget.state.reduceMotion,
+                                  builder: (menu) => GlassMenuItem(
+                                    label: '删除字体',
+                                    icon: CupertinoIcons.trash,
+                                    onPressed: () =>
+                                        Navigator.pop(menu, 'delete'),
+                                  ),
+                                );
+                                if (mounted && action == 'delete') {
+                                  await _delete(font);
+                                }
+                              },
                             ),
                           ),
-                          const SizedBox(width: 12),
-                          GlassIconButton(
-                            icon: CupertinoIcons.trash,
-                            label: '移除 ${font.name}',
-                            onPressed: busy ? null : () => _delete(font),
-                          ),
-                        ],
-                      ),
+                        ),
+                      ],
                     ),
-                ],
-              ),
-            ),
+                  ),
+                ),
+            ],
           ),
         ),
       ),
@@ -412,6 +436,19 @@ class _DownloadableFontRow extends StatelessWidget {
   final UserFontStore fonts;
   final bool busy, reduceMotion;
   final VoidCallback onDownload, onDelete;
+
+  Future<void> _openMenu(BuildContext anchor) async {
+    final action = await showGlassMenu<String>(
+      context: anchor,
+      reduceMotion: reduceMotion,
+      builder: (menu) => GlassMenuItem(
+        label: '删除已下载字体',
+        icon: CupertinoIcons.trash,
+        onPressed: () => Navigator.pop(menu, 'delete'),
+      ),
+    );
+    if (action == 'delete') onDelete();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -450,8 +487,7 @@ class _DownloadableFontRow extends StatelessWidget {
           ? onDelete
           : onDownload,
     );
-    final content = Padding(
-      padding: const EdgeInsets.symmetric(vertical: 12),
+    final content = ContentPanel(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -473,7 +509,7 @@ class _DownloadableFontRow extends StatelessWidget {
                       font.description,
                       style: TextStyle(
                         fontSize: 12,
-                        height: 1.5,
+                        height: 1.4,
                         color: scheme.onSurfaceVariant,
                       ),
                     ),
@@ -488,8 +524,8 @@ class _DownloadableFontRow extends StatelessWidget {
                               maxLines: 2,
                               overflow: TextOverflow.ellipsis,
                               style: TextStyle(
-                                fontSize: 11,
-                                height: 1.5,
+                                fontSize: 12,
+                                height: 1.4,
                                 color: scheme.onSurfaceVariant,
                               ),
                             )
@@ -501,8 +537,8 @@ class _DownloadableFontRow extends StatelessWidget {
                             ? '下载未完成，点击重试'
                             : '${font.sizeLabel} · 按需下载',
                         style: TextStyle(
-                          fontSize: 11,
-                          height: 1.5,
+                          fontSize: 12,
+                          height: 1.4,
                           color: scheme.onSurfaceVariant,
                         ),
                       ),
@@ -527,27 +563,40 @@ class _DownloadableFontRow extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 12),
-              ValueListenableBuilder<FontDownloadProgress?>(
-                valueListenable: fonts.downloadChanges,
-                // Progress never rebuilds the other font actions or previews.
-                builder: (context, progress, child) =>
-                    active ? action(progress) : child!,
-                child: active ? null : action(null),
-              ),
+              if (available)
+                GlassMenuAnchor(
+                  child: Builder(
+                    builder: (anchor) => CompactRowMenuButton(
+                      label: '${font.name} 更多操作',
+                      onPressed: () => _openMenu(anchor),
+                    ),
+                  ),
+                )
+              else
+                ValueListenableBuilder<FontDownloadProgress?>(
+                  valueListenable: fonts.downloadChanges,
+                  // Progress never rebuilds the other font actions or previews.
+                  builder: (context, progress, child) =>
+                      active ? action(progress) : child!,
+                  child: active ? null : action(null),
+                ),
             ],
           ),
         ],
       ),
     );
-    return reduceMotion
-        ? content
-        : AnimatedSize(
-            duration: const Duration(milliseconds: 260),
-            reverseDuration: const Duration(milliseconds: 220),
-            curve: Curves.easeOutCubic,
-            alignment: Alignment.topCenter,
-            child: content,
-          );
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 14),
+      child: reduceMotion
+          ? content
+          : AnimatedSize(
+              duration: const Duration(milliseconds: 260),
+              reverseDuration: const Duration(milliseconds: 220),
+              curve: Curves.easeOutCubic,
+              alignment: Alignment.topCenter,
+              child: content,
+            ),
+    );
   }
 }
 

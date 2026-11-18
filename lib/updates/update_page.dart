@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import '../app_interactions.dart';
 import '../app_ui.dart';
 import '../archive_progress.dart';
+import '../feature_pages.dart';
 import 'app_updates.dart';
 import 'release_highlights.dart';
 import 'release_markdown.dart';
@@ -173,16 +174,21 @@ class _AppUpdateMonitorState extends State<AppUpdateMonitor>
       return;
     }
     final release = service.release!;
-    final route = _AppUpdatePromptRoute(
-      release: release,
-      canDownload: service.asset != null,
-      appearance: GlassAppearance.of(overlay),
-      reduceMotion: MediaQuery.disableAnimationsOf(overlay),
-    );
+    final reduceMotion = MediaQuery.disableAnimationsOf(overlay);
     _promptOpen = true;
     try {
       FocusManager.instance.primaryFocus?.unfocus();
-      final answer = navigator.push<bool>(route);
+      final answer = await showJellySheet<bool>(
+        context: overlay,
+        barrierLabel: '稍后提醒',
+        reduceMotion: reduceMotion,
+        maxWidth: 440,
+        maxHeight: 640,
+        builder: (_) => _AppUpdatePromptSheet(
+          release: release,
+          canDownload: service.asset != null,
+        ),
+      );
       // Save only after actually presenting a prompt, not when a menu or a
       // background app prevented it. Dismissing outside also counts as later.
       try {
@@ -192,14 +198,12 @@ class _AppUpdateMonitorState extends State<AppUpdateMonitor>
           showNovelFeedback(overlay, '提醒偏好未保存，下次打开可能再次提示');
         }
       }
-      final accepted = await answer;
-      await route.completed;
-      if (!mounted || !navigator.mounted || accepted != true) return;
+      if (!mounted || !navigator.mounted || answer != true) return;
       unawaited(
         pushNovelPage<void>(
           navigator.overlay!.context,
           AppUpdatePage(updates: service),
-          reduceMotion: route.reduceMotion,
+          reduceMotion: reduceMotion,
         ),
       );
       // The button is explicit download consent, never installation consent.
@@ -266,164 +270,88 @@ class _AppUpdateMonitorState extends State<AppUpdateMonitor>
       AppUpdatesScope(updates: widget.updates, child: widget.child);
 }
 
-class _AppUpdatePromptRoute extends PopupRoute<bool>
-    with AppHapticModalBarrier<bool> {
-  _AppUpdatePromptRoute({
+class _AppUpdatePromptSheet extends StatelessWidget {
+  const _AppUpdatePromptSheet({
     required this.release,
     required this.canDownload,
-    required this.appearance,
-    required this.reduceMotion,
   });
   final AppRelease release;
   final bool canDownload;
-  final GlassAppearance appearance;
-  final bool reduceMotion;
 
   @override
-  Duration get transitionDuration =>
-      reduceMotion ? Duration.zero : NovelMotion.enter;
-  @override
-  Duration get reverseTransitionDuration =>
-      reduceMotion ? Duration.zero : NovelMotion.exit;
-  @override
-  bool get barrierDismissible => true;
-  @override
-  Color get barrierColor => Colors.black.withValues(alpha: .16);
-  @override
-  String get barrierLabel => '稍后提醒';
-
-  @override
-  Widget buildPage(
-    BuildContext context,
-    Animation<double> animation,
-    Animation<double> secondaryAnimation,
-  ) => GlassAppearance(
-    blur: appearance.blur,
-    opacity: appearance.opacity,
-    child: Material(
-      type: MaterialType.transparency,
-      child: SafeArea(
-        child: Padding(
-          padding:
-              const EdgeInsets.symmetric(horizontal: 20, vertical: 24) +
-              MediaQuery.viewInsetsOf(context),
-          child: Center(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 440, maxHeight: 640),
-              child: GlassOverlayTransition(
-                animation: animation,
-                kind: GlassOverlayKind.sheet,
-                reduceMotion: reduceMotion,
-                child: GlassOverlaySurface(
-                  key: const ValueKey('app-update-prompt'),
-                  child: Semantics(
-                    namesRoute: true,
-                    label: '发现新版本 ${release.version.name}',
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        Flexible(
-                          child: SingleChildScrollView(
-                            padding: const EdgeInsets.fromLTRB(24, 24, 24, 16),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                const ArchiveIcon(
-                                  CupertinoIcons.arrow_up_circle,
-                                  size: 28,
-                                  ambient: true,
-                                ),
-                                const SizedBox(height: 16),
-                                const AppText(
-                                  '发现新版本',
-                                  style: TextStyle(
-                                    fontSize: 22,
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                ),
-                                const SizedBox(height: 6),
-                                AppText(
-                                  '轻小说文库 ${release.version.name}',
-                                  style: TextStyle(
-                                    color: Theme.of(
-                                      context,
-                                    ).colorScheme.onSurfaceVariant,
-                                  ),
-                                ),
-                                const SizedBox(height: 20),
-                                ReleaseNotes(
-                                  release.notes.trim().isEmpty
-                                      ? '新版本已准备好，可以下载更新。'
-                                      : release.notes,
-                                  baseUri: release.page,
-                                ),
-                                const SizedBox(height: 8),
-                                AppText(
-                                  '选择稍后提醒，24 小时内不再提示此版本。',
-                                  style: TextStyle(
-                                    fontSize: 13,
-                                    height: 1.5,
-                                    color: Theme.of(
-                                      context,
-                                    ).colorScheme.onSurfaceVariant,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                        Padding(
-                          padding: const EdgeInsets.fromLTRB(24, 0, 24, 20),
-                          child: LayoutBuilder(
-                            builder: (context, constraints) {
-                              final later = GlassTextButton(
-                                key: const ValueKey('postpone-app-update'),
-                                onPressed: () => Navigator.pop(context, false),
-                                child: const AppText('稍后提醒'),
-                              );
-                              final update = GlassTextButton(
-                                key: const ValueKey('confirm-app-update'),
-                                onPressed: () => Navigator.pop(context, true),
-                                child: AppText(
-                                  canDownload ? '立即更新' : '查看更新',
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.w700,
-                                  ),
-                                ),
-                              );
-                              if (constraints.maxWidth < 300 ||
-                                  MediaQuery.textScalerOf(context).scale(14) >
-                                      19) {
-                                return Column(
-                                  crossAxisAlignment:
-                                      CrossAxisAlignment.stretch,
-                                  children: [
-                                    update,
-                                    const SizedBox(height: 4),
-                                    later,
-                                  ],
-                                );
-                              }
-                              return Row(
-                                children: [
-                                  Expanded(child: later),
-                                  const SizedBox(width: 12),
-                                  Expanded(child: update),
-                                ],
-                              );
-                            },
-                          ),
-                        ),
-                      ],
-                    ),
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.fromLTRB(24, 8, 24, 20),
+    child: Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Flexible(
+          child: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                ArchiveSection(
+                  title: '发现新版本',
+                  code: 'SYSTEM / UPDATE',
+                  subtitle: '文库阅读 ${release.version.name}',
+                ),
+                const SizedBox(height: 16),
+                ReleaseNotes(
+                  release.notes.trim().isEmpty
+                      ? '新版本已准备好，可以下载更新。'
+                      : release.notes,
+                  baseUri: release.page,
+                ),
+                const SizedBox(height: 12),
+                AppText(
+                  '选择稍后提醒，24 小时内不再提示此版本。',
+                  style: TextStyle(
+                    fontSize: 12,
+                    height: 1.4,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
                   ),
                 ),
-              ),
+              ],
             ),
           ),
         ),
-      ),
+        const SizedBox(height: 18),
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final later = GlassTextButton(
+              key: const ValueKey('postpone-app-update'),
+              onPressed: () => Navigator.pop(context, false),
+              child: const AppText('稍后提醒'),
+            );
+            final update = GlassTextButton(
+              key: const ValueKey('confirm-app-update'),
+              onPressed: () => Navigator.pop(context, true),
+              child: AppText(
+                canDownload ? '立即更新' : '查看更新',
+                style: const TextStyle(fontWeight: FontWeight.w700),
+              ),
+            );
+            if (constraints.maxWidth < 300 ||
+                MediaQuery.textScalerOf(context).scale(14) > 19) {
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  update,
+                  const SizedBox(height: 4),
+                  later,
+                ],
+              );
+            }
+            return Row(
+              children: [
+                Expanded(child: later),
+                const SizedBox(width: 12),
+                Expanded(child: update),
+              ],
+            );
+          },
+        ),
+      ],
     ),
   );
 }
@@ -441,222 +369,197 @@ class AppUpdatePage extends StatelessWidget {
 
   Widget _page(BuildContext context) {
     final service = updates;
-    final padding = MediaQuery.paddingOf(context);
     final version = service?.installed?.version ?? currentAppVersion;
     final build = service?.installed?.build ?? currentAppBuild;
     final available = service?.available ?? false;
-    return Scaffold(
-      body: Atmosphere(
-        child: GlassHeaderLayout(
-          header: ArchiveHeaderBar(
-            leading: GlassIconButton(
-              icon: CupertinoIcons.back,
-              label: '返回',
-              onPressed: () => Navigator.pop(context),
-            ),
-            title: const ArchiveRouteTitle(
-              title: '关于轻小说文库',
-              code: 'SYSTEM / ABOUT',
+    return ArchiveFeaturePage(
+      title: '关于文库阅读',
+      code: 'SYSTEM / ABOUT',
+      child: ListView(
+        key: const ValueKey('update-page-scroll'),
+        padding: featurePadding(context),
+        children: [
+          const ArchiveSection(title: '文库阅读', code: 'WENKU8 / FLUTTER'),
+          const SizedBox(height: 12),
+          AppText(
+            '当前版本 $version · 构建 $build',
+            key: const ValueKey('installed-app-version'),
+            style: TextStyle(
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
             ),
           ),
-          body: ListView(
-            key: const ValueKey('update-page-scroll'),
-            padding: EdgeInsets.fromLTRB(
-              24 + padding.left,
-              padding.top + FrostedHeader.toolbarHeight + 20,
-              24 + padding.right,
-              padding.bottom + 32,
-            ),
-            children: [
-              const ArchiveSection(title: '轻小说文库', code: 'WENKU8 / FLUTTER'),
-              const SizedBox(height: 12),
-              AppText(
-                '当前版本 $version · 构建 $build',
-                key: const ValueKey('installed-app-version'),
-                style: TextStyle(
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
-                ),
-              ),
-              const SizedBox(height: 24),
-              if (service != null && service.checksEnabled) ...[
-                ContentPanel(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
+          const SizedBox(height: 24),
+          if (service != null && service.checksEnabled) ...[
+            ContentPanel(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Row(
                     children: [
-                      Row(
-                        children: [
-                          const Expanded(
-                            child: AppText(
-                              '自动检查更新',
-                              style: TextStyle(fontWeight: FontWeight.w600),
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          AppControls.toggle(
-                            context,
-                            key: const ValueKey('automatic-update-check'),
-                            value: service.autoCheck,
-                            onChanged: (value) async {
-                              try {
-                                await service.setAutoCheck(value);
-                              } catch (_) {
-                                if (context.mounted) {
-                                  showNovelFeedback(context, '设置保存失败，请重试');
-                                }
-                              }
-                            },
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 8),
-                      AppText(
-                        service.packageUpdates
-                            ? '每次打开应用时检查新版本，下载与安装由你确认。'
-                            : '每次打开应用时检查对应平台的新版本，下载后需自行签名安装。',
-                        style: TextStyle(
-                          fontSize: 13,
-                          height: 1.5,
-                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      const Expanded(
+                        child: AppText(
+                          '自动检查更新',
+                          style: TextStyle(fontWeight: FontWeight.w600),
                         ),
                       ),
-                      const SizedBox(height: 12),
-                      GlassTextButton(
-                        key: const ValueKey('check-app-update'),
-                        onPressed: service.busy ? null : () => service.check(),
-                        child: AppText(service.checking ? '正在检查版本' : '检查更新'),
+                      const SizedBox(width: 12),
+                      AppControls.toggle(
+                        context,
+                        key: const ValueKey('automatic-update-check'),
+                        value: service.autoCheck,
+                        onChanged: (value) async {
+                          try {
+                            await service.setAutoCheck(value);
+                          } catch (_) {
+                            if (context.mounted) {
+                              showNovelFeedback(context, '设置保存失败，请重试');
+                            }
+                          }
+                        },
                       ),
-                      if (service.checking) ...[
-                        const SizedBox(height: 12),
-                        const SizedBox(
-                          height: 16,
-                          child: RefreshProgress(label: '正在检查版本'),
-                        ),
-                      ] else if (service.checked && !available) ...[
-                        const SizedBox(height: 12),
-                        AppText(
-                          service.release == null ? '暂未发布可用的正式版本' : '已是最新版本',
-                        ),
-                      ],
-                      if (service.checked && service.release != null) ...[
-                        const SizedBox(height: 8),
-                        AppText(
-                          '最新正式版 ${service.release!.version.name}',
-                          key: const ValueKey('latest-app-version'),
-                          style: TextStyle(
-                            fontSize: 13,
-                            color: Theme.of(
-                              context,
-                            ).colorScheme.onSurfaceVariant,
-                          ),
-                        ),
-                      ],
-                      if (service.error != null) ...[
-                        const SizedBox(height: 12),
-                        AppText(
-                          service.error!,
-                          key: const ValueKey('update-error'),
-                          style: TextStyle(
-                            color: Theme.of(context).colorScheme.error,
-                          ),
-                        ),
-                      ],
                     ],
                   ),
-                ),
-                if (available) ...[
-                  const SizedBox(height: 24),
-                  ArchiveSection(
-                    title: '发现新版本 ${service.release!.version.name}',
-                    code: 'GITHUB / RELEASE',
-                  ),
-                  const SizedBox(height: 14),
-                  ContentPanel(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        ReleaseNotes(
-                          service.release!.notes.isEmpty
-                              ? '此版本未提供更新说明。'
-                              : service.release!.notes,
-                          baseUri: service.release!.page,
-                        ),
-                        const SizedBox(height: 16),
-                        if (service.asset != null)
-                          _UpdateTransferAction(service: service)
-                        else if (service.packageUpdates)
-                          const AppText('此版本暂无适合本机的 APK。'),
-                        if (!service.packageUpdates)
-                          const AppText('请前往发布页下载对应安装包，签名后安装。升级前请备份阅读记录。'),
-                        GlassTextButton(
-                          onPressed: () => _open(
-                            context,
-                            () => service.openProjectPage(showRelease: true),
-                          ),
-                          child: const AppText('查看版本与下载入口'),
-                        ),
-                      ],
+                  const SizedBox(height: 8),
+                  AppText(
+                    service.packageUpdates
+                        ? '每次打开应用时检查新版本，下载与安装由你确认。'
+                        : '每次打开应用时检查对应平台的新版本，下载后需自行签名安装。',
+                    style: TextStyle(
+                      fontSize: 13,
+                      height: 1.5,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
                     ),
                   ),
+                  const SizedBox(height: 12),
+                  GlassTextButton(
+                    key: const ValueKey('check-app-update'),
+                    onPressed: service.busy ? null : () => service.check(),
+                    child: AppText(service.checking ? '正在检查版本' : '检查更新'),
+                  ),
+                  if (service.checking) ...[
+                    const SizedBox(height: 12),
+                    const SizedBox(
+                      height: 16,
+                      child: RefreshProgress(label: '正在检查版本'),
+                    ),
+                  ] else if (service.checked && !available) ...[
+                    const SizedBox(height: 12),
+                    AppText(service.release == null ? '暂未发布可用的正式版本' : '已是最新版本'),
+                  ],
+                  if (service.checked && service.release != null) ...[
+                    const SizedBox(height: 8),
+                    AppText(
+                      '最新正式版 ${service.release!.version.name}',
+                      key: const ValueKey('latest-app-version'),
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                  if (service.error != null) ...[
+                    const SizedBox(height: 12),
+                    AppText(
+                      service.error!,
+                      key: const ValueKey('update-error'),
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.error,
+                      ),
+                    ),
+                  ],
                 ],
-                const SizedBox(height: 28),
-              ],
-              CurrentReleaseCard(updates: service),
-              const SizedBox(height: 28),
-              const ArchiveSection(title: '重要说明', code: 'READ / BEFORE USE'),
-              const SizedBox(height: 14),
-              const ContentPanel(
-                key: ValueKey('app-important-notices'),
-                child: ReleaseNotes(projectImportantNotices),
               ),
-              const SizedBox(height: 28),
-              const ArchiveSection(title: '项目与许可', code: 'SOURCE / LICENSES'),
+            ),
+            if (available) ...[
+              const SizedBox(height: 24),
+              ArchiveSection(
+                title: '发现新版本 ${service.release!.version.name}',
+                code: 'GITHUB / RELEASE',
+              ),
               const SizedBox(height: 14),
               ContentPanel(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    const AppText(
-                      '公开源码遵循仓库许可证；第三方组件、字体及其贡献者的版权与许可分别保留。',
-                      style: TextStyle(height: 1.6),
+                    ReleaseNotes(
+                      service.release!.notes.isEmpty
+                          ? '此版本未提供更新说明。'
+                          : service.release!.notes,
+                      baseUri: service.release!.page,
                     ),
-                    const SizedBox(height: 12),
-                    const AppText(
-                      '小说正文、封面和插图的权利属于各自权利人。',
-                      style: TextStyle(height: 1.6),
-                    ),
-                    const SizedBox(height: 12),
-                    const AppText(
-                      '可下载字体遵循 SIL OFL 1.1；在线语音协议适配参考 rany2/edge-tts，遵循 LGPL v3。第三方组件的版权与完整授权分别保留在许可页中。',
-                      style: TextStyle(height: 1.6),
-                    ),
+                    const SizedBox(height: 16),
+                    if (service.asset != null)
+                      _UpdateTransferAction(service: service)
+                    else if (service.packageUpdates)
+                      const AppText('此版本暂无适合本机的 APK。'),
+                    if (!service.packageUpdates)
+                      const AppText('请前往发布页下载对应安装包，签名后安装。升级前请备份阅读记录。'),
                     GlassTextButton(
-                      key: const ValueKey('app-open-source-licenses'),
-                      onPressed: () => showLicensePage(
-                        context: context,
-                        applicationName: '轻小说文库',
-                        applicationVersion: currentAppVersion,
-                        applicationLegalese:
-                            'Copyright © 2026 Wenku8 Flutter contributors',
+                      onPressed: () => _open(
+                        context,
+                        () => service.openProjectPage(showRelease: true),
                       ),
-                      child: const AppText('开源许可与字体授权'),
+                      child: const AppText('查看版本与下载入口'),
                     ),
-                    if (service != null) ...[
-                      const SizedBox(height: 12),
-                      GlassTextButton(
-                        key: const ValueKey('app-project-download'),
-                        onPressed: () =>
-                            _open(context, () => service.openProjectPage()),
-                        child: AppText(
-                          service.checksEnabled ? '项目介绍与下载' : '项目介绍',
-                        ),
-                      ),
-                    ],
                   ],
                 ),
               ),
             ],
+            const SizedBox(height: 28),
+          ],
+          CurrentReleaseCard(updates: service),
+          const SizedBox(height: 28),
+          const ArchiveSection(title: '重要说明', code: 'READ / BEFORE USE'),
+          const SizedBox(height: 14),
+          const ContentPanel(
+            key: ValueKey('app-important-notices'),
+            child: ReleaseNotes(projectImportantNotices),
           ),
-        ),
+          const SizedBox(height: 28),
+          const ArchiveSection(title: '项目与许可', code: 'SOURCE / LICENSES'),
+          const SizedBox(height: 14),
+          ContentPanel(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const AppText(
+                  '公开源码遵循仓库许可证；第三方组件、字体及其贡献者的版权与许可分别保留。',
+                  style: TextStyle(height: 1.6),
+                ),
+                const SizedBox(height: 12),
+                const AppText(
+                  '小说正文、封面和插图的权利属于各自权利人。',
+                  style: TextStyle(height: 1.6),
+                ),
+                const SizedBox(height: 12),
+                const AppText(
+                  '可下载字体遵循 SIL OFL 1.1；在线语音协议适配参考 rany2/edge-tts，遵循 LGPL v3。第三方组件的版权与完整授权分别保留在许可页中。',
+                  style: TextStyle(height: 1.6),
+                ),
+                GlassTextButton(
+                  key: const ValueKey('app-open-source-licenses'),
+                  onPressed: () => showLicensePage(
+                    context: context,
+                    applicationName: '文库阅读',
+                    applicationVersion: currentAppVersion,
+                    applicationLegalese:
+                        'Copyright © 2026 Wenku8 Flutter contributors',
+                  ),
+                  child: const AppText('开源许可与字体授权'),
+                ),
+                if (service != null) ...[
+                  const SizedBox(height: 12),
+                  GlassTextButton(
+                    key: const ValueKey('app-project-download'),
+                    onPressed: () =>
+                        _open(context, () => service.openProjectPage()),
+                    child: AppText(service.checksEnabled ? '项目介绍与下载' : '项目介绍'),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }

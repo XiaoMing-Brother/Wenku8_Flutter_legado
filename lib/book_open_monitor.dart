@@ -64,16 +64,16 @@ class _BookOpenMonitorState extends State<BookOpenMonitor>
         context: context,
         reduceMotion: widget.library.reduceMotion,
         builder: (sheet) => Padding(
-          padding: const EdgeInsets.all(24),
+          padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              const AppText(
-                '保存到本地书库',
-                style: TextStyle(fontSize: 21, fontWeight: FontWeight.w600),
+              const ArchiveSection(
+                title: '保存到本地书库',
+                code: 'LIBRARY / LOCAL',
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 16),
               AppText(
                 request.name,
                 maxLines: 2,

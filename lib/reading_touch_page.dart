@@ -82,9 +82,9 @@ class _ReadingTouchContentState extends State<ReadingTouchContent> {
   Future<void> _clear() async {
     final confirmed = await confirmNovelAction(
       context,
-      title: '清空触摸指纹？',
-      message: '竖屏和横屏的触碰次数都会清空，阅读记录不受影响。',
-      confirmLabel: '清空',
+      title: '删除触摸指纹？',
+      message: '竖屏和横屏记录的触碰次数会从本机移除，阅读记录不受影响。',
+      confirmLabel: '删除触摸指纹',
       reduceMotion: MediaQuery.disableAnimationsOf(context),
     );
     if (confirmed != true || !mounted) return;

@@ -70,7 +70,7 @@ Widget _localLibraryHeader(
           onPressed: () => Navigator.pop(context),
         ),
       const Expanded(
-        child: ArchiveMasthead(title: '本地', code: '03 / LOCAL ARCHIVE'),
+        child: ArchiveMasthead(title: '本地', code: 'LOCAL / LIBRARY'),
       ),
       GlassMenuAnchor(
         child: Builder(

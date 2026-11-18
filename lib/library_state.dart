@@ -34,6 +34,7 @@ import 'reader_underline.dart';
 import 'reader_annotation_range.dart';
 import 'reading_activity.dart';
 import 'reading_moments.dart';
+import 'pending_book.dart';
 export 'reading_entry.dart';
 
 class ReadingPosition {
@@ -340,6 +341,18 @@ class LibraryState extends ChangeNotifier {
           .whereType<int>()
           .where((id) => id > 0 && !isLocalBook(id)),
     );
+    if (_prefs.get(pendingBooksPreferenceKey) case final String record) {
+      try {
+        for (final pending in decodePendingBooks(record)) {
+          if (!_shelf.contains(pending.id)) continue;
+          _pendingBooks[pending.id] = pending;
+          _known[pending.id] = pending.toNovel();
+          _added.putIfAbsent(pending.id, () => pending.addedAt);
+        }
+      } on FormatException {
+        // Keep the shelf usable even if one pending record is damaged.
+      }
+    }
     _hiddenHistory.addAll(
       _preferenceStrings(
         _prefs.get('reading_history_hidden'),
@@ -361,10 +374,13 @@ class LibraryState extends ChangeNotifier {
       }
       if (key.startsWith('shelf_added_')) {
         final id = int.tryParse(key.substring('shelf_added_'.length));
+        if (id != null && isPendingBook(id)) continue;
         final value = _prefs.get(key);
         if (id != null && value is int) _added[id] = value;
       }
       if (key.startsWith('novel_meta_')) {
+        final id = int.tryParse(key.substring('novel_meta_'.length));
+        if (id != null && isPendingBook(id)) continue;
         try {
           final novel = Novel.fromSnapshot(
             jsonDecode(_prefs.getString(key)!) as Map<String, dynamic>,
@@ -504,7 +520,7 @@ class LibraryState extends ChangeNotifier {
       'finished' => 'finished',
       _ => 'all',
     };
-    _shelfLayout = BookCollectionMode.parseOrDefault(
+    _shelfLayout = BookCollectionMode.parseShelfOrDefault(
       _prefs.get('shelfLayout'),
     ).storageValue;
     _shelfGridDensity = BookGridDensity.parseOrAuto(
@@ -681,6 +697,7 @@ class LibraryState extends ChangeNotifier {
   final Set<int> _hiddenHistory = {};
   final Set<int> _hiddenLocalBooks = {};
   final Map<int, Novel> _known = {};
+  final Map<int, PendingBook> _pendingBooks = {};
   final Map<int, Novel> _persistedNovels = {};
   final Map<int, int> _chapters = {};
   final Map<int, ReadingPosition> _positions = {};
@@ -754,7 +771,7 @@ class LibraryState extends ChangeNotifier {
   String _shelfSort = 'recentRead';
   String _shelfFilter = 'all';
   String _shelfSourceFilter = 'all';
-  String _shelfLayout = 'shelf';
+  String _shelfLayout = 'shelfOnly';
   BookGridDensity _shelfGridDensity = const BookGridDensity.auto();
   BookShelfPreferences _shelfPreferences =
       const BookShelfPreferences.defaults();
@@ -1038,6 +1055,7 @@ class LibraryState extends ChangeNotifier {
   bool contains(int id) => _shelf.contains(id);
   int chapterFor(int id) => _chapters[id] ?? _positions[id]?.chapter ?? 0;
   Novel? cachedNovel(int id) => _known[id];
+  PendingBook? pendingBook(int id) => _pendingBooks[id];
   ReadingPosition? positionFor(int id) => _positions[id];
   List<ReaderBookmark> bookmarksFor(int id) =>
       List.unmodifiable(_bookmarks[id] ?? const <ReaderBookmark>[]);
@@ -1151,7 +1169,6 @@ class LibraryState extends ChangeNotifier {
       _chapters.containsKey(id) || _positions.containsKey(id);
   int addedAt(int id) => _added[id] ?? 0;
   int shelfRevision(int id) => _shelfRevisions[id] ?? 0;
-  Map<int, int> get shelfRevisions => Map.unmodifiable(_shelfRevisions);
   int lastReadAt(int id) => _positions[id]?.updatedAt ?? 0;
 
   bool finishedReading(Novel novel) {
@@ -1547,6 +1564,35 @@ class LibraryState extends ChangeNotifier {
   Set<String> hiddenReaderLanguagesFor(int id) =>
       _bookReaderStyles[id]?.hiddenLanguages ?? const {};
   String? onlyReaderLanguageFor(int id) => _bookReaderStyles[id]?.onlyLanguage;
+  bool replaceRulesOverriddenFor(int id) =>
+      _bookReaderStyles[id]?.replaceRulesEnabled != null;
+  bool replaceRulesEnabledFor(int id, {required bool fallback}) =>
+      _bookReaderStyles[id]?.replaceRulesEnabled ?? fallback;
+
+  Future<void> setReplaceRulesEnabled(int id, bool enabled) async {
+    if (_restoreBarrier case final barrier?) {
+      return barrier.future.then((_) => setReplaceRulesEnabled(id, enabled));
+    }
+    final style =
+        _bookReaderStyles[id] ??
+        ReaderBookStyle(
+          preferences: _readerPreferences,
+          fontSize: _fontSize,
+          lineHeight: _lineHeight,
+          typeface: _readerTypeface,
+          enabled: false,
+        );
+    await _setBookReaderStyle(id, style.copyWith(replaceRulesEnabled: enabled));
+  }
+
+  Future<void> clearReplaceRulesOverride(int id) async {
+    if (_restoreBarrier case final barrier?) {
+      return barrier.future.then((_) => clearReplaceRulesOverride(id));
+    }
+    final style = _bookReaderStyles[id];
+    if (style == null || style.replaceRulesEnabled == null) return;
+    await _setBookReaderStyle(id, style.copyWith(replaceRulesEnabled: null));
+  }
 
   Future<void> setHiddenReaderLanguages(
     int id,
@@ -2398,7 +2444,7 @@ class LibraryState extends ChangeNotifier {
   }
 
   /// One transactional merge/notification rather than rebuilding the shelf
-  /// once per imported cloud/legacy ID. Reading records are never overwritten.
+  /// once per imported legacy ID. Reading records are never overwritten.
   Future<void> addShelfIds(Iterable<int> values) async {
     final ids = values.where((id) => id > 0 && !isLocalBook(id)).toSet();
     if (_restoreBarrier case final barrier?) {
@@ -2423,53 +2469,114 @@ class LibraryState extends ChangeNotifier {
     });
   }
 
-  Future<void> applyCloudShelf({
-    required Set<int> add,
-    required Set<int> remove,
-    required Map<int, int> expectedRevisions,
-  }) {
-    if (_restoreBarrier case final barrier?) {
-      return barrier.future.then(
-        (_) => applyCloudShelf(
-          add: add,
-          remove: remove,
-          expectedRevisions: expectedRevisions,
-        ),
-      );
-    }
-    return _queuePositionWrite(() async {
-      final next = {..._shelf};
-      final now = DateTime.now().millisecondsSinceEpoch;
-      final added = <int>{};
-      for (final id in {...add, ...remove}) {
-        if (id <= 0 ||
-            isLocalBook(id) ||
-            shelfRevision(id) != (expectedRevisions[id] ?? 0)) {
-          continue;
-        }
-        if (add.contains(id)) {
-          if (next.add(id)) added.add(id);
-        } else {
-          next.remove(id);
-        }
+  /// Adds imported book list rows in one preference write. Each row keeps a
+  /// reserved identity until the user opens it and a source is matched.
+  Future<int> addPendingShelfBooks(Iterable<PendingBook> values) async {
+    final candidates = <int, PendingBook>{};
+    for (final book in values) {
+      if (!isPendingBook(book.id)) continue;
+      if (_pendingBooks.containsKey(book.id)) {
+        if (_shelf.contains(book.id)) continue;
+      } else if (_shelf.contains(book.id) && _known[book.id] != null) {
+        continue;
       }
-      if (setEquals(next, _shelf)) return;
-      final changed = {...next.difference(_shelf), ..._shelf.difference(next)};
+      candidates[book.id] = book;
+    }
+    if (candidates.isEmpty) return 0;
+    if (_restoreBarrier case final barrier?) {
+      await barrier.future;
+      return addPendingShelfBooks(candidates.values);
+    }
+    var added = 0;
+    await _queuePositionWrite(() async {
+      final merged = {..._pendingBooks, ...candidates};
+      final record = encodePendingBooks(merged.values);
+      final shelf = {..._shelf, ...candidates.keys};
       await _commitLibraryRecords({
-        'shelf': next.map((id) => '$id').toList(),
-        for (final id in added) 'shelf_added_$id': now,
+        'shelf': shelf.map((id) => '$id').toList(),
+        pendingBooksPreferenceKey: record,
       });
       _shelf
         ..clear()
-        ..addAll(next);
-      for (final id in added) {
-        _added[id] = now;
+        ..addAll(shelf);
+      _pendingBooks
+        ..clear()
+        ..addAll(merged);
+      for (final entry in candidates.entries) {
+        _added[entry.key] = entry.value.addedAt;
+        _known[entry.key] = entry.value.toNovel();
+        _shelfRevisions[entry.key] = shelfRevision(entry.key) + 1;
       }
-      for (final id in changed) {
-        _shelfRevisions[id] = shelfRevision(id) + 1;
-      }
+      added = candidates.length;
       if (!_disposed) notifyListeners();
     });
+    return added;
+  }
+
+  /// Replaces one pending shelf row with the readable book chosen by the user.
+  /// The original shelf position, timestamp and category are preserved.
+  Future<void> replacePendingShelfBook(PendingBook pending, Novel novel) async {
+    if (!_pendingBooks.containsKey(pending.id) ||
+        !_shelf.contains(pending.id) ||
+        novel.id <= 0 ||
+        isLocalBook(novel.id) ||
+        novel.id == pending.id) {
+      return;
+    }
+    if (_restoreBarrier case final barrier?) {
+      await barrier.future;
+      return replacePendingShelfBook(pending, novel);
+    }
+    final group = organization.groupOf(pending.id);
+    await _queuePositionWrite(() async {
+      final record = encodePendingBooks(
+        _pendingBooks.values.where((book) => book.id != pending.id),
+      );
+      final snapshot = _novelSnapshot(novel);
+      final timestamp =
+          _added[novel.id] ??
+          _added[pending.id] ??
+          DateTime.now().millisecondsSinceEpoch;
+      final shelf = {..._shelf}
+        ..remove(pending.id)
+        ..add(novel.id);
+      try {
+        await _commitLibraryRecords({
+          'shelf': shelf.map((id) => '$id').toList(),
+          'shelf_added_${novel.id}': timestamp,
+          'novel_meta_${novel.id}': ?snapshot,
+          'novel_meta_${pending.id}': null,
+          'shelf_added_${pending.id}': null,
+          pendingBooksPreferenceKey: record,
+        });
+      } catch (_) {
+        if (snapshot != null && identical(_persistedNovels[novel.id], novel)) {
+          _persistedNovels.remove(novel.id);
+        }
+        rethrow;
+      }
+      _shelf
+        ..clear()
+        ..addAll(shelf);
+      _pendingBooks.remove(pending.id);
+      _added
+        ..remove(pending.id)
+        ..[novel.id] = timestamp;
+      _known
+        ..remove(pending.id)
+        ..[novel.id] = novel;
+      _shelfRevisions[pending.id] = shelfRevision(pending.id) + 1;
+      _shelfRevisions[novel.id] = shelfRevision(novel.id) + 1;
+      if (!_disposed) notifyListeners();
+    });
+    if (group != LocalLibraryPreferences.unfiled) {
+      try {
+        await organization.assign(novel.id, group);
+      } on Object {
+        // The book is already readable; a failed category copy is recoverable
+        // from the shelf menu.
+      }
+    }
   }
 
   Future<void> setShelfMembership(
@@ -2492,6 +2599,7 @@ class LibraryState extends ChangeNotifier {
     present = present && !isLocalBook(id);
     await _queuePositionWrite(() async {
       final changedMembership = contains(id) != present;
+      final droppingPending = !present && isPendingBook(id);
       final shelf = {..._shelf};
       if (present) {
         shelf.add(id);
@@ -2503,12 +2611,37 @@ class LibraryState extends ChangeNotifier {
                 ? restoredAddedAt
                 : DateTime.now().millisecondsSinceEpoch
           : _added[id];
-      final snapshot = novel == null ? null : _novelSnapshot(novel);
+      final restoringPending =
+          present &&
+          isPendingBook(id) &&
+          novel != null &&
+          !_pendingBooks.containsKey(id);
+      final restoredPending = restoringPending
+          ? PendingBook.fromNovel(
+              novel,
+              addedAt: timestamp ?? DateTime.now().millisecondsSinceEpoch,
+            )
+          : null;
+      final pendingRecord = droppingPending
+          ? encodePendingBooks(
+              _pendingBooks.values.where((book) => book.id != id),
+            )
+          : restoredPending == null
+          ? null
+          : encodePendingBooks([..._pendingBooks.values, restoredPending]);
+      final snapshot = novel == null || isPendingBook(id)
+          ? null
+          : _novelSnapshot(novel);
       try {
         await _commitLibraryRecords({
           if (changedMembership) 'shelf': shelf.map((id) => '$id').toList(),
           if (present && timestamp != null) 'shelf_added_$id': timestamp,
-          'novel_meta_$id': ?snapshot,
+          if (droppingPending) 'shelf_added_$id': null,
+          pendingBooksPreferenceKey: ?pendingRecord,
+          if (droppingPending)
+            'novel_meta_$id': null
+          else
+            'novel_meta_$id': ?snapshot,
         });
       } catch (_) {
         if (novel != null && identical(_persistedNovels[id], novel)) {
@@ -2520,9 +2653,19 @@ class LibraryState extends ChangeNotifier {
         ..clear()
         ..addAll(shelf);
       if (present && timestamp != null) _added[id] = timestamp;
+      if (droppingPending) {
+        _pendingBooks.remove(id);
+        _known.remove(id);
+        _persistedNovels.remove(id);
+        _added.remove(id);
+      }
+      if (restoredPending != null) _pendingBooks[id] = restoredPending;
       if (novel != null) _known[id] = novel;
       if (changedMembership) _shelfRevisions[id] = shelfRevision(id) + 1;
-      if (!_disposed && (changedMembership || novel != null)) notifyListeners();
+      if (!_disposed &&
+          (changedMembership || novel != null || droppingPending)) {
+        notifyListeners();
+      }
     });
   }
 
@@ -3344,9 +3487,13 @@ class LibraryState extends ChangeNotifier {
     'localTxtEncoding': organization.encoding,
     if (_prefs.containsKey(LocalImportOptions.preferenceKey))
       LocalImportOptions.preferenceKey: organization.importOptions.encode(),
-    for (final entry in _added.entries) 'shelf_added_${entry.key}': entry.value,
+    for (final entry in _added.entries)
+      if (!isPendingBook(entry.key)) 'shelf_added_${entry.key}': entry.value,
     for (final entry in _known.entries)
-      'novel_meta_${entry.key}': jsonEncode(entry.value.toSnapshot()),
+      if (!isPendingBook(entry.key))
+        'novel_meta_${entry.key}': jsonEncode(entry.value.toSnapshot()),
+    if (_pendingBooks.isNotEmpty)
+      pendingBooksPreferenceKey: encodePendingBooks(_pendingBooks.values),
     for (final entry in _chapters.entries) 'chapter_${entry.key}': entry.value,
     for (final entry in _positions.entries)
       'reading_position_${entry.key}': jsonEncode(entry.value.toJson()),
@@ -3433,6 +3580,22 @@ class LibraryState extends ChangeNotifier {
               .where(isLocalBook),
         };
         final changed = <String, Object>{};
+        final restoredPending = <int, PendingBook>{};
+        if (records[pendingBooksPreferenceKey] case final String record) {
+          try {
+            for (final pending in decodePendingBooks(record)) {
+              if (shelf.contains(pending.id)) {
+                restoredPending[pending.id] = pending;
+              }
+            }
+          } on FormatException {
+            // The rest of the restored library remains usable.
+          }
+        }
+        final mergedPending = {
+          for (final entry in {..._pendingBooks, ...restoredPending}.entries)
+            if (shelf.contains(entry.key)) entry.key: entry.value,
+        };
         final incomingActivity = records[ReadingActivityStore.preferenceKey];
         final incomingMoments = records[ReadingMomentsStore.preferenceKey];
         if (incomingMoments is String) {
@@ -3605,11 +3768,18 @@ class LibraryState extends ChangeNotifier {
         changed['reading_history_hidden'] = hidden.map((id) => '$id').toList();
         changed['local_shelf_hidden'] = hiddenLocal.map((id) => '$id').toList();
         changed['recentSearches'] = searches;
+        if (mergedPending.isNotEmpty) {
+          changed[pendingBooksPreferenceKey] = encodePendingBooks(
+            mergedPending.values,
+          );
+        }
         if (importPreferences) {
           for (final key in backupPreferenceKeys) {
             if (records[key] case final value?) {
               // Local layout joins the transaction below under its own queue.
-              if (key != 'localShelfContent') changed[key] = value;
+              if (key != 'localShelfContent') {
+                changed[key] = value;
+              }
             }
           }
           if (restoredBlockedTags != null) {
@@ -3689,6 +3859,15 @@ class LibraryState extends ChangeNotifier {
         _persistedNovels
           ..clear()
           ..addAll(known);
+        _persistedNovels.removeWhere((id, _) => isPendingBook(id));
+        _pendingBooks
+          ..clear()
+          ..addAll(mergedPending);
+        for (final pending in mergedPending.values) {
+          if (!shelf.contains(pending.id)) continue;
+          _known[pending.id] = pending.toNovel();
+          _added[pending.id] = pending.addedAt;
+        }
         _chapters
           ..clear()
           ..addAll(chapters);
@@ -3764,7 +3943,7 @@ class LibraryState extends ChangeNotifier {
             _shelfSourceFilter = value;
           }
           if (records['shelfLayout'] case final String value) {
-            _shelfLayout = BookCollectionMode.parseOrDefault(
+            _shelfLayout = BookCollectionMode.parseShelfOrDefault(
               value,
             ).storageValue;
           }
@@ -3910,7 +4089,7 @@ class LibraryState extends ChangeNotifier {
     return _mergeBookmarkMetadata(current, incoming);
   }
 
-  Future<void> _commitLibraryRecords(Map<String, Object> changes) async {
+  Future<void> _commitLibraryRecords(Map<String, Object?> changes) async {
     changes.removeWhere(
       (key, value) => jsonEncode(_prefs.get(key)) == jsonEncode(value),
     );

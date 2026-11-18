@@ -7,7 +7,7 @@ void registerAppLicenses() {
   _registered = true;
   LicenseRegistry.addLicense(() async* {
     yield LicenseEntryWithLineBreaks(const [
-      'Wenku8 Flutter · 公开源码',
+      '文库阅读 · 公开源码',
     ], await rootBundle.loadString('assets/licenses/GPL-3.0.txt'));
     yield LicenseEntryWithLineBreaks(const [
       'Source Han Serif CN / TW · Adobe',
@@ -38,6 +38,9 @@ void registerAppLicenses() {
     ], await rootBundle.loadString('assets/licenses/libmobi.txt'));
     for (final item in const {
       'jsoup · Jonathan Hedley': 'jsoup',
+      'OkHttp · Square, Inc.': 'okhttp',
+      'JsonPath · Jayway': 'json-path',
+      'Rhino · Mozilla and contributors': 'rhino',
       'commonmark-java · Atlassian': 'commonmark',
       'PDFBox Android · Apache Software Foundation / Tom Roush': 'pdfbox',
       'PDFBox / FontBox notices': 'pdfbox-notice',

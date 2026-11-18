@@ -95,6 +95,15 @@ class _IllustrationLayoutPageState extends State<IllustrationLayoutPage> {
   }
 
   Future<void> _remove(IllustrationPlacement placement) async {
+    if (!await confirmNovelAction(
+      context,
+      title: '删除插图位置？',
+      message: '仅移除正文中的排版位置，卷末原图和正文保留。',
+      confirmLabel: '删除插图位置',
+      reduceMotion: widget.state.reduceMotion,
+    )) {
+      return;
+    }
     try {
       await widget.state.removeIllustration(widget.novel.id, placement.id);
     } catch (_) {
@@ -116,17 +125,29 @@ class _IllustrationLayoutPageState extends State<IllustrationLayoutPage> {
       reduceMotion: widget.state.reduceMotion,
       heightFactor: .78,
       builder: (sheet) => ListView.builder(
-        padding: const EdgeInsets.all(24),
-        itemCount: ids.length,
-        itemBuilder: (_, index) => GlassTextButton(
-          onPressed: () => Navigator.pop(sheet, ids[index]),
-          child: AppText(
-            source.paragraphs[ids[index]],
-            maxLines: 3,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(fontSize: 13, height: 1.65),
-          ),
-        ),
+        padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
+        itemCount: ids.length + 1,
+        itemBuilder: (_, index) {
+          if (index == 0) {
+            return const Padding(
+              padding: EdgeInsets.only(bottom: 12),
+              child: ArchiveSection(
+                title: '选择段落',
+                code: 'ILLUSTRATIONS / ANCHOR',
+              ),
+            );
+          }
+          final id = ids[index - 1];
+          return GlassTextButton(
+            onPressed: () => Navigator.pop(sheet, id),
+            child: AppText(
+              source.paragraphs[id],
+              maxLines: 3,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 13, height: 1.65),
+            ),
+          );
+        },
       ),
     );
     if (mounted && selected != null) {

@@ -296,10 +296,85 @@ class _BookmarkLibraryPageState extends State<BookmarkLibraryPage>
         ),
   );
 
+  Future<void> _shareMark(ReaderBookmark mark, Novel? novel) async {
+    String? serifFamily;
+    try {
+      serifFamily = await registeredReadingReportSerif(widget.state.fonts);
+    } catch (_) {
+      // Optional installed typography never blocks sharing.
+    }
+    if (!mounted) return;
+    await pushNovelPage<void>(
+      context,
+      QuoteCardPage(
+        serifFamily: serifFamily,
+        data: QuoteCardData(
+          text: mark.quote,
+          book: novel?.title ?? '',
+          author: novel?.author ?? '',
+          chapter: mark.chapterTitle,
+          recordedAt:
+              mark.createdAt == null || mark.createdOffsetMinutes == null
+              ? null
+              : mark.createdAt!.toUtc().add(
+                  Duration(minutes: mark.createdOffsetMinutes!),
+                ),
+        ),
+      ),
+      reduceMotion: widget.state.reduceMotion,
+    );
+  }
+
+  Future<void> _openMarkMenu(
+    BuildContext anchor,
+    _BookmarkEntry entry,
+    Novel? novel,
+  ) async {
+    final mark = entry.bookmark;
+    final action = await showGlassMenu<String>(
+      context: anchor,
+      reduceMotion: widget.state.reduceMotion,
+      builder: (menu) => Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (mark.quote.isNotEmpty)
+            GlassMenuItem(
+              label: '分享摘录图片',
+              icon: CupertinoIcons.square_arrow_up,
+              order: 0,
+              onPressed: () => Navigator.pop(menu, 'share'),
+            ),
+          GlassMenuItem(
+            label: mark.isUnderline ? '分类划线' : '分类书签',
+            icon: CupertinoIcons.folder,
+            order: 1,
+            onPressed: () => Navigator.pop(menu, 'category'),
+          ),
+          GlassMenuItem(
+            label: '查看与编辑批注',
+            icon: CupertinoIcons.square_pencil,
+            order: 2,
+            onPressed: () => Navigator.pop(menu, 'edit'),
+          ),
+        ],
+      ),
+    );
+    if (!mounted) return;
+    switch (action) {
+      case 'share':
+        await _shareMark(mark, novel);
+      case 'category':
+        await organizeBookmark(context, widget.state, entry.novelId, mark);
+      case 'edit':
+        await _edit(entry.novelId, mark);
+    }
+  }
+
   @override
   Widget build(BuildContext context) => ArchiveFeaturePage(
     title: '书签',
-    code: 'PERSONAL / EXCERPTS',
+    code: 'PERSONAL / BOOKMARKS',
     actions: [
       GlassIconButton(
         key: const ValueKey('bookmark-search-toggle'),
@@ -430,18 +505,25 @@ class _BookmarkLibraryPageState extends State<BookmarkLibraryPage>
                             const SizedBox(height: 16),
                             if (entries.isEmpty)
                               Padding(
-                                padding: const EdgeInsets.symmetric(
-                                  vertical: 36,
-                                ),
-                                child: AppText(
-                                  query.isEmpty
-                                      ? '长按正文选择喜欢的句子，点「书签」即可收藏。\n已有的位置书签也会显示在这里。'
-                                      : widget.state.bookmarkEntries.any(
-                                          (entry) => entry.bookmark.isUnderline,
-                                        )
-                                      ? '没有找到匹配的记录'
-                                      : '没有找到匹配的书签',
-                                  style: const TextStyle(height: 1.8),
+                                padding: const EdgeInsets.only(top: 12),
+                                child: ContentNotice(
+                                  icon: query.isEmpty
+                                      ? CupertinoIcons.bookmark
+                                      : CupertinoIcons.search,
+                                  title: query.isEmpty ? '还没有书签' : '没有找到匹配的书签',
+                                  message: query.isEmpty
+                                      ? '长按正文选择喜欢的句子，点「书签」即可收藏。已有的位置书签也会显示在这里。'
+                                      : '调整搜索词或书签分类后再试。',
+                                  secondaryAction: query.isEmpty
+                                      ? null
+                                      : GlassTextButton(
+                                          compact: true,
+                                          onPressed: () {
+                                            _search.clear();
+                                            setState(() => _query = '');
+                                          },
+                                          child: const AppText('清除搜索'),
+                                        ),
                                 ),
                               ),
                           ],
@@ -457,7 +539,7 @@ class _BookmarkLibraryPageState extends State<BookmarkLibraryPage>
                           child: LibraryReflowPart(
                             id: ('bookmark-book', row),
                             child: Padding(
-                              padding: const EdgeInsets.only(bottom: 16),
+                              padding: const EdgeInsets.only(bottom: 14),
                               child: ContentPanel(
                                 key: ValueKey('bookmark-book-$row'),
                                 onTap: () => _toggleBook(row),
@@ -516,7 +598,7 @@ class _BookmarkLibraryPageState extends State<BookmarkLibraryPage>
                       final mark = entry.bookmark;
                       final novel = _known(entry.novelId);
                       final content = Padding(
-                        padding: const EdgeInsets.only(bottom: 16),
+                        padding: const EdgeInsets.only(bottom: 14),
                         child: ContentPanel(
                           key: ValueKey('my-bookmark-${mark.id}'),
                           onTap: () => _open(entry.novelId, mark),
@@ -526,7 +608,7 @@ class _BookmarkLibraryPageState extends State<BookmarkLibraryPage>
                               if (mark.quote.isNotEmpty ||
                                   mark.note.isNotEmpty) ...[
                                 ReaderBookmarkExcerpt(mark: mark),
-                                const SizedBox(height: 20),
+                                const SizedBox(height: 14),
                               ],
                               if (mark.quote.isEmpty && mark.note.isEmpty) ...[
                                 AppText(
@@ -550,7 +632,7 @@ class _BookmarkLibraryPageState extends State<BookmarkLibraryPage>
                                 mark.chapterTitle,
                                 style: TextStyle(
                                   fontSize: 12,
-                                  height: 1.6,
+                                  height: 1.4,
                                   color: Theme.of(
                                     context,
                                   ).colorScheme.onSurfaceVariant,
@@ -563,83 +645,18 @@ class _BookmarkLibraryPageState extends State<BookmarkLibraryPage>
                                   style: const TextStyle(fontSize: 12),
                                 ),
                               ],
-                              const SizedBox(height: 12),
-                              Row(
-                                children: [
-                                  Expanded(
-                                    child: GlassTextButton(
-                                      key: ValueKey('bookmark-read-${mark.id}'),
-                                      onPressed: _opening == null
-                                          ? () => _open(entry.novelId, mark)
-                                          : null,
-                                      child: AppText(
-                                        _opening == mark.id ? '正在打开…' : '回到原文',
-                                      ),
+                              Align(
+                                alignment: Alignment.centerRight,
+                                child: GlassMenuAnchor(
+                                  child: Builder(
+                                    builder: (anchor) => CompactRowMenuButton(
+                                      key: ValueKey('bookmark-menu-${mark.id}'),
+                                      label: '书签 ${mark.id} 更多操作',
+                                      onPressed: () =>
+                                          _openMarkMenu(anchor, entry, novel),
                                     ),
                                   ),
-                                  const SizedBox(width: 8),
-                                  if (mark.quote.isNotEmpty)
-                                    GlassIconButton(
-                                      key: ValueKey(
-                                        'bookmark-share-${mark.id}',
-                                      ),
-                                      icon: CupertinoIcons.square_arrow_up,
-                                      label: '分享摘录图片 ${mark.id}',
-                                      onPressed: () async {
-                                        String? serifFamily;
-                                        try {
-                                          serifFamily =
-                                              await registeredReadingReportSerif(
-                                                widget.state.fonts,
-                                              );
-                                        } catch (_) {
-                                          // Optional installed typography never blocks sharing.
-                                        }
-                                        if (!context.mounted) return;
-                                        await pushNovelPage<void>(
-                                          context,
-                                          QuoteCardPage(
-                                            serifFamily: serifFamily,
-                                            data: QuoteCardData(
-                                              text: mark.quote,
-                                              book: novel?.title ?? '',
-                                              author: novel?.author ?? '',
-                                              chapter: mark.chapterTitle,
-                                              recordedAt:
-                                                  mark.createdAt == null ||
-                                                      mark.createdOffsetMinutes ==
-                                                          null
-                                                  ? null
-                                                  : mark.createdAt!.toUtc().add(
-                                                      Duration(
-                                                        minutes: mark
-                                                            .createdOffsetMinutes!,
-                                                      ),
-                                                    ),
-                                            ),
-                                          ),
-                                          reduceMotion:
-                                              widget.state.reduceMotion,
-                                        );
-                                      },
-                                    ),
-                                  GlassIconButton(
-                                    icon: CupertinoIcons.folder,
-                                    label:
-                                        '${mark.isUnderline ? '分类划线' : '分类书签'} ${mark.id}',
-                                    onPressed: () => organizeBookmark(
-                                      context,
-                                      widget.state,
-                                      entry.novelId,
-                                      mark,
-                                    ),
-                                  ),
-                                  GlassIconButton(
-                                    icon: CupertinoIcons.square_pencil,
-                                    label: '查看与编辑批注 ${mark.id}',
-                                    onPressed: () => _edit(entry.novelId, mark),
-                                  ),
-                                ],
+                                ),
                               ),
                             ],
                           ),

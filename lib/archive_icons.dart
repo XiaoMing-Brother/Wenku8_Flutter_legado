@@ -95,7 +95,7 @@ enum ArchiveSymbol {
   phone('手机', '系统'),
   laptop('电脑', '系统'),
   branch('同步冲突', '系统'),
-  personAdd('注册账号', '系统'),
+  personAdd('添加用户', '系统'),
   eye('显示', '系统'),
   eyeOff('隐藏', '系统'),
   closeCircle('清空', '系统'),

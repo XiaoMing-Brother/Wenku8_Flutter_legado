@@ -8,8 +8,6 @@ import 'book_tag_catalog.dart';
 import 'book_search.dart';
 import 'tag_catalogue.dart';
 import 'blocked_tags.dart';
-import 'publication_catalog.dart';
-import 'web_publication_catalog.dart' show PublicationConnectionRequired;
 
 /// Owns page cursors, stale-result isolation and explicit recovery. A failed
 /// page never advances the cursor or loops automatically against the service.
@@ -62,12 +60,6 @@ class NovelFeedController extends ChangeNotifier {
   int _visibleResultStartIndex = 0;
   int _blockedItemCount = 0;
   NovelSort sort = NovelSort.lastUpdate;
-  PublicationLibrary? _publication;
-  PublicationCatalog? _publicationCatalog;
-
-  /// An explicit publication category replaces, rather than combines with,
-  /// ranking and tag requests because its service has its own ordered cursor.
-  PublicationLibrary? get publication => _publication;
   String query = '';
   BookSearchField searchField = BookSearchField.all;
   List<String> tags = const [];
@@ -76,17 +68,30 @@ class NovelFeedController extends ChangeNotifier {
   int page = 0;
   int? totalItems;
   Set<BookSearchField> incompleteSearchFields = const {};
+  Set<String> incompleteSources = const {};
   String? get searchNotice {
-    if (incompleteSearchFields.isEmpty) return null;
     final fields = incompleteSearchFields.map((field) => field.label).join('、');
+    final sources = incompleteSources.isEmpty
+        ? ''
+        : incompleteSources.take(3).join('、') +
+              (incompleteSources.length > 3
+                  ? ' 等 ${incompleteSources.length} 个来源'
+                  : '');
+    final scope = [
+      if (fields.isNotEmpty) fields,
+      if (sources.isNotEmpty) sources,
+    ];
+    if (scope.isEmpty) return null;
+    final scopeLabel = scope.join('；');
     return items.isEmpty
-        ? '$fields搜索暂未完成，目前没有可显示的结果。'
-        : '$fields搜索暂未完成，已保留其他搜索结果。';
+        ? '$scopeLabel搜索失败，目前没有可显示的结果。'
+        : '$scopeLabel搜索失败，已保留其他搜索结果。';
   }
 
   bool hasMore = true;
   bool loading = false;
   TagSearchProgress? _tagProgress;
+  NovelSearchProgress? _searchProgress;
   String? get tagProgressLabel {
     final progress = _tagProgress;
     if (!loading || progress == null) return null;
@@ -96,19 +101,23 @@ class NovelFeedController extends ChangeNotifier {
         : '正在筛选标签 · 已检查 ${progress.scannedPages} / $total 页';
   }
 
+  String? get searchProgressLabel {
+    final progress = _searchProgress;
+    if (!loading || progress == null || progress.totalSources == 0) return null;
+    return '正在搜索书源 · 已完成 '
+        '${progress.completedSources}/${progress.totalSources}';
+  }
+
   Object? error;
   String get failureMessage {
     final failure = error;
-    if (failure is PublicationConnectionRequired) {
-      return '此出版文库需要官网账号连接，请到账号页确认后重试。';
-    }
     if (failure is FormatException && failure.message.toString().isNotEmpty) {
       return failure.message.toString();
     }
     if (failure is PlatformException && failure.details is Map) {
       return switch ((failure.details as Map)['httpStatus']) {
         429 => '当前请求较多，请稍后重试；已保存的书籍与阅读记录仍保留。',
-        401 || 403 => '当前连接需要登录或访问验证，请在账号页确认后重试。',
+        401 || 403 => '当前服务要求访问验证，请稍后重试；已保存的书籍与阅读记录仍保留。',
         451 => '当前服务未提供此内容，已保存的书籍与阅读记录仍保留。',
         _ => '检查网络后重试，已保存的书籍与阅读记录仍保留。',
       };
@@ -208,51 +217,19 @@ class NovelFeedController extends ChangeNotifier {
       : _load(replace: page == 0 || refreshFailed, force: true);
 
   Future<void> selectSort(NovelSort value) async {
-    if (sort == value && tags.isEmpty && _publication == null) return;
+    if (sort == value && tags.isEmpty) return;
     sort = value;
     tags = const [];
-    _publication = null;
-    _publicationCatalog = null;
     _reset();
     await _load(replace: true);
   }
 
   Future<void> selectTags(Iterable<String> values) async {
     final next = tagSearchTerms(values.join(' '));
-    if (listEquals(tags, next) && _publication == null) return;
+    if (listEquals(tags, next)) return;
     tags = List.unmodifiable(next);
-    _publication = null;
-    _publicationCatalog = null;
     _reset();
     await _load(replace: true);
-  }
-
-  /// Browse a publication through the same paging, refresh and stale-response
-  /// isolation as discovery. The caller restores the existing account first.
-  Future<void> selectPublication(
-    PublicationLibrary value, {
-    required PublicationCatalog catalog,
-    bool force = false,
-  }) async {
-    if (_disposed || search) return;
-    if (!force &&
-        _publication?.id == value.id &&
-        identical(_publicationCatalog, catalog)) {
-      return;
-    }
-    _publication = value;
-    _publicationCatalog = catalog;
-    tags = const [];
-    _reset();
-    await _load(replace: true, force: force);
-  }
-
-  /// A changed identity must not retain another account's visible book list.
-  /// A refreshed connection for the same identity preserves resolved content.
-  Future<void> refreshPublicationSession({required bool retain}) async {
-    if (_disposed || _publication == null) return;
-    if (!retain) _reset();
-    await _load(replace: true, force: true);
   }
 
   Future<void> searchFor(String value) async {
@@ -290,9 +267,11 @@ class NovelFeedController extends ChangeNotifier {
         (_searchDelay != null || loading || (page > 0 && error == null))) {
       return;
     }
+    final wasLoading = loading;
     _searchDelay?.cancel();
     query = term;
     _reset();
+    if (wasLoading) _cancelRepositorySearch();
     loading = true;
     notifyListeners();
     _searchDelay = Timer(delay, () {
@@ -309,6 +288,7 @@ class NovelFeedController extends ChangeNotifier {
     _searchDelay?.cancel();
     _searchDelay = null;
     _generation++;
+    _cancelRepositorySearch();
     loading = false;
     refreshing = false;
     _tagProgress = null;
@@ -316,6 +296,10 @@ class NovelFeedController extends ChangeNotifier {
     // page was cancelled. Each child has already invalidated that old request.
     _acceptGroupChanges = _usesSearchGroups;
     notifyListeners();
+  }
+
+  void _cancelRepositorySearch() {
+    unawaited(repository.cancelSearch().catchError((Object _) {}));
   }
 
   void _reset() {
@@ -326,7 +310,9 @@ class NovelFeedController extends ChangeNotifier {
     page = 0;
     totalItems = null;
     incompleteSearchFields = const {};
+    incompleteSources = const {};
     _tagProgress = null;
+    _searchProgress = null;
     hasMore = true;
     error = null;
     refreshFailed = false;
@@ -345,8 +331,6 @@ class NovelFeedController extends ChangeNotifier {
     var requestedPage = replace ? 1 : page + 1;
     var replacing = replace;
     final requestedSort = sort;
-    final requestedPublication = _publication;
-    final publicationCatalog = _publicationCatalog;
     final filteringTags = !search && tags.isNotEmpty;
     final requestedQuery = filteringTags ? tags.join(' ') : query;
     final requestedField = filteringTags ? BookSearchField.tags : searchField;
@@ -357,8 +341,15 @@ class NovelFeedController extends ChangeNotifier {
     final pendingIncompleteFields = replace
         ? <BookSearchField>{}
         : {...incompleteSearchFields};
+    final pendingIncompleteSources = replace
+        ? <String>{}
+        : {...incompleteSources};
+    final progressiveRepository = repository is ProgressiveNovelSearch
+        ? repository as ProgressiveNovelSearch
+        : null;
     loading = true;
     _tagProgress = null;
+    _searchProgress = null;
     refreshing = retaining;
     error = null;
     refreshFailed = false;
@@ -391,20 +382,41 @@ class NovelFeedController extends ChangeNotifier {
           notifyListeners();
         }
 
+        void acceptSearchProgress(NovelSearchProgress progress) {
+          if (_disposed || generation != _generation) return;
+          _searchProgress = progress;
+          if (!retaining) {
+            final oldCount = pending.length;
+            final merged = <int, Novel>{
+              if (!replacing)
+                for (final item in pending) item.id: item,
+              for (final item in progress.items) item.id: item,
+            };
+            final first = replacing ? 0 : oldCount;
+            pending = List.unmodifiable(merged.values);
+            replacing = false;
+            _items = pending;
+            _visibleItems = null;
+            _tagSuggestions.addAll(pending.expand((book) => book.tags));
+            BookTagCatalog.shared.observe(_tagSuggestions);
+            totalItems = pending.length;
+            if (first < pending.length) {
+              _resultStartIndex = first;
+              _resultReplacesRetained = false;
+              _resultRevision++;
+            }
+          }
+          notifyListeners();
+        }
+
         final tagOnly =
             requestedField == BookSearchField.tags ||
             requestedField == BookSearchField.all &&
                 requestedQuery.trim().startsWith('#');
         final result =
-            requestedPublication != null && publicationCatalog != null
-            ? await publicationCatalog.browsePublication(
-                requestedPublication.id,
-                page: requestedPage,
-                refresh: force,
-              )
-            : (search || filteringTags) &&
-                  tagOnly &&
-                  repository is ProgressiveTagCatalogue
+            (search || filteringTags) &&
+                tagOnly &&
+                repository is ProgressiveTagCatalogue
             ? await (repository as ProgressiveTagCatalogue).tagPage(
                 requestedQuery,
                 page: requestedPage,
@@ -413,12 +425,21 @@ class NovelFeedController extends ChangeNotifier {
                 onProgress: acceptTagProgress,
               )
             : search || filteringTags
-            ? await repository.searchFilteredPage(
-                requestedQuery,
-                field: requestedField,
-                page: requestedPage,
-                refresh: force,
-              )
+            ? await (progressiveRepository != null
+                  ? progressiveRepository.searchFilteredPageProgressively(
+                      requestedQuery,
+                      field: requestedField,
+                      page: requestedPage,
+                      refresh: force,
+                      current: () => !_disposed && generation == _generation,
+                      onProgress: acceptSearchProgress,
+                    )
+                  : repository.searchFilteredPage(
+                      requestedQuery,
+                      field: requestedField,
+                      page: requestedPage,
+                      refresh: force,
+                    ))
             : await repository.browse(
                 sort: requestedSort,
                 page: requestedPage,
@@ -429,6 +450,7 @@ class NovelFeedController extends ChangeNotifier {
           throw const FormatException('分页游标不匹配');
         }
         pendingIncompleteFields.addAll(result.searchFailures.keys);
+        pendingIncompleteSources.addAll(result.sourceFailures.keys);
         final oldCount = pending.length;
         final merged = <int, Novel>{
           if (!replacing)
@@ -470,6 +492,7 @@ class NovelFeedController extends ChangeNotifier {
           hasMore = result.hasMore;
           totalItems = result.totalItems;
           incompleteSearchFields = Set.unmodifiable(pendingIncompleteFields);
+          incompleteSources = Set.unmodifiable(pendingIncompleteSources);
         }
         if (complete) break;
         if (!retaining) notifyListeners();
@@ -485,6 +508,7 @@ class NovelFeedController extends ChangeNotifier {
         loading = false;
         refreshing = false;
         _tagProgress = null;
+        _searchProgress = null;
         notifyListeners();
       }
     }
@@ -553,6 +577,9 @@ class NovelFeedController extends ChangeNotifier {
         ...group.incompleteSearchFields,
       ],
     });
+    incompleteSources = Set.unmodifiable(
+      groups.expand((group) => group.incompleteSources),
+    );
     error = groups.every((group) => group.error != null)
         ? groups.first.error
         : null;
@@ -563,6 +590,7 @@ class NovelFeedController extends ChangeNotifier {
   void dispose() {
     _disposed = true;
     _searchDelay?.cancel();
+    if (loading) _cancelRepositorySearch();
     _generation++;
     for (final group in _searchGroups ?? const <NovelFeedController>[]) {
       group.dispose();

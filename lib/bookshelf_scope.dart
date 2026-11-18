@@ -2,6 +2,7 @@ import 'library_state.dart';
 import 'offline_repository.dart';
 import 'local_library_preferences.dart';
 import 'catalog.dart';
+import 'pending_book.dart';
 
 /// The shelf contains saved books and, when merged, imported originals.
 /// Cached trial chapters provide offline availability, never membership.
@@ -57,8 +58,10 @@ bool bookshelfMatchesSource(
   String? source,
 }) {
   if (!state.combinedShelf) return true;
+  final selected = source ?? state.shelfSourceFilter;
+  if (isPendingBook(id)) return selected == 'all';
   final local = offline?.local?.book(id) != null;
-  return switch (source ?? state.shelfSourceFilter) {
+  return switch (selected) {
     'local' => local,
     'cached' => !local && offline?.availableOffline(id) == true,
     'online' => !local && state.contains(id),
@@ -74,6 +77,7 @@ String bookshelfSourceLabel(String source) => switch (source) {
 };
 
 String bookshelfSource(int id, OfflineNovelRepository? offline) {
+  if (isPendingBook(id)) return '待匹配';
   if (offline?.local?.book(id) != null) return '本地';
   return offline?.availableOffline(id) == true ? '缓存' : '在线';
 }

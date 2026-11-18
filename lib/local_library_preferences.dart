@@ -425,6 +425,7 @@ class LocalLibraryPreferences extends ChangeNotifier {
   }
 
   Future<void> setViewMode(BookCollectionMode value) => setView(switch (value) {
+    BookCollectionMode.shelf => LocalLibraryView.shelf,
     BookCollectionMode.list => LocalLibraryView.list,
     BookCollectionMode.shelfList => LocalLibraryView.shelf,
     BookCollectionMode.shelfGrid => LocalLibraryView.shelfGrid,

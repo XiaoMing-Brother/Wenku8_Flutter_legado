@@ -1,5 +1,5 @@
 name: wenku8_flutter
-description: "轻小说文库 Flutter 迁移版（Android 优先）。"
+description: "文库阅读 Flutter 版（Android 优先）。"
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
 publish_to: 'none' # Remove this line if you wish to publish to pub.dev
@@ -110,6 +110,9 @@ flutter:
     - assets/licenses/edge-tts.txt
     - assets/licenses/libmobi.txt
     - assets/licenses/jsoup.txt
+    - assets/licenses/okhttp.txt
+    - assets/licenses/json-path.txt
+    - assets/licenses/rhino.txt
     - assets/licenses/commonmark.txt
     - assets/licenses/pdfbox.txt
     - assets/licenses/pdfbox-notice.txt

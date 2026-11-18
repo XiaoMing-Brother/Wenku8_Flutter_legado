@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/widgets.dart';
+import 'book_sources/book_source_images.dart';
 import 'local_book_media.dart';
 import 'local_image_layout.dart';
 import 'app_language.dart';
@@ -158,6 +159,9 @@ String? readerIllustrationUrl(String paragraph) {
   final tail = text.substring(end + marker.length).trim();
   final raw = text.substring(marker.length, end).trim();
   final uri = Uri.tryParse(raw);
+  if (uri != null && uri.scheme == BookSourceImages.markerScheme) {
+    return BookSourceImages.isMarker(raw) ? raw : null;
+  }
   if (uri != null && LocalBookMedia.valid(uri)) {
     return LocalImageLayout.parseSuffix(tail) == null ? null : uri.toString();
   }

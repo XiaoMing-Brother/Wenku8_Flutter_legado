@@ -22,53 +22,59 @@ class BookCollectionRegionToolbar extends StatelessWidget {
     this.activeFilters = 0,
     this.onLayout,
     this.layoutKey,
+    this.showTitle = true,
   });
   final String title, category;
   final String? subtitle;
   final int count, activeFilters;
   final bool loading;
+  final bool showTitle;
   final VoidCallback? onCategory, onFilter, onView, onLayout;
   final Key? categoryKey, filterKey, viewKey, layoutKey;
 
   @override
-  Widget build(BuildContext context) => Column(
-    crossAxisAlignment: CrossAxisAlignment.stretch,
-    children: [
-      Row(
-        children: [
-          Expanded(
-            child: ArchiveSection(
-              title: title,
-              code: 'COLLECTION / REGION',
-              subtitle: subtitle ?? '',
+  Widget build(BuildContext context) {
+    final toolbar = LibraryToolbar(
+      category: category,
+      count: count,
+      onCategory: onCategory,
+      onOptions: onFilter,
+      onView: onView,
+      categoryKey: categoryKey,
+      optionsKey: filterKey,
+      viewKey: viewKey,
+      loading: loading,
+      activeFilters: activeFilters,
+    );
+    if (!showTitle) return toolbar;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: ArchiveSection(
+                title: title,
+                code: 'COLLECTION / REGION',
+                subtitle: subtitle ?? '',
+              ),
             ),
-          ),
-          if (onLayout != null) ...[
-            const SizedBox(width: 12),
-            GlassTextButton(
-              key: layoutKey,
-              compact: true,
-              onPressed: onLayout,
-              child: const AppText('整体布局'),
-            ),
+            if (onLayout != null) ...[
+              const SizedBox(width: 12),
+              GlassTextButton(
+                key: layoutKey,
+                compact: true,
+                onPressed: onLayout,
+                child: const AppText('整体布局'),
+              ),
+            ],
           ],
-        ],
-      ),
-      const SizedBox(height: 12),
-      LibraryToolbar(
-        category: category,
-        count: count,
-        onCategory: onCategory,
-        onOptions: onFilter,
-        onView: onView,
-        categoryKey: categoryKey,
-        optionsKey: filterKey,
-        viewKey: viewKey,
-        loading: loading,
-        activeFilters: activeFilters,
-      ),
-    ],
-  );
+        ),
+        const SizedBox(height: 12),
+        toolbar,
+      ],
+    );
+  }
 }
 
 /// Picking a region category changes only the caller's view preference, never
@@ -87,7 +93,7 @@ Future<String?> chooseBookCollectionRegionCategory(
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const ArchiveSection(title: '立体书架分类', code: 'UPPER / CATEGORY'),
+        const ArchiveSection(title: '立体书架分类', code: 'SHELF / CATEGORY'),
         const SizedBox(height: 12),
         for (final (index, entry) in options.entries.indexed)
           GlassMenuItem(

@@ -1,9 +1,9 @@
-import 'package:flutter/cupertino.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import 'app_interactions.dart';
 import 'app_ui.dart';
+import 'feature_pages.dart';
 import 'haptic_preferences.dart';
 import 'library_state.dart';
 
@@ -91,106 +91,87 @@ class _HapticSettingsPageState extends State<HapticSettingsPage>
     animation: widget.state.settingsChanges,
     builder: (context, _) {
       final preferences = widget.state.haptics;
-      final padding = MediaQuery.paddingOf(context);
-      return Scaffold(
-        body: Atmosphere(
-          child: GlassHeaderLayout(
-            header: ArchiveHeaderBar(
-              leading: GlassIconButton(
-                icon: CupertinoIcons.back,
-                label: '返回性能与动效',
-                onPressed: () => Navigator.pop(context),
-              ),
-              title: const ArchiveRouteTitle(
-                title: '振动反馈',
-                code: 'SYSTEM / HAPTICS',
-              ),
-            ),
-            body: ListView(
-              key: const ValueKey('haptic-settings-scroll'),
-              padding: EdgeInsets.fromLTRB(
-                24 + padding.left,
-                padding.top + FrostedHeader.toolbarHeight + 20,
-                24 + padding.right,
-                padding.bottom + 32,
-              ),
-              children: [
-                Center(
-                  child: ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 712),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        ContentPanel(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
+      return ArchiveFeaturePage(
+        title: '振动反馈',
+        code: 'SYSTEM / HAPTICS',
+        child: ListView(
+          key: const ValueKey('haptic-settings-scroll'),
+          padding: featurePadding(context),
+          children: [
+            Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 712),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    ContentPanel(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          _toggleRow(
+                            title: '振动反馈',
+                            description: '关闭后保留各项设置',
+                            switchKey: 'haptic-global-enabled',
+                            value: preferences.enabled,
+                            onChanged: _saving
+                                ? null
+                                : (enabled) {
+                                    final next = preferences.withEnabled(
+                                      enabled,
+                                    );
+                                    return _save(
+                                      next,
+                                      preview: enabled
+                                          ? _firstEnabled(next)
+                                          : null,
+                                    );
+                                  },
+                          ),
+                          const Divider(height: 28),
+                          Row(
                             children: [
-                              _toggleRow(
-                                title: '振动反馈',
-                                description: '关闭后保留各项设置',
-                                switchKey: 'haptic-global-enabled',
-                                value: preferences.enabled,
-                                onChanged: _saving
-                                    ? null
-                                    : (enabled) {
-                                        final next = preferences.withEnabled(
-                                          enabled,
-                                        );
-                                        return _save(
-                                          next,
-                                          preview: enabled
-                                              ? _firstEnabled(next)
-                                              : null,
-                                        );
-                                      },
-                              ),
-                              const Divider(height: 28),
-                              Row(
-                                children: [
-                                  const Expanded(child: AppText('全部强度')),
-                                  if (preferences.uniformStrength == null)
-                                    AppText('已分别设置', style: _supportingStyle),
-                                ],
-                              ),
-                              const SizedBox(height: 12),
-                              _allStrengthPicker(preferences),
+                              const Expanded(child: AppText('全部强度')),
+                              if (preferences.uniformStrength == null)
+                                AppText('已分别设置', style: _supportingStyle),
                             ],
                           ),
-                        ),
-                        const SizedBox(height: 12),
-                        _capabilityNote,
-                        const SizedBox(height: 24),
-                        AppText(
-                          '按交互调整',
-                          style: Theme.of(context).textTheme.titleMedium,
-                        ),
-                        const SizedBox(height: 12),
-                        ContentPanel(
-                          child: Column(
-                            children: [
-                              for (final category in HapticCategory.values) ...[
-                                if (category != HapticCategory.values.first)
-                                  const Divider(height: 32),
-                                _category(category, preferences),
-                              ],
-                            ],
-                          ),
-                        ),
-                      ],
+                          const SizedBox(height: 12),
+                          _allStrengthPicker(preferences),
+                        ],
+                      ),
                     ),
-                  ),
+                    const SizedBox(height: 12),
+                    _capabilityNote,
+                    const SizedBox(height: 24),
+                    const ArchiveSection(
+                      title: '按交互调整',
+                      code: 'SYSTEM / HAPTIC TYPES',
+                    ),
+                    const SizedBox(height: 12),
+                    ContentPanel(
+                      child: Column(
+                        children: [
+                          for (final category in HapticCategory.values) ...[
+                            if (category != HapticCategory.values.first)
+                              const Divider(height: 32),
+                            _category(category, preferences),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ],
                 ),
-              ],
+              ),
             ),
-          ),
+          ],
         ),
       );
     },
   );
 
   TextStyle get _supportingStyle => TextStyle(
-    fontSize: 13,
-    height: 1.45,
+    fontSize: 12,
+    height: 1.4,
     color: Theme.of(context).colorScheme.onSurfaceVariant,
   );
 

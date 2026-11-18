@@ -9,6 +9,8 @@ import io.flutter.embedding.engine.plugins.activity.ActivityAware
 import io.flutter.embedding.engine.plugins.activity.ActivityPluginBinding
 import io.flutter.plugin.common.MethodChannel
 import io.flutter.plugin.common.PluginRegistry
+import org.mewx.wenku8_flutter.booksource.BookSourcePlugin
+import org.mewx.wenku8_flutter.booksource.DictRulePlugin
 
 /** Source builds attach local platform capabilities only. */
 internal fun attachWenkuEnginePlugins(engine: FlutterEngine) {
@@ -26,6 +28,8 @@ internal fun attachWenkuEnginePlugins(engine: FlutterEngine) {
     if (!engine.plugins.has(ReaderControlsPlugin::class.java)) engine.plugins.add(ReaderControlsPlugin())
     if (!engine.plugins.has(NetworkStatusPlugin::class.java)) engine.plugins.add(NetworkStatusPlugin())
     if (!engine.plugins.has(FrameRatePlugin::class.java)) engine.plugins.add(FrameRatePlugin())
+    if (!engine.plugins.has(BookSourcePlugin::class.java)) engine.plugins.add(BookSourcePlugin())
+    if (!engine.plugins.has(DictRulePlugin::class.java)) engine.plugins.add(DictRulePlugin())
 }
 
 class WenkuHostPlugin : FlutterPlugin, ActivityAware, PluginRegistry.ActivityResultListener, PluginRegistry.RequestPermissionsResultListener, PluginRegistry.NewIntentListener {

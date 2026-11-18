@@ -258,7 +258,7 @@ class _LocalSeriesEditorState extends State<LocalSeriesEditor> {
       context: context,
       reduceMotion: widget.library.reduceMotion,
       builder: (sheet) => Padding(
-        padding: const EdgeInsets.all(24),
+        padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -321,7 +321,7 @@ class _LocalSeriesEditorState extends State<LocalSeriesEditor> {
     final id = _order[index], book = widget.books.book(_order[index])!;
     return Padding(
       key: ValueKey('series-volume-$id'),
-      padding: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.only(bottom: 14),
       child: ContentPanel(
         child: ArchivePart(
           child: Column(
@@ -584,14 +584,25 @@ class _AddVolumesSheetState extends State<_AddVolumesSheet> {
           const SizedBox(height: 16),
           Expanded(
             child: candidates.isEmpty
-                ? Center(
-                    child: AppText(
-                      widget.books.isEmpty ? '没有可添加的独立书籍' : '没有找到符合的书籍',
-                    ),
+                ? ContentNotice(
+                    icon: widget.books.isEmpty
+                        ? CupertinoIcons.tray
+                        : CupertinoIcons.search,
+                    title: widget.books.isEmpty ? '没有可添加的书籍' : '没有匹配的书籍',
+                    message: widget.books.isEmpty
+                        ? '导入本地书籍后可在这里加入分卷。'
+                        : '调整搜索词后再试。',
+                    secondaryAction: widget.books.isEmpty
+                        ? null
+                        : GlassTextButton(
+                            compact: true,
+                            onPressed: () => setState(_search.clear),
+                            child: const AppText('清除搜索'),
+                          ),
                   )
                 : ListView.separated(
                     itemCount: candidates.length,
-                    separatorBuilder: (_, _) => const SizedBox(height: 10),
+                    separatorBuilder: (_, _) => const SizedBox(height: 14),
                     itemBuilder: (context, index) {
                       final book = candidates[index],
                           selected = _selected.contains(candidates[index].id);

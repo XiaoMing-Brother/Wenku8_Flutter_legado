@@ -14,6 +14,7 @@
         android:label="${wenkuAppLabel}"
         android:requestLegacyExternalStorage="true"
         android:name=".WenkuApplication"
+        android:networkSecurityConfig="@xml/network_security_config"
         android:fullBackupContent="@xml/backup_rules"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:icon="@mipmap/ic_launcher"
@@ -52,6 +53,12 @@
               />
             <meta-data android:name="flutter_deeplinking_enabled" android:value="false" />
         </activity>
+        <activity
+            android:name=".WebLoginActivity"
+            android:exported="false"
+            android:theme="@style/WebLoginTheme"
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
+            android:windowSoftInputMode="adjustResize" />
         <!-- File associations go directly to the permanent Flutter host. The
              compatibility/launcher activity never reads or imports a file. -->
         <activity-alias

@@ -21,6 +21,7 @@ import 'book_documents.dart';
 import 'local_books.dart' show isLocalBook;
 import 'reader_languages.dart';
 import 'bookmark_categories.dart';
+import 'replace_rules/replace_rule_store.dart';
 import 'feature_pages.dart' show confirmNovelAction;
 
 sealed class ReaderToolAction {
@@ -452,6 +453,12 @@ class _ReaderToolsState extends State<ReaderTools>
       widget.state.readerPreferencesFor(widget.novel.id);
   double get _fontSize => widget.state.readerFontSizeFor(widget.novel.id);
   double get _lineHeight => widget.state.readerLineHeightFor(widget.novel.id);
+  bool get _replaceRulesEnabled => widget.state.replaceRulesEnabledFor(
+    widget.novel.id,
+    fallback: ReplaceRuleStore.shared.enabled,
+  );
+  bool get _replaceRulesOverridden =>
+      widget.state.replaceRulesOverriddenFor(widget.novel.id);
   bool _changingScope = false;
   bool _changingLanguages = false;
   bool _backgroundExpanded = false, _backgroundBusy = false;
@@ -507,9 +514,9 @@ class _ReaderToolsState extends State<ReaderTools>
     if (id == null || _backgroundBusy) return;
     if (!await confirmNovelAction(
       context,
-      title: '删除这张阅读背景？',
+      title: '删除阅读背景？',
       message: '使用它的书籍恢复纯色背景，原始图片不受影响。',
-      confirmLabel: '删除背景',
+      confirmLabel: '删除阅读背景',
       reduceMotion: widget.state.reduceMotion,
     )) {
       return;
@@ -779,6 +786,24 @@ class _ReaderToolsState extends State<ReaderTools>
       if (mounted) showNovelFeedback(context, '语言显示设置未保存，请重试');
     } finally {
       if (mounted) setState(() => _changingLanguages = false);
+    }
+  }
+
+  Future<void> _setReplaceRules(bool value) async {
+    try {
+      await widget.state.setReplaceRulesEnabled(widget.novel.id, value);
+      if (mounted) setState(() {});
+    } catch (_) {
+      if (mounted) showNovelFeedback(context, '替换净化设置未保存，请重试');
+    }
+  }
+
+  Future<void> _followGlobalReplaceRules() async {
+    try {
+      await widget.state.clearReplaceRulesOverride(widget.novel.id);
+      if (mounted) setState(() {});
+    } catch (_) {
+      if (mounted) showNovelFeedback(context, '替换净化设置未保存，请重试');
     }
   }
 
@@ -1327,6 +1352,38 @@ class _ReaderToolsState extends State<ReaderTools>
                 },
                 onChanged: (paper) =>
                     _preferences(_readerPreferences.copyWith(paper: paper)),
+              ),
+          ],
+        ),
+      ),
+    if (category == 'theme')
+      _adjustment(
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            _switch(
+              context,
+              '本书使用替换净化',
+              _replaceRulesEnabled,
+              _setReplaceRules,
+            ),
+            const SizedBox(height: 6),
+            AppText(
+              '替换规则只改变阅读页显示，不改写缓存正文。可在「设置 → 阅读与外观 → 替换净化」中管理规则和全局开关。',
+              style: TextStyle(
+                fontSize: 12,
+                height: 1.6,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+            ),
+            if (_replaceRulesOverridden)
+              Align(
+                alignment: Alignment.centerRight,
+                child: GlassTextButton(
+                  compact: true,
+                  onPressed: _followGlobalReplaceRules,
+                  child: const AppText('跟随全局设置'),
+                ),
               ),
           ],
         ),

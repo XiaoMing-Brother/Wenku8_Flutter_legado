@@ -6,11 +6,5 @@ class OnlineComponentUnavailable implements Exception {
   String toString() => message;
 }
 
-class OnlineAuthenticationRequired implements Exception {
-  const OnlineAuthenticationRequired();
-  @override
-  String toString() => '请先登录账号';
-}
-
 Future<T> unavailableOnline<T>() =>
     Future<T>.error(const OnlineComponentUnavailable());

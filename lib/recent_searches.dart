@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 import 'app_interactions.dart';
 import 'app_ui.dart';
+import 'feature_pages.dart';
 import 'library_state.dart';
 
 class RecentSearches extends StatelessWidget {
@@ -16,38 +17,14 @@ class RecentSearches extends StatelessWidget {
 
   Future<void> _clear(BuildContext context) async {
     FocusScope.of(context).unfocus();
-    final confirmed = await showJellySheet<bool>(
-      context: context,
+    final confirmed = await confirmNovelAction(
+      context,
+      title: '删除最近搜索？',
+      message: '本机保存的搜索关键词会移除，不影响书架、阅读进度或书签。',
+      confirmLabel: '删除最近搜索',
       reduceMotion: state.reduceMotion,
-      builder: (sheet) => SingleChildScrollView(
-        primary: false,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              const AppText(
-                '清空最近搜索？',
-                style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600),
-              ),
-              const SizedBox(height: 12),
-              const AppText('只清除本机关键词，不影响书架、阅读进度或书签。'),
-              const SizedBox(height: 16),
-              GlassTextButton(
-                onPressed: () => Navigator.pop(sheet, true),
-                child: const AppText('清空搜索记录'),
-              ),
-              GlassTextButton(
-                onPressed: () => Navigator.pop(sheet, false),
-                child: const AppText('取消'),
-              ),
-            ],
-          ),
-        ),
-      ),
     );
-    if (confirmed != true || !context.mounted) return;
+    if (!confirmed || !context.mounted) return;
     try {
       await state.clearRecentSearches();
     } catch (_) {

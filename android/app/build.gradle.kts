@@ -31,11 +31,11 @@ android {
     defaultConfig {
         // Public source previews must not replace an installed distribution.
         applicationId = "org.mewx.wenku8_flutter.source_preview"
-        minSdk = flutter.minSdkVersion
+        minSdk = 26
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
-        manifestPlaceholders["wenkuAppLabel"] = "轻小说文库 · 源码预览"
+        manifestPlaceholders["wenkuAppLabel"] = "文库阅读"
         // AGP otherwise builds upstream desktop utilities too, including the
         // DRM tool whose encryption code is intentionally disabled in this app.
         externalNativeBuild.cmake.targets.addAll(listOf("mobi", "wenku_mobi"))
@@ -86,6 +86,19 @@ android {
             ndk.abiFilters.addAll(targetAbis)
         }
     }
+
+    packaging {
+        resources {
+            // 阅读器只用 PDFBox 的常规加密与 POI 的 Word 读取路径，剔除
+            // 未启用的抗量子算法参数表和演示文稿/表格资源。
+            excludes += setOf(
+                "org/bouncycastle/pqc/**",
+                "org/apache/poi/sl/**",
+                "org/apache/poi/hslf/**",
+                "org/apache/poi/ss/**"
+            )
+        }
+    }
 }
 
 flutter {
@@ -98,6 +111,9 @@ dependencies {
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs_nio:2.1.5")
     implementation("org.jsoup:jsoup:1.23.2")
     implementation("org.commonmark:commonmark:0.30.1")
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    implementation("com.jayway.jsonpath:json-path:2.9.0")
+    implementation("org.mozilla:rhino:1.8.1")
     implementation("com.tom-roush:pdfbox-android:2.0.27.0")
     // Keep the media host classes available to the app's shared-engine wiring.
     implementation("androidx.media:media:1.7.0")

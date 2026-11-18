@@ -1,0 +1,772 @@
+package org.mewx.wenku8_flutter.booksource
+
+import android.util.Base64
+import android.util.Log
+import java.net.URLEncoder
+import java.security.MessageDigest
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import java.util.concurrent.ConcurrentHashMap
+import org.json.JSONArray
+import org.json.JSONObject
+import org.mozilla.javascript.BaseFunction
+import org.mozilla.javascript.Context
+import org.mozilla.javascript.NativeArray
+import org.mozilla.javascript.NativeJavaObject
+import org.mozilla.javascript.NativeObject
+import org.mozilla.javascript.RhinoException
+import org.mozilla.javascript.Scriptable
+import org.mozilla.javascript.ScriptableObject
+import org.mozilla.javascript.Undefined
+import org.mozilla.javascript.WrappedException
+
+internal class BookSourceJs(private val http: BookSourceHttp) {
+    private val cache = JsCache()
+    private val remoteLibs = ConcurrentHashMap<String, String>()
+
+    fun eval(script: String, env: JsEnv, followup: String? = null): Any? {
+        val cx = Context.enter()
+        try {
+            cx.optimizationLevel = -1
+            cx.languageVersion = Context.VERSION_ES6
+            val scope = cx.initStandardObjects()
+            // Rhino 的 Packages/java/org 等是懒加载的；脚本里一旦访问
+            // org.jsoup 之类的包，内置的 java 会覆盖下面安装的自定义 java，
+            // 导致后续 java.ajax 等全部失效。先主动触发初始化。
+            ScriptableObject.getProperty(scope, "Packages")
+            val variables = mutableMapOf<String, Any?>()
+            bind(cx, scope, "result", env.content, variables)
+            bind(cx, scope, "src", env.content, variables)
+            bind(cx, scope, "baseUrl", env.baseUrl, variables)
+            bind(
+                cx,
+                scope,
+                "url",
+                env.response?.url?.takeIf { it.isNotBlank() } ?: env.baseUrl,
+                variables,
+            )
+            bind(cx, scope, "key", env.key, variables)
+            bind(cx, scope, "page", env.page, variables)
+            bind(cx, scope, "title", env.chapter?.title.orEmpty(), variables)
+            bind(cx, scope, "book", env.book?.toMap() ?: emptyMap<String, Any?>(), variables)
+            bind(cx, scope, "chapter", env.chapter?.toMap() ?: emptyMap<String, Any?>(), variables)
+            bind(cx, scope, "isLongClick", env.isLongClick, variables)
+            bind(cx, scope, "cache", cacheObject(cx, scope), variables)
+            env.response?.let { response ->
+                val responseJs = responseObject(cx, scope, response)
+                variables["result"] = response
+                ScriptableObject.putProperty(scope, "result", responseJs)
+                variables["src"] = response
+                ScriptableObject.putProperty(scope, "src", responseJs)
+            }
+            val infoObject = bindInfoMap(cx, scope, env, variables)
+            bindSource(cx, scope, env, variables)
+            installJava(cx, scope, env, variables)
+            bindCookie(cx, scope, env)
+            val source = env.source
+            if (source.jsLib.isNotBlank()) {
+                evaluateJsLib(cx, scope, source.jsLib.trim())
+            }
+            val value = cx.evaluateString(scope, script, "rule", 1, null)
+            if (infoObject != null) {
+                copyInfoMap(infoObject, env.infoMap)
+            }
+            if (followup != null) {
+                val followed = cx.evaluateString(scope, followup, "login", 1, null)
+                val result = jsToKotlin(cx, followed)
+                if (result != null) return result
+            }
+            return jsToKotlin(cx, value)
+        } catch (error: WrappedException) {
+            throw error.wrappedException
+        } finally {
+            Context.exit()
+        }
+    }
+
+    private fun evaluateJsLib(cx: Context, scope: Scriptable, jsLib: String) {
+        // Legado 允许 jsLib 写成 {"名称": "远程 JS 地址"}，按出现顺序加载。
+        val remote = if (jsLib.startsWith("{")) {
+            runCatching { JSONObject(jsLib) }.getOrNull()
+        } else {
+            null
+        }
+        if (remote == null) {
+            evaluateLibScript(cx, scope, jsLib, "jsLib")
+            return
+        }
+        for (key in remote.keys()) {
+            val url = remote.opt(key)?.toString()?.trim().orEmpty()
+            if (!url.startsWith("http://") && !url.startsWith("https://")) continue
+            val code = remoteLibs.getOrPut(url) { http.fetchText(url) }
+            evaluateLibScript(cx, scope, code, "jsLib-$key")
+        }
+    }
+
+    private fun evaluateLibScript(
+        cx: Context,
+        scope: Scriptable,
+        code: String,
+        name: String,
+    ) {
+        try {
+            cx.evaluateString(scope, code, name, 1, null)
+        } catch (error: RhinoException) {
+            val line = error.lineNumber()
+            val snippet = if (line > 0) {
+                code.lineSequence()
+                    .drop(line - 1)
+                    .firstOrNull()
+                    ?.trim()
+                    ?.take(160)
+            } else {
+                null
+            }
+            val detail = error.details().ifBlank { error.message.orEmpty() }
+            throw IllegalStateException(
+                buildString {
+                    append("书源 $name 第 $line 行加载失败：$detail")
+                    if (!snippet.isNullOrBlank()) append(" → $snippet")
+                },
+                error,
+            )
+        }
+    }
+
+    private fun bindInfoMap(
+        cx: Context,
+        scope: Scriptable,
+        env: JsEnv,
+        variables: MutableMap<String, Any?>,
+    ): Scriptable? {
+        val values = env.infoMap ?: return null
+        val result = cx.newObject(scope)
+        for ((key, value) in values) {
+            ScriptableObject.putProperty(result, key, value)
+        }
+        fun method(name: String, arity: Int, body: (Array<out Any?>) -> Any?) {
+            val function = JsFunction(name, arity, body)
+            function.parentScope = scope
+            function.prototype = ScriptableObject.getFunctionPrototype(scope)
+            ScriptableObject.putProperty(result, name, function)
+        }
+        method("get", 1) { args ->
+            ScriptableObject.getProperty(result, stringArg(args, 0))
+        }
+        method("put", 2) { args ->
+            ScriptableObject.putProperty(result, stringArg(args, 0), args.getOrNull(1))
+            null
+        }
+        method("saveNow", 0) { null }
+        variables["infoMap"] = values.toMap()
+        ScriptableObject.putProperty(scope, "infoMap", result)
+        return result
+    }
+
+    private fun copyInfoMap(source: Scriptable, target: MutableMap<String, String>?) {
+        if (target == null) return
+        for (id in source.ids) {
+            val key = Context.toString(id)
+            if (key == "get" || key == "put" || key == "saveNow") continue
+            val value = ScriptableObject.getProperty(source, key)
+            if (value == Scriptable.NOT_FOUND || value == null || value is Undefined) {
+                target.remove(key)
+            } else {
+                target[key] = Context.toString(value)
+            }
+        }
+    }
+
+    private fun bindSource(
+        cx: Context,
+        scope: Scriptable,
+        env: JsEnv,
+        variables: MutableMap<String, Any?>,
+    ) {
+        val result = (toJs(cx, scope, env.source.rawMap()) as? Scriptable)
+            ?: cx.newObject(scope)
+        fun method(name: String, arity: Int, body: (Array<out Any?>) -> Any?) {
+            val function = JsFunction(name, arity, body)
+            function.parentScope = scope
+            function.prototype = ScriptableObject.getFunctionPrototype(scope)
+            ScriptableObject.putProperty(result, name, function)
+        }
+        method("getVariable", 0) { env.variables?.get(env.source.key).orEmpty() }
+        method("putVariable", 1) { args ->
+            env.variables?.put(env.source.key, stringArg(args, 0))
+            null
+        }
+        method("setVariable", 1) { args ->
+            env.variables?.put(env.source.key, stringArg(args, 0))
+            null
+        }
+        method("getKey", 0) { env.source.key }
+        method("getBookSourceName", 0) { env.source.name }
+        method("getLoginInfo", 0) {
+            env.variables?.get(loginInfoKey(env.source.key))?.ifBlank { null }
+        }
+        method("getLoginInfoMap", 0) {
+            jsonObjectValue(cx, scope, env.variables?.get(loginInfoKey(env.source.key)))
+                ?: cx.newObject(scope)
+        }
+        method("getLoginHeader", 0) {
+            env.variables?.get(loginHeaderKey(env.source.key))?.ifBlank { null }
+        }
+        method("getLoginHeaderMap", 0) {
+            jsonObjectValue(cx, scope, env.variables?.get(loginHeaderKey(env.source.key)))
+        }
+        method("putLoginInfo", 1) { args ->
+            env.variables?.put(loginInfoKey(env.source.key), stringArg(args, 0))
+            true
+        }
+        method("putLoginInfoMap", 1) { args ->
+            val value = jsToKotlin(cx, args.getOrNull(0))
+            val text = when (value) {
+                is Map<*, *> -> JSONObject(value).toString()
+                null -> "{}"
+                else -> Context.toString(value)
+            }
+            env.variables?.put(loginInfoKey(env.source.key), text)
+            true
+        }
+        method("removeLoginInfo", 0) {
+            env.variables?.remove(loginInfoKey(env.source.key))
+            null
+        }
+        method("putLoginHeader", 1) { args ->
+            val header = loginHeaderText(cx, args.getOrNull(0))
+            if (header == null) {
+                env.variables?.remove(loginHeaderKey(env.source.key))
+            } else {
+                env.variables?.put(loginHeaderKey(env.source.key), header)
+                http.applyLoginHeaderCookie(env.source.key, header)
+            }
+            null
+        }
+        method("removeLoginHeader", 0) {
+            env.variables?.remove(loginHeaderKey(env.source.key))
+            http.removeCookie(env.source.key)
+            null
+        }
+        method("getJava", 0) { ScriptableObject.getProperty(scope, "java") }
+        method("refreshJSLib", 0) { null }
+        method("putConcurrent", 1) { null }
+        method("getHeaderMap", 0) {
+            jsonObjectValue(cx, scope, env.source.rawMap()["header"]?.toString())
+        }
+        method("refreshExplore", 0) { null }
+        variables["source"] = env.source.rawMap()
+        ScriptableObject.putProperty(scope, "source", result)
+    }
+
+    private fun loginHeaderText(cx: Context, value: Any?): String? {
+        val text = when (val converted = jsToKotlin(cx, value)) {
+            null -> return null
+            is Map<*, *> -> toJsonObject(converted).toString()
+            else -> converted.toString().trim()
+        }
+        if (!text.startsWith("{")) return null
+        val json = runCatching { JSONObject(text) }.getOrNull() ?: return null
+        return json.takeIf { it.length() > 0 }?.toString()
+    }
+
+    private fun jsonObjectValue(
+        cx: Context,
+        scope: Scriptable,
+        raw: String?,
+    ): Any? {
+        if (raw.isNullOrBlank()) return null
+        return runCatching {
+            toJs(cx, scope, jsonValue(JSONObject(raw)))
+        }.getOrNull()
+    }
+
+    private fun jsonValue(value: Any?): Any? = when (value) {
+        is JSONObject -> buildMap {
+            for (key in value.keys()) put(key, jsonValue(value.opt(key)))
+        }
+        is JSONArray -> (0 until value.length()).map { jsonValue(value.opt(it)) }
+        JSONObject.NULL -> null
+        else -> value
+    }
+
+    private fun cacheObject(cx: Context, scope: Scriptable): Scriptable =
+        cx.newObject(scope).also { result ->
+            fun method(name: String, arity: Int, body: (Array<out Any?>) -> Any?) {
+                val function = JsFunction(name, arity, body)
+                function.parentScope = scope
+                function.prototype = ScriptableObject.getFunctionPrototype(scope)
+                ScriptableObject.putProperty(result, name, function)
+            }
+            method("get", 1) { args -> cache.get(stringArg(args, 0)) }
+            method("put", 3) { args ->
+                val ttl = stringArg(args, 2).toLongOrNull() ?: 0L
+                cache.put(stringArg(args, 0), stringArg(args, 1), ttl)
+                null
+            }
+            method("remove", 1) { args ->
+                cache.remove(stringArg(args, 0))
+                null
+            }
+        }
+
+    private fun bind(
+        cx: Context,
+        scope: Scriptable,
+        name: String,
+        value: Any?,
+        variables: MutableMap<String, Any?>,
+    ) {
+        variables[name] = value
+        ScriptableObject.putProperty(scope, name, toJs(cx, scope, value))
+    }
+
+    private fun installJava(
+        cx: Context,
+        scope: Scriptable,
+        env: JsEnv,
+        variables: MutableMap<String, Any?>,
+    ) {
+        val javaObject = cx.newObject(scope)
+        fun fn(name: String, arity: Int, body: (Array<out Any?>) -> Any?) {
+            val function = JsFunction(name, arity, body)
+            function.parentScope = scope
+            function.prototype = ScriptableObject.getFunctionPrototype(scope)
+            ScriptableObject.putProperty(javaObject, name, function)
+        }
+        fn("ajax", 1) { args -> fetch(env, firstUrl(args.getOrNull(0))) }
+        fn("get", 2) { args ->
+            val url = stringArg(args, 0)
+            val headers = headerMap(args.getOrNull(1))
+            val spec = RequestSpec(
+                http.resolve(env.source.key, url),
+                UrlOption("GET", headers, null, null),
+            )
+            responseObject(
+                cx,
+                scope,
+                http.fetch(env.source, spec, allowUnsuccessful = true),
+            )
+        }
+        fn("post", 3) { args ->
+            val url = stringArg(args, 0)
+            val body = stringArg(args, 1)
+            val headers = headerMap(args.getOrNull(2))
+            val spec = RequestSpec(
+                http.resolve(env.source.key, url),
+                UrlOption("POST", headers, body, null),
+            )
+            responseObject(
+                cx,
+                scope,
+                http.fetch(env.source, spec, allowUnsuccessful = true),
+            )
+        }
+        fn("connect", 2) { args ->
+            val request = http.requestSpec(env.source.key, stringArg(args, 0))
+            val headers = headerMap(args.getOrNull(1))
+            // connect() in Legado accepts a URL followed by the usual
+            // `,{ "method": "POST", "body": {...} }` request options. Merge
+            // the separate header argument without losing those options.
+            val spec = RequestSpec(
+                request.url,
+                request.option.copy(headers = request.option.headers + headers),
+            )
+            responseObject(
+                cx,
+                scope,
+                http.fetch(env.source, spec, allowUnsuccessful = true),
+            )
+        }
+        fn("getString", 1) { args ->
+            env.analyzer.getString(stringArg(args, 0), env.toRuleContext())
+        }
+        fn("getStringList", 1) { args ->
+            toJs(
+                cx,
+                scope,
+                env.analyzer.getStrings(stringArg(args, 0), env.toRuleContext()),
+            )
+        }
+        fn("getElements", 1) { args ->
+            toJs(
+                cx,
+                scope,
+                env.analyzer.getObjects(stringArg(args, 0), env.toRuleContext()),
+            )
+        }
+        fn("put", 2) { args ->
+            variables[stringArg(args, 0)] = args.getOrNull(1)
+            null
+        }
+        fn("base64Encode", 1) { args ->
+            Base64.encodeToString(stringArg(args, 0).toByteArray(), Base64.NO_WRAP)
+        }
+        fn("base64Decode", 1) { args ->
+            String(Base64.decode(stringArg(args, 0), Base64.DEFAULT))
+        }
+        fn("md5Encode", 1) { args ->
+            MessageDigest.getInstance("MD5")
+                .digest(stringArg(args, 0).toByteArray())
+                .joinToString("") { "%02x".format(it) }
+        }
+        fn("urlEncode", 1) { args ->
+            URLEncoder.encode(stringArg(args, 0), "UTF-8")
+        }
+        fn("timeFormat", 2) { args ->
+            val time = stringArg(args, 0).toLongOrNull() ?: 0L
+            val format = stringArg(args, 1).ifEmpty { "yyyy-MM-dd HH:mm" }
+            SimpleDateFormat(format, Locale.getDefault()).format(Date(time))
+        }
+        fn("htmlFormat", 1) { args -> stringArg(args, 0) }
+        fn("log", 1) { args ->
+            Log.d("BookSource", stringArg(args, 0))
+            null
+        }
+        fn("toast", 1) { _ -> null }
+        fn("t2s", 1) { args ->
+            val text = stringArg(args, 0)
+            runCatching {
+                android.icu.text.Transliterator
+                    .getInstance("Traditional-Simplified")
+                    .transliterate(text)
+            }.getOrDefault(text)
+        }
+        fn("s2t", 1) { args ->
+            val text = stringArg(args, 0)
+            runCatching {
+                android.icu.text.Transliterator
+                    .getInstance("Simplified-Traditional")
+                    .transliterate(text)
+            }.getOrDefault(text)
+        }
+        fn("webView", 3) { args ->
+            val html = stringArg(args, 0)
+            val url = stringArg(args, 1)
+            val js = stringArg(args, 2)
+            when {
+                html.isNotBlank() -> html
+                url.isBlank() -> ""
+                js.contains("document.cookie", ignoreCase = true) ->
+                    http.cookie(env.source.key, url)
+                else -> runCatching { fetch(env, url) }.getOrDefault("")
+            }
+        }
+        fn("startBrowserAwait", 2) { args ->
+            val url = stringArg(args, 0)
+            val response = if (url.isBlank()) {
+                null
+            } else {
+                runCatching {
+                    http.fetch(env.source, http.requestSpec(env.source.key, url))
+                }.getOrNull()
+            }
+            responseObject(
+                cx,
+                scope,
+                response ?: BookSourceResponse("", "", 0, emptyMap()),
+            )
+        }
+        fn("searchBook", 2) { args ->
+            env.onSearchBook?.invoke(stringArg(args, 0))
+            true
+        }
+        fn("open", 3) { _ -> null }
+        ScriptableObject.putProperty(scope, "java", javaObject)
+    }
+
+    private fun bindCookie(cx: Context, scope: Scriptable, env: JsEnv) {
+        val result = cx.newObject(scope)
+        fun method(name: String, arity: Int, body: (Array<out Any?>) -> Any?) {
+            val function = JsFunction(name, arity, body)
+            function.parentScope = scope
+            function.prototype = ScriptableObject.getFunctionPrototype(scope)
+            ScriptableObject.putProperty(result, name, function)
+        }
+        method("getCookie", 1) { args ->
+            http.cookie(env.source.key, stringArg(args, 0))
+        }
+        method("getKey", 2) { args ->
+            http.cookieKey(env.source.key, stringArg(args, 0), stringArg(args, 1))
+        }
+        method("replaceCookie", 2) { args ->
+            http.replaceCookie(env.source.key, stringArg(args, 0), stringArg(args, 1))
+            null
+        }
+        method("setCookie", 2) { args ->
+            http.setCookie(env.source.key, stringArg(args, 0), stringArg(args, 1))
+            null
+        }
+        method("removeCookie", 1) { _ ->
+            http.removeCookie(env.source.key)
+            null
+        }
+        method("cookieToMap", 1) { args ->
+            toJs(cx, scope, parseCookieMap(stringArg(args, 0)))
+        }
+        method("mapToCookie", 1) { args ->
+            val map = jsToKotlin(cx, args.getOrNull(0)) as? Map<*, *> ?: emptyMap<Any?, Any?>()
+            map.entries.joinToString("; ") { (key, value) -> "$key=$value" }
+        }
+        ScriptableObject.putProperty(scope, "cookie", result)
+    }
+
+    private class JsCache {
+        private data class Entry(val value: String, val expiresAt: Long)
+
+        private val values = ConcurrentHashMap<String, Entry>()
+
+        fun get(key: String): String? {
+            val entry = values[key] ?: return null
+            if (entry.expiresAt > 0 && entry.expiresAt < System.currentTimeMillis()) {
+                values.remove(key)
+                return null
+            }
+            return entry.value
+        }
+
+        fun put(key: String, value: String, ttlSeconds: Long) {
+            val expiresAt = if (ttlSeconds > 0) {
+                System.currentTimeMillis() + ttlSeconds * 1000
+            } else {
+                0L
+            }
+            values[key] = Entry(value, expiresAt)
+        }
+
+        fun remove(key: String) {
+            values.remove(key)
+        }
+    }
+
+    private fun fetch(env: JsEnv, url: String): String =
+        http.fetch(
+            env.source,
+            http.requestSpec(env.source.key, url),
+            allowUnsuccessful = true,
+        ).text
+
+    private fun responseObject(
+        cx: Context,
+        scope: Scriptable,
+        response: BookSourceResponse,
+    ): JsResponseObject {
+        val result = JsResponseObject(response)
+        result.parentScope = scope
+        result.prototype = ScriptableObject.getObjectPrototype(scope)
+        fun property(name: String, value: Any?) {
+            ScriptableObject.putProperty(result, name, value)
+        }
+        fun method(name: String, body: () -> Any?) {
+            val function = JsFunction(name, 0) { body() }
+            function.parentScope = scope
+            function.prototype = ScriptableObject.getFunctionPrototype(scope)
+            ScriptableObject.putProperty(result, name, function)
+        }
+        method("body") { response.text }
+        method("html") { response.text }
+        property("url", response.url)
+        property("statusCode", response.statusCode)
+        property("code", response.statusCode)
+        property("message", "")
+        property("isSuccessful", response.statusCode in 200..299)
+        method("errorBody") { null }
+        method("headers") { toJs(cx, scope, response.headers) }
+        return result
+    }
+
+    private class JsResponseObject(val response: BookSourceResponse) : NativeObject()
+
+    private fun firstUrl(value: Any?): String = when (value) {
+        is NativeArray -> if (value.length > 0) {
+            Context.toString(value.get(0, value))
+        } else {
+            ""
+        }
+        is NativeJavaObject -> firstUrl(value.unwrap())
+        is List<*> -> value.firstOrNull()?.toString().orEmpty()
+        else -> stringArg(arrayOf(value), 0)
+    }
+
+    private fun toJs(cx: Context, scope: Scriptable, value: Any?): Any? = when (value) {
+        null -> null
+        is BookSourceResponse -> responseObject(cx, scope, value)
+        is Map<*, *> -> cx.newObject(scope).also { objectValue ->
+            for ((key, item) in value) {
+                if (key == null) continue
+                ScriptableObject.putProperty(
+                    objectValue,
+                    key.toString(),
+                    toJs(cx, scope, item),
+                )
+            }
+            val getter = JsFunction("get", 1) { args ->
+                val key = stringArg(args, 0)
+                toJs(cx, scope, value[key])
+            }
+            getter.parentScope = scope
+            getter.prototype = ScriptableObject.getFunctionPrototype(scope)
+            ScriptableObject.putProperty(objectValue, "get", getter)
+        }
+        is Iterable<*> -> cx.newArray(
+            scope,
+            value.map { toJs(cx, scope, it) }.toTypedArray(),
+        )
+        is Array<*> -> cx.newArray(
+            scope,
+            value.map { toJs(cx, scope, it) }.toTypedArray(),
+        )
+        else -> Context.javaToJS(value, scope)
+    }
+
+    private fun jsToKotlin(cx: Context, value: Any?): Any? = when (value) {
+        null, is Undefined -> null
+        is WrappedException -> throw value.wrappedException
+        is NativeJavaObject -> value.unwrap()
+        is JsResponseObject -> value.response
+        is NativeArray -> (0 until value.length.toInt()).map { index ->
+            jsToKotlin(cx, value.get(index, value))
+        }
+        is NativeObject -> buildMap {
+            for (id in value.ids) {
+                val key = Context.toString(id)
+                put(key, jsToKotlin(cx, value.get(key, value)))
+            }
+        }
+        is String, is Number, is Boolean -> value
+        is Scriptable -> Context.toString(value)
+        else -> Context.toString(value)
+    }
+
+    private fun stringArg(args: Array<out Any?>, index: Int): String =
+        Context.toString(args.getOrNull(index) ?: "")
+
+    private fun headerMap(value: Any?): Map<String, String> = when (value) {
+        null, is Undefined -> emptyMap()
+        is String -> {
+            val text = value.trim()
+            if (text.isEmpty()) {
+                emptyMap()
+            } else {
+                runCatching {
+                    val json = JSONObject(text)
+                    buildMap {
+                        for (key in json.keys()) {
+                            val item = json.opt(key)
+                            if (item != null && item != JSONObject.NULL) {
+                                put(key, item.toString())
+                            }
+                        }
+                    }
+                }.getOrElse { emptyMap() }
+            }
+        }
+        else -> stringMap(value)
+    }
+
+    private fun stringMap(value: Any?): Map<String, String> {
+        if (value is NativeJavaObject) return stringMap(value.unwrap())
+        if (value is Map<*, *>) {
+            return buildMap {
+                for ((key, item) in value) {
+                    if (key != null && item != null) put(key.toString(), item.toString())
+                }
+            }
+        }
+        if (value !is Scriptable) return emptyMap()
+        val result = mutableMapOf<String, String>()
+        for (id in value.ids) {
+            val key = Context.toString(id)
+            val item = ScriptableObject.getProperty(value, key)
+            if (item == Scriptable.NOT_FOUND || item == null || item is Undefined) continue
+            result[key] = Context.toString(item)
+        }
+        return result
+    }
+
+    private fun parseCookieMap(cookie: String): Map<String, String> {
+        if (cookie.isBlank()) return emptyMap()
+        return buildMap {
+            for (part in cookie.split(';')) {
+                val pair = part.trim()
+                val separator = pair.indexOf('=')
+                if (separator <= 0) continue
+                put(
+                    pair.substring(0, separator).trim(),
+                    pair.substring(separator + 1).trim(),
+                )
+            }
+        }
+    }
+
+    private class JsFunction(
+        private val name: String,
+        private val arity: Int,
+        private val body: (Array<out Any?>) -> Any?,
+    ) : BaseFunction() {
+        override fun getFunctionName(): String = name
+        override fun getArity(): Int = arity
+        override fun call(
+            cx: Context,
+            scope: Scriptable,
+            thisObj: Scriptable?,
+            args: Array<out Any?>,
+        ): Any? = try {
+            body(args)
+        } catch (error: WrappedException) {
+            throw error
+        } catch (error: RuntimeException) {
+            throw error
+        } catch (error: Error) {
+            throw error
+        } catch (error: Throwable) {
+            // Rhino 解释器只接受 RuntimeException/Error；受检异常需要先包装，
+            // 否则会被强转成 Error 并报 "cannot be cast to java.lang.Error"。
+            throw WrappedException(error)
+        }
+    }
+}
+
+internal data class JsEnv(
+    val source: BookSource,
+    val analyzer: BookSourceAnalyzer,
+    val content: Any?,
+    val baseUrl: String,
+    val key: String,
+    val page: Int,
+    val book: BookData? = null,
+    val chapter: ChapterData? = null,
+    val infoMap: MutableMap<String, String>? = null,
+    val variables: BookSourceVariables? = null,
+    val onSearchBook: ((String) -> Unit)? = null,
+    val isLongClick: Boolean = false,
+    val response: BookSourceResponse? = null,
+) {
+    fun toRuleContext(): RuleContext = RuleContext(
+        content = content,
+        baseUrl = baseUrl,
+        key = key,
+        page = page,
+        book = book,
+        chapter = chapter,
+    )
+}
+
+private fun BookData.toMap(): Map<String, Any?> = mapOf(
+    "name" to name,
+    "author" to author,
+    "bookUrl" to bookUrl,
+    "coverUrl" to coverUrl,
+    "intro" to intro,
+    "kind" to kind,
+    "lastChapter" to lastChapter,
+    "updateTime" to updateTime,
+    "tocUrl" to tocUrl,
+)
+
+private fun ChapterData.toMap(): Map<String, Any?> = mapOf(
+    "title" to title,
+    "url" to url,
+    "nextUrl" to nextUrl,
+)

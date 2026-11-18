@@ -16,6 +16,7 @@ class ReaderBookStyle {
     required this.typeface,
     this.enabled = true,
     this.onlyLanguage,
+    this.replaceRulesEnabled,
     Set<String> hiddenLanguages = const {},
   }) : hiddenLanguages = Set.unmodifiable(hiddenLanguages);
 
@@ -24,6 +25,7 @@ class ReaderBookStyle {
   final String typeface;
   final bool enabled;
   final String? onlyLanguage;
+  final bool? replaceRulesEnabled;
   static const _unchanged = Object();
   final Set<String> hiddenLanguages;
   ReaderPreferences? _defaults, _effective;
@@ -43,6 +45,7 @@ class ReaderBookStyle {
     double? lineHeight,
     String? typeface,
     bool? enabled,
+    Object? replaceRulesEnabled = _unchanged,
     Set<String>? hiddenLanguages,
     Object? onlyLanguage = _unchanged,
   }) => ReaderBookStyle(
@@ -51,6 +54,9 @@ class ReaderBookStyle {
     lineHeight: lineHeight ?? this.lineHeight,
     typeface: typeface ?? this.typeface,
     enabled: enabled ?? this.enabled,
+    replaceRulesEnabled: identical(replaceRulesEnabled, _unchanged)
+        ? this.replaceRulesEnabled
+        : replaceRulesEnabled as bool?,
     hiddenLanguages: hiddenLanguages ?? this.hiddenLanguages,
     onlyLanguage: identical(onlyLanguage, _unchanged)
         ? this.onlyLanguage
@@ -81,6 +87,8 @@ class ReaderBookStyle {
   Map<String, Object?> toJson() => {
     'enabled': enabled,
     if (onlyLanguage != null) 'onlyLanguage': onlyLanguage,
+    if (replaceRulesEnabled != null)
+      'replaceRulesEnabled': replaceRulesEnabled,
     if (hiddenLanguages.isNotEmpty)
       'hiddenLanguages': hiddenLanguages.toList()..sort(),
     'fontSize': fontSize,
@@ -104,6 +112,7 @@ class ReaderBookStyle {
     final layout = json['layout'];
     final hidden = json['hiddenLanguages'] ?? const <String>[];
     final only = json['onlyLanguage'];
+    final replaceRules = json['replaceRulesEnabled'];
     if (only != null &&
         (only is! String || only.isEmpty || readerLanguageCode(only) != only)) {
       throw const FormatException('本书语言设置格式有误');
@@ -119,6 +128,7 @@ class ReaderBookStyle {
       throw const FormatException('本书语言设置格式有误');
     }
     if (json['enabled'] is! bool ||
+        (replaceRules != null && replaceRules is! bool) ||
         !validFontChoice(json['typeface'], follow: true) ||
         layout is! Map ||
         layout.keys.any((key) => !_layoutKeys.contains(key))) {
@@ -126,6 +136,7 @@ class ReaderBookStyle {
     }
     return ReaderBookStyle(
       enabled: json['enabled'] as bool,
+      replaceRulesEnabled: replaceRules as bool?,
       hiddenLanguages: hidden.cast<String>().toSet(),
       onlyLanguage: only as String?,
       preferences: ReaderPreferences.fromJson(

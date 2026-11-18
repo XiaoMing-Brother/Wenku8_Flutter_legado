@@ -27,7 +27,7 @@ def command(args, phase):
 
 def check_package(badging, abi):
     expected = f"name='{PACKAGE}' versionCode='{BUILD}' versionName='{VERSION}'"
-    if expected not in badging or "application-label:'轻小说文库'" not in badging:
+    if expected not in badging or "application-label:'文库阅读'" not in badging:
         raise ValueError("Package identity or version mismatch")
     if "application-debuggable" in badging or f"native-code: '{abi}'" not in badging:
         raise ValueError("Release architecture or build type mismatch")

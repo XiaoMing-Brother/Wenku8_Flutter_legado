@@ -72,21 +72,21 @@ class _WidgetCardsPageState extends State<ReadingWidgetSettingsPage> {
     final design = await showJellySheet<ReadingWidgetDesign>(
       context: context,
       reduceMotion: widget.state.reduceMotion,
-      builder: (context) => Padding(
-        padding: const EdgeInsets.all(24),
+      builder: (context) => SingleChildScrollView(
+        padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const AppText(
-              '选择桌面内容',
-              style: TextStyle(fontSize: 21, fontWeight: FontWeight.w600),
+            const ArchiveSection(
+              title: '选择桌面内容',
+              code: 'READING / WIDGET',
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 12),
             for (final design in ReadingWidgetCards.designs)
-              GlassTextButton(
+              GlassMenuItem(
+                label: design.label,
                 onPressed: () => Navigator.pop(context, design),
-                child: AppText(design.label),
               ),
           ],
         ),
@@ -355,7 +355,7 @@ class _ReadingWidgetSettingsPageState extends State<ReadingWidgetCardEditor> {
                 onChanged: _saving ? null : (skin) => _configure(skin: skin),
               ),
               const SizedBox(height: 28),
-              const ArchiveSection(title: '显示模式', code: '02 / APPEARANCE'),
+              const ArchiveSection(title: '显示模式', code: '02 / MODE'),
               const SizedBox(height: 14),
               AppControls.segments<ReadingWidgetAppearance>(
                 context,
@@ -532,14 +532,14 @@ class _ReadingGoalEditorState extends State<_ReadingGoalEditor> {
 
   @override
   Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.all(24),
+    padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
     child: Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const AppText(
-          '每日阅读目标',
-          style: TextStyle(fontSize: 21, fontWeight: FontWeight.w600),
+        const ArchiveSection(
+          title: '每日阅读目标',
+          code: 'READING / GOAL',
         ),
         const SizedBox(height: 20),
         TextField(

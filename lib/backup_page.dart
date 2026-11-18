@@ -1,9 +1,9 @@
-import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'app_interactions.dart';
 import 'app_ui.dart';
+import 'feature_pages.dart';
 import 'library_backup.dart';
 import 'library_state.dart';
 import 'local_platform.dart';
@@ -86,163 +86,137 @@ class _LibraryBackupPageState extends State<LibraryBackupPage> {
   @override
   Widget build(BuildContext context) => PopScope<void>(
     canPop: _busy == null,
-    child: Scaffold(
-      body: Atmosphere(
-        child: GlassHeaderLayout(
-          header: ArchiveHeaderBar(
-            leading: GlassIconButton(
-              icon: CupertinoIcons.back,
-              label: '返回设置',
-              onPressed: _busy == null ? () => Navigator.pop(context) : null,
-            ),
-            title: const ArchiveRouteTitle(
-              title: '备份与恢复',
-              code: 'SYSTEM / DATA TRANSFER',
-            ),
-          ),
-          body: LoadedContentSequence(
-            generation: _preview,
-            child: ListView(
-              key: const ValueKey('backup-scroll'),
-              padding: EdgeInsets.fromLTRB(
-                24,
-                MediaQuery.paddingOf(context).top +
-                    FrostedHeader.toolbarHeight +
-                    20,
-                24,
-                MediaQuery.paddingOf(context).bottom + 32,
+    child: ArchiveFeaturePage(
+      title: '备份与恢复',
+      code: 'SYSTEM / DATA TRANSFER',
+      canPop: _busy == null,
+      child: LoadedContentSequence(
+        generation: _preview,
+        child: ListView(
+          key: const ValueKey('backup-scroll'),
+          padding: featurePadding(context),
+          children: [
+            const ArchiveSection(title: '带走你的阅读记录', code: 'SYSTEM / BACKUP'),
+            const SizedBox(height: 12),
+            const AppText('备份书架、阅读进度、书签、阅读历史、最近搜索和偏好。离线正文不包含在备份中。'),
+            const SizedBox(height: 24),
+            ContentPanel(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  if (LocalPlatform.fileActions) ...[
+                    GlassTextButton(
+                      key: const ValueKey('backup-export-file'),
+                      onPressed: _busy == null ? _export : null,
+                      child: const AppText('导出备份文件'),
+                    ),
+                    GlassTextButton(
+                      key: const ValueKey('backup-import-file'),
+                      onPressed: _busy == null ? _import : null,
+                      child: const AppText('选择备份文件'),
+                    ),
+                    const Divider(height: 24),
+                  ],
+                  GlassTextButton(
+                    key: const ValueKey('backup-copy'),
+                    onPressed: _busy == null
+                        ? () => _export(clipboard: true)
+                        : null,
+                    child: const AppText('复制备份文本'),
+                  ),
+                  GlassTextButton(
+                    key: const ValueKey('backup-paste'),
+                    onPressed: _busy == null
+                        ? () => _import(clipboard: true)
+                        : null,
+                    child: const AppText('从剪贴板读取备份'),
+                  ),
+                ],
               ),
-              children: [
-                const AppText(
-                  '带走你的阅读记录',
-                  style: TextStyle(fontSize: 22, fontWeight: FontWeight.w600),
+            ),
+            if (_busy != null)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 24),
+                child: Row(
+                  children: [
+                    Expanded(child: AppText(_busy!)),
+                    const SizedBox(width: 12),
+                    const SizedBox(
+                      width: 120,
+                      height: 64,
+                      child: LoadingSkeleton(layout: SkeletonLayout.actions),
+                    ),
+                  ],
                 ),
-                const SizedBox(height: 12),
-                const AppText('备份书架、阅读进度、书签、阅读历史、最近搜索和偏好。离线正文与账号信息不包含在备份中。'),
-                const SizedBox(height: 24),
-                ContentPanel(
+              ),
+            if (_error != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 20),
+                child: Semantics(
+                  liveRegion: true,
+                  child: AppText(
+                    _error!,
+                    key: const ValueKey('backup-error'),
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.error,
+                    ),
+                  ),
+                ),
+              ),
+            if (_preview case final backup?) ...[
+              const SizedBox(height: 24),
+              LoadedContentItem(
+                index: 0,
+                child: sectionHeader(context, '恢复预览', ''),
+              ),
+              const SizedBox(height: 14),
+              LoadedContentItem(
+                index: 1,
+                child: ContentPanel(
+                  key: const ValueKey('backup-preview'),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      if (LocalPlatform.fileActions) ...[
-                        GlassTextButton(
-                          key: const ValueKey('backup-export-file'),
-                          onPressed: _busy == null ? _export : null,
-                          child: const AppText('导出备份文件'),
-                        ),
-                        GlassTextButton(
-                          key: const ValueKey('backup-import-file'),
-                          onPressed: _busy == null ? _import : null,
-                          child: const AppText('选择备份文件'),
-                        ),
-                        const Divider(height: 24),
-                      ],
+                      AppText('备份时间 ${_date(backup.createdAt)}'),
+                      const SizedBox(height: 12),
+                      AppText(
+                        '${backup.shelfCount} 本书架收藏 · ${backup.positionCount} 条阅读进度\n${backup.bookmarkCount} 个书签 · ${backup.historyCount} 本阅读记录',
+                      ),
+                      const SizedBox(height: 14),
+                      const AppText('恢复将合并到本机，不清空已有书架和书签；同一本书保留更新时间较新的进度。'),
+                      const Divider(height: 24),
+                      Row(
+                        children: [
+                          const Expanded(child: AppText('同时恢复外观与阅读偏好')),
+                          AppControls.toggle(
+                            context,
+                            key: const ValueKey('backup-import-preferences'),
+                            value: _preferences,
+                            onChanged: _busy == null
+                                ? (value) =>
+                                      setState(() => _preferences = value)
+                                : null,
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
                       GlassTextButton(
-                        key: const ValueKey('backup-copy'),
-                        onPressed: _busy == null
-                            ? () => _export(clipboard: true)
-                            : null,
-                        child: const AppText('复制备份文本'),
+                        key: const ValueKey('backup-confirm'),
+                        onPressed: _busy == null ? _restore : null,
+                        child: const AppText('确认合并恢复'),
                       ),
                       GlassTextButton(
-                        key: const ValueKey('backup-paste'),
                         onPressed: _busy == null
-                            ? () => _import(clipboard: true)
+                            ? () => setState(() => _preview = null)
                             : null,
-                        child: const AppText('从剪贴板读取备份'),
+                        child: const AppText('取消恢复'),
                       ),
                     ],
                   ),
                 ),
-                if (_busy != null)
-                  Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 24),
-                    child: Row(
-                      children: [
-                        Expanded(child: AppText(_busy!)),
-                        const SizedBox(width: 12),
-                        const SizedBox(
-                          width: 120,
-                          height: 64,
-                          child: LoadingSkeleton(
-                            layout: SkeletonLayout.actions,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                if (_error != null)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 20),
-                    child: Semantics(
-                      liveRegion: true,
-                      child: AppText(
-                        _error!,
-                        key: const ValueKey('backup-error'),
-                        style: TextStyle(
-                          color: Theme.of(context).colorScheme.error,
-                        ),
-                      ),
-                    ),
-                  ),
-                if (_preview case final backup?) ...[
-                  const SizedBox(height: 24),
-                  LoadedContentItem(
-                    index: 0,
-                    child: sectionHeader(context, '恢复预览', ''),
-                  ),
-                  const SizedBox(height: 14),
-                  LoadedContentItem(
-                    index: 1,
-                    child: ContentPanel(
-                      key: const ValueKey('backup-preview'),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          AppText('备份时间 ${_date(backup.createdAt)}'),
-                          const SizedBox(height: 12),
-                          AppText(
-                            '${backup.shelfCount} 本书架收藏 · ${backup.positionCount} 条阅读进度\n${backup.bookmarkCount} 个书签 · ${backup.historyCount} 本阅读记录',
-                          ),
-                          const SizedBox(height: 14),
-                          const AppText('恢复将合并到本机，不清空已有书架和书签；同一本书保留更新时间较新的进度。'),
-                          const Divider(height: 24),
-                          Row(
-                            children: [
-                              const Expanded(child: AppText('同时恢复外观与阅读偏好')),
-                              AppControls.toggle(
-                                context,
-                                key: const ValueKey(
-                                  'backup-import-preferences',
-                                ),
-                                value: _preferences,
-                                onChanged: _busy == null
-                                    ? (value) =>
-                                          setState(() => _preferences = value)
-                                    : null,
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 12),
-                          GlassTextButton(
-                            key: const ValueKey('backup-confirm'),
-                            onPressed: _busy == null ? _restore : null,
-                            child: const AppText('确认合并恢复'),
-                          ),
-                          GlassTextButton(
-                            onPressed: _busy == null
-                                ? () => setState(() => _preview = null)
-                                : null,
-                            child: const AppText('取消恢复'),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ],
-              ],
-            ),
-          ),
+              ),
+            ],
+          ],
         ),
       ),
     ),

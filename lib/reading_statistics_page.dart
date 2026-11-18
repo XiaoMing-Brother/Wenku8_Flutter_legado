@@ -837,7 +837,7 @@ class _ReadingStatisticsPageState extends State<ReadingStatisticsPage>
   Widget _breadth(BuildContext context) => Column(
     crossAxisAlignment: CrossAxisAlignment.start,
     children: [
-      const ArchiveSection(title: '阅读的广度', code: '02 / BOOKS ALONG THE WAY'),
+      const ArchiveSection(title: '阅读的广度', code: 'READING / BREADTH'),
       if (_hasBreadth) ...[
         const SizedBox(height: 14),
         AppText('每天读过的书 · 本', style: _muted(context)),
@@ -860,7 +860,7 @@ class _ReadingStatisticsPageState extends State<ReadingStatisticsPage>
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const ArchiveSection(title: '阅读日历', code: '02 / CONSISTENCY'),
+      const ArchiveSection(title: '阅读日历', code: 'READING / CALENDAR'),
         const SizedBox(height: 20),
         _Metrics([
           _Metric('截至区间末连续', '${data.currentStreak}', '天'),
@@ -1006,7 +1006,7 @@ class _ReadingStatisticsPageState extends State<ReadingStatisticsPage>
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const ArchiveSection(title: '书页足迹', code: '03 / READING & EXCERPTS'),
+      const ArchiveSection(title: '书页足迹', code: 'READING / FOOTPRINT'),
         if (data.readingBooks > 0) ...[
           const SizedBox(height: 20),
           AppText(
@@ -1123,7 +1123,7 @@ class _ReadingStatisticsPageState extends State<ReadingStatisticsPage>
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const ArchiveSection(title: '我的藏书', code: '04 / COLLECTION'),
+      const ArchiveSection(title: '我的藏书', code: 'READING / COLLECTION'),
         const SizedBox(height: 20),
         if (wide)
           Row(

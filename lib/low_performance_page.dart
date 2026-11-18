@@ -1,8 +1,8 @@
-import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 
 import 'app_interactions.dart';
 import 'app_ui.dart';
+import 'feature_pages.dart';
 import 'library_state.dart';
 import 'performance_preferences.dart';
 
@@ -33,116 +33,90 @@ class _LowPerformancePageState extends State<LowPerformancePage> {
     animation: widget.state.settingsChanges,
     builder: (context, _) {
       final preferences = widget.state.performance;
-      return Scaffold(
-        body: Atmosphere(
-          child: GlassHeaderLayout(
-            header: ArchiveHeaderBar(
-              leading: GlassIconButton(
-                icon: CupertinoIcons.back,
-                label: '返回设置',
-                onPressed: () => Navigator.pop(context),
-              ),
-              title: const ArchiveRouteTitle(
+      return ArchiveFeaturePage(
+        title: '低性能设备模式',
+        code: 'SYSTEM / PERFORMANCE',
+        child: ListView(
+          key: const ValueKey('performance-options-scroll'),
+          padding: featurePadding(context),
+          children: [
+            ContentPanel(
+              child: _option(
                 title: '低性能设备模式',
-                code: 'SYSTEM / PERFORMANCE',
+                description: preferences.enabled
+                    ? '轻量预设已启用，可按需要保留下面的效果。'
+                    : '一键减少图形开销；关闭后恢复原来的外观。',
+                value: preferences.enabled,
+                switchKey: 'low-performance-mode',
+                onChanged: _saving
+                    ? null
+                    : (value) => _save(preferences.withEnabled(value)),
               ),
             ),
-            body: ListView(
-              key: const ValueKey('performance-options-scroll'),
-              padding: EdgeInsets.fromLTRB(
-                24 + MediaQuery.paddingOf(context).left,
-                MediaQuery.paddingOf(context).top +
-                    FrostedHeader.toolbarHeight +
-                    20,
-                24 + MediaQuery.paddingOf(context).right,
-                MediaQuery.paddingOf(context).bottom + 32,
+            const SizedBox(height: 24),
+            const ArchiveSection(title: '保留的效果', code: 'SYSTEM / EFFECTS'),
+            const SizedBox(height: 8),
+            AppText(
+              '开启的效果越少，图形开销越低。正文、书签、缓存和听书功能保持不变。',
+              style: TextStyle(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+                height: 1.5,
               ),
-              children: [
-                ContentPanel(
-                  child: _option(
-                    title: '低性能设备模式',
-                    description: preferences.enabled
-                        ? '轻量预设已启用，可按需要保留下面的效果。'
-                        : '一键减少图形开销；关闭后恢复原来的外观。',
-                    value: preferences.enabled,
-                    switchKey: 'low-performance-mode',
-                    onChanged: _saving
-                        ? null
-                        : (value) => _save(preferences.withEnabled(value)),
-                  ),
-                ),
-                const SizedBox(height: 24),
-                AppText(
-                  '保留的效果',
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
-                const SizedBox(height: 8),
-                AppText(
-                  '开启的效果越少，图形开销越低。正文、书签、缓存和听书功能保持不变。',
-                  style: TextStyle(
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                    height: 1.5,
-                  ),
-                ),
-                const SizedBox(height: 16),
-                for (final group in const [
-                  (
-                    '玻璃与模糊',
-                    [
-                      PerformanceEffect.glass,
-                      PerformanceEffect.blur,
-                      PerformanceEffect.edgeBlur,
-                    ],
-                  ),
-                  (
-                    '交互动效',
-                    [PerformanceEffect.motion, PerformanceEffect.animatedIcons],
-                  ),
-                  ('书架呈现', [PerformanceEffect.shelf3d]),
-                ]) ...[
-                  AppText(
-                    group.$1,
-                    style: const TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  ContentPanel(
-                    child: Column(
-                      children: [
-                        for (final effect in group.$2) ...[
-                          if (effect != group.$2.first)
-                            const Divider(height: 28),
-                          _option(
-                            title: effect.label,
-                            description: effect.description,
-                            value: preferences.allows(effect),
-                            switchKey: effect.preferenceKey,
-                            onChanged: !preferences.enabled || _saving
-                                ? null
-                                : (value) => _save(
-                                    preferences.withEffect(effect, value),
-                                  ),
-                          ),
-                        ],
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 20),
+            ),
+            const SizedBox(height: 16),
+            for (final group in const [
+              (
+                '玻璃与模糊',
+                [
+                  PerformanceEffect.glass,
+                  PerformanceEffect.blur,
+                  PerformanceEffect.edgeBlur,
                 ],
-                const SizedBox(height: 16),
-                GlassTextButton(
-                  key: const ValueKey('performance-light-preset'),
-                  onPressed: _saving || !preferences.enabled
-                      ? null
-                      : () =>
-                            _save(const PerformancePreferences(enabled: true)),
-                  child: const AppText('恢复轻量预设'),
+              ),
+              (
+                '交互动效',
+                [PerformanceEffect.motion, PerformanceEffect.animatedIcons],
+              ),
+              ('书架呈现', [PerformanceEffect.shelf3d]),
+            ]) ...[
+              AppText(
+                group.$1,
+                style: const TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
                 ),
-              ],
+              ),
+              const SizedBox(height: 12),
+              ContentPanel(
+                child: Column(
+                  children: [
+                    for (final effect in group.$2) ...[
+                      if (effect != group.$2.first) const Divider(height: 28),
+                      _option(
+                        title: effect.label,
+                        description: effect.description,
+                        value: preferences.allows(effect),
+                        switchKey: effect.preferenceKey,
+                        onChanged: !preferences.enabled || _saving
+                            ? null
+                            : (value) =>
+                                  _save(preferences.withEffect(effect, value)),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              const SizedBox(height: 20),
+            ],
+            const SizedBox(height: 16),
+            GlassTextButton(
+              key: const ValueKey('performance-light-preset'),
+              onPressed: _saving || !preferences.enabled
+                  ? null
+                  : () => _save(const PerformancePreferences(enabled: true)),
+              child: const AppText('恢复轻量预设'),
             ),
-          ),
+          ],
         ),
       );
     },
@@ -171,8 +145,8 @@ class _LowPerformancePageState extends State<LowPerformancePage> {
               AppText(
                 description,
                 style: TextStyle(
-                  fontSize: 13,
-                  height: 1.45,
+                  fontSize: 12,
+                  height: 1.4,
                   color: Theme.of(context).colorScheme.onSurfaceVariant,
                 ),
               ),

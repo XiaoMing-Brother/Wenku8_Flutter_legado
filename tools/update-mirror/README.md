@@ -1,4 +1,4 @@
-# 已停用的轻小说文库更新镜像
+# 已停用的文库阅读更新镜像
 
 项目展示页迁至 GitHub Pages：<https://mikufoxxx.github.io/Wenku8_Flutter/>。页面仅展示项目、赞助与反馈入口，不提供下载、不自动查询发行版，也不使用 Worker。
 

@@ -1,3 +1,6 @@
+import 'dart:convert';
+import 'dart:io';
+
 import 'package:flutter/cupertino.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'app_interactions.dart';
@@ -15,10 +18,13 @@ import 'local_book_scanner.dart';
 import 'local_import_batch.dart';
 import 'local_import_review.dart';
 import 'local_import_page.dart';
+import 'local_import_options.dart';
 import 'local_library_preferences.dart';
 import 'local_series_actions.dart';
 import 'local_scan_page.dart';
 import 'local_scan_selection.dart';
+import 'txt_toc_rules/txt_toc_rule_engine.dart';
+import 'txt_toc_rules/txt_toc_rule_store.dart';
 
 /// Category writes follow the finite selected batch, not every parsed member.
 /// Books are durable first; a failed assignment is reported without reimporting
@@ -137,6 +143,7 @@ class LocalBookImporter extends ChangeNotifier {
     bool management = false,
     VoidCallback? onManage,
     VoidCallback? onBatch,
+    VoidCallback? onImportBookList,
     BookSync? sync,
   }) async {
     if (busy) return;
@@ -148,18 +155,24 @@ class LocalBookImporter extends ChangeNotifier {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           GlassMenuItem(
-            label: '导入书籍',
+            label: '导入本地书籍',
             onPressed: () => Navigator.pop(menu, 'local'),
           ),
-          if (onBatch != null)
+          if (onImportBookList != null)
             GlassMenuItem(
               order: 1,
+              label: '导入书籍列表',
+              onPressed: () => Navigator.pop(menu, 'bookList'),
+            ),
+          if (onBatch != null)
+            GlassMenuItem(
+              order: 2,
               label: '批量整理',
               onPressed: () => Navigator.pop(menu, 'batch'),
             ),
           if (management)
             GlassMenuItem(
-              order: 2,
+              order: 3,
               label: '本地分类与同步',
               onPressed: () => Navigator.pop(menu, 'manage'),
             ),
@@ -173,6 +186,10 @@ class LocalBookImporter extends ChangeNotifier {
     }
     if (action == 'batch') {
       onBatch?.call();
+      return;
+    }
+    if (action == 'bookList') {
+      onImportBookList?.call();
       return;
     }
     await openImportPage(context, sync: sync);
@@ -280,6 +297,61 @@ class LocalBookImporter extends ChangeNotifier {
       organization = library.organization;
       final encoding = prefs.getString('localTxtEncoding') ?? 'auto';
       final importOptions = organization.importOptions.effective;
+      final tocRuleStore = TxtTocRuleStore.shared;
+      Future<String> textSampleFromPath(String? path) async {
+        if (path == null) return '';
+        final file = File(path);
+        if (!await file.exists()) return '';
+        final handle = await file.open();
+        try {
+          return utf8.decode(
+            await handle.read(256 * 1024),
+            allowMalformed: true,
+          );
+        } finally {
+          await handle.close();
+        }
+      }
+
+      Future<String> textSampleFromReference(String reference) async {
+        final source = await books.textAccess.inspect(
+          reference,
+          encoding: encoding,
+        );
+        final buffer = StringBuffer();
+        var offset = 0;
+        while (offset < source.size && buffer.length < 256 * 1024) {
+          final block = await books.textAccess.block(source, offset);
+          if (block.next <= offset || block.text.isEmpty) break;
+          buffer.write(block.text);
+          offset = block.next;
+        }
+        return buffer.toString();
+      }
+
+      Future<LocalImportOptions> importOptionsFor(
+        String name, {
+        String? decodedPath,
+        String? reference,
+      }) async {
+        if (!importOptions.autoTocRule ||
+            !name.toLowerCase().endsWith('.txt')) {
+          return importOptions;
+        }
+        try {
+          await tocRuleStore.load();
+          final sample = reference == null
+              ? await textSampleFromPath(decodedPath)
+              : await textSampleFromReference(reference);
+          final rule = selectTxtTocRule(tocRuleStore.rules, sample);
+          return rule == null
+              ? importOptions.withoutAutoTocRule()
+              : importOptions.withTocRule(rule.chapterRule, rule.volumeRule);
+        } on Object {
+          return importOptions.withoutAutoTocRule();
+        }
+      }
+
       final fresh = <int>{};
       var categoryWarning = false;
       Future<Novel> registerImported(
@@ -324,7 +396,7 @@ class LocalBookImporter extends ChangeNotifier {
             name,
             path,
             decodedPath: decoded,
-            options: importOptions,
+            options: await importOptionsFor(name, decodedPath: decoded),
             recoverDamagedEpub:
                 !automatic && name.toLowerCase().endsWith('.epub'),
           );
@@ -392,7 +464,10 @@ class LocalBookImporter extends ChangeNotifier {
                       selected.path!,
                       originalName: selected.originName!,
                       original: original,
-                      options: importOptions,
+                      options: await importOptionsFor(
+                        selected.name,
+                        decodedPath: decoded,
+                      ),
                       decodedPath: decoded,
                       renewReference: selectedBooks != null,
                     ),
@@ -419,13 +494,19 @@ class LocalBookImporter extends ChangeNotifier {
                           selected.name,
                           reference,
                           encoding: encoding,
-                          options: importOptions,
+                          options: await importOptionsFor(
+                            selected.name,
+                            reference: reference,
+                          ),
                           renewReference: selectedBooks != null,
                         )
                       : await books.importLinkedDocument(
                           selected.name,
                           reference,
-                          options: importOptions,
+                          options: await importOptionsFor(
+                            selected.name,
+                            reference: reference,
+                          ),
                           renewReference: selectedBooks != null,
                           recoverDamagedEpub:
                               !automatic &&
@@ -656,10 +737,12 @@ class LocalBookImportButton extends StatefulWidget {
     required this.books,
     required this.library,
     this.onManage,
+    this.onImportBookList,
   });
   final LocalBookStore books;
   final LibraryState library;
   final VoidCallback? onManage;
+  final VoidCallback? onImportBookList;
   @override
   State<LocalBookImportButton> createState() => _LocalBookImportButtonState();
 }
@@ -712,10 +795,10 @@ class _LocalBookImportButtonState extends State<LocalBookImportButton>
       child: Builder(
         builder: (anchor) => GlassIconButton(
           key: const ValueKey('shelf-import-book'),
-          icon: CupertinoIcons.arrow_down_doc,
+          icon: CupertinoIcons.ellipsis,
           label: switch (importer.progress) {
             final progress? => '正在导入 ${progress.$1} / ${progress.$2} 本',
-            _ => importer.busy ? '正在导入书籍' : '导入书籍',
+            _ => importer.busy ? '正在导入书籍' : '导入书籍与更多操作',
           },
           onPressed: importer.busy
               ? null
@@ -723,6 +806,7 @@ class _LocalBookImportButtonState extends State<LocalBookImportButton>
                   anchor,
                   management: widget.onManage != null,
                   onManage: widget.onManage,
+                  onImportBookList: widget.onImportBookList,
                 ),
         ),
       ),

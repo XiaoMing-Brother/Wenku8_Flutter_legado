@@ -34,6 +34,12 @@ MOBI 在本机重建为 EPUB 后使用现有阅读器，不访问转换服务，
 
 Android 文档转换使用 [jsoup 1.23.2](https://jsoup.org/)（MIT，Jonathan Hedley）、[commonmark-java 0.30.1](https://github.com/commonmark/commonmark-java)（BSD-2-Clause，Atlassian）和 [PDFBox Android 2.0.27.0](https://github.com/TomRoush/PdfBox-Android)（Apache-2.0，Tom Roush / Apache Software Foundation）。PDFBox 的 Bouncy Castle 1.72 依赖遵循 MIT-style 许可。Android 旧版本兼容使用 Google 的 `desugar_jdk_libs_nio` 2.1.5（GPL-2.0 with Classpath Exception）。固定版本列于 `android/app/build.gradle.kts`，原文与 PDFBox / FontBox 声明保存在 `assets/licenses/` 并注册到应用许可页。FB2 / DOCX 的 SAX 转换与 RTF 正文导入为本工程实现。
 
+### 书源引擎
+
+Android 书源适配层在 `android/app/src/main/kotlin/org/mewx/wenku8_flutter/booksource/` 中实现 Legado 书源规则的本地解析子集，不包含 Legado 应用源码，也不在 Flutter 侧解释规则。网络请求使用 [OkHttp 4.12.0](https://square.github.io/okhttp/)（Apache-2.0，Square, Inc.），JSON 路径使用 [JsonPath 2.9.0](https://github.com/json-path/JsonPath)（Apache-2.0，Jayway），脚本规则使用 [Rhino 1.7.15](https://github.com/mozilla/rhino)（MPL-2.0，Mozilla 及贡献者）。HTML 选择器复用已有的 jsoup。以上依赖的完整许可保存在 `assets/licenses/okhttp.txt`、`assets/licenses/json-path.txt` 和 `assets/licenses/rhino.txt`，并注册到应用开源许可页。
+
+书源规则语义与 Legado/MD3 版本保持兼容，但本工程只接入文字/文件类型的搜索、详情、目录和正文链路；音频、图片、视频书源会保留导入但不执行。书源返回的内容、封面和插图归原站点及权利人所有，本工程不附带书源数据。
+
 OpenJDK 兼容库通过 Gradle 依赖引入，源码与构建脚本见 [google/desugar_jdk_libs](https://github.com/google/desugar_jdk_libs)。Classpath Exception 与原始许可随 `assets/licenses/` 保留。
 
 旧 Word DOC 在 Android 本机使用 [Apache POI HWPF 5.5.1](https://poi.apache.org/components/document/) 转换，未接入在线转换服务。Apache POI 及其文档依赖的原许可与声明保存在 [`assets/licenses/poi.txt`](../assets/licenses/poi.txt)，注册到应用开源许可页。
@@ -42,7 +48,7 @@ OpenJDK 兼容库通过 Gradle 依赖引入，源码与构建脚本见 [google/d
 
 局域网续读使用 `cryptography` 2.9.0（Apache-2.0），仅在用户开启并配对后交换阅读位置、书签和分类，不使用外部服务器。旧 EPUB 定位迁移使用 `diff_match_patch` 0.4.1（Apache-2.0），仅在本机计算定位映射。系统朗读通过 Android 公开 TextToSpeech 服务发现与文件合成接口连接已安装引擎。
 
-依赖版本锁定于 `pubspec.lock`。Flutter、Cupertino Icons、音频与存储插件保留各自许可；Flutter 构建生成的许可集合可在 **设置 → 关于轻小说文库 → 开源许可与字体授权** 查看。该页面也包括可下载字体与协议适配声明。
+依赖版本锁定于 `pubspec.lock`。Flutter、Cupertino Icons、音频与存储插件保留各自许可；Flutter 构建生成的许可集合可在 **设置 → 关于文库阅读 → 开源许可与字体授权** 查看。该页面也包括可下载字体与协议适配声明。
 
 液态玻璃基于 [liquid_glass_easy 5.0.0](https://pub.dev/packages/liquid_glass_easy/versions/5.0.0)，作者 Ahmed Gamil，使用 MIT License。源码和原许可保留于 [`third_party/liquid_glass_easy`](../third_party/liquid_glass_easy)；本地 GPU 性能修改单独记录在 [`PATCHES.md`](../third_party/liquid_glass_easy/PATCHES.md)。应用保留原作者署名，版权与许可随源码及 Flutter 的开源许可集合分发。
 
@@ -50,7 +56,7 @@ OpenJDK 兼容库通过 Gradle 依赖引入，源码与构建脚本见 [google/d
 
 中文显示使用 [OpenCC ver.1.1.9](https://github.com/BYVoid/OpenCC/tree/ver.1.1.9) 的原始字词典（BYVoid 及贡献者，Apache-2.0）。词典及来源说明位于 `assets/opencc/`，完整许可位于 `assets/licenses/opencc.txt`，注册到应用开源许可页。区域字形转换与有界缓存由 Dart 实现，不包含 OpenCC 原生二进制。
 
-TXT / EPUB 目录解析、图片尺寸样式与同步归档使用 `archive`（MIT）、`html`（MIT）及 `csslib`（BSD-3-Clause），版本保留于锁文件，许可包含在 Flutter 生成的开源许可集合中。应用使用本项目选定的奶白人物剪影图标，原始位图与适配信息保留于 `assets/branding/`，不包含莱茵生命标志或宣传片素材。
+TXT / EPUB 目录解析、图片尺寸样式与同步归档使用 `archive`（MIT）、`html`（MIT）及 `csslib`（BSD-3-Clause），版本保留于锁文件，许可包含在 Flutter 生成的开源许可集合中。应用使用本项目选定的黑白人物与书页图标，原始位图与适配信息保留于 `assets/branding/`，不包含莱茵生命标志或宣传片素材。
 
 小说、封面、插图归各自权利人所有，不包含在源码许可中。README 展示图使用独立演示数据、程序绘制封面，不包含个人账号、阅读记录或真实设备通知。
 

@@ -19,8 +19,6 @@ enum SkeletonLayout {
   reader,
   readerVertical,
   bookRow,
-  review,
-  reviewThread,
   history,
   actions,
   inline,
@@ -134,27 +132,6 @@ class _SkeletonPainter extends CustomPainter {
       block(71, 20, 65, 7);
       block(71, 35, (size.width - 93) * .87, 15);
       block(71, 64, (size.width - 93) * .55, 10);
-      return;
-    }
-    if (layout == SkeletonLayout.review ||
-        layout == SkeletonLayout.reviewThread) {
-      final thread = layout == SkeletonLayout.reviewThread;
-      block(0, 4, size.width * .76, 15);
-      if (thread) {
-        final lines = math.max(1, ((size.height - 72) / 24).floor());
-        for (var line = 0; line < lines; line++) {
-          block(
-            0,
-            36 + line * 24,
-            size.width * (line == lines - 1 ? .62 : .96),
-            10,
-          );
-        }
-      } else {
-        block(0, 35, size.width * .92, 10);
-      }
-      block(0, math.max(56, size.height - 32), size.width * .44, 8);
-      if (!thread) block(0, size.height - 8, size.width * .58, 8);
       return;
     }
     if (layout == SkeletonLayout.inline) {
@@ -299,11 +276,12 @@ class LibrarySkeleton extends StatelessWidget {
     super.key,
     this.header,
     this.featured = true,
+    this.collection = true,
     this.grid = false,
     this.gridDensity = const BookGridDensity.auto(),
   });
   final Widget? header;
-  final bool featured, grid;
+  final bool featured, collection, grid;
   final BookGridDensity gridDensity;
   @override
   Widget build(BuildContext context) => Semantics(
@@ -329,13 +307,15 @@ class LibrarySkeleton extends StatelessWidget {
               ),
           const SizedBox(height: 14),
           if (featured) const ArchiveShelfSkeleton(),
-          const SizedBox(height: 32),
-          const SizedBox(
-            height: 44,
-            child: LoadingSkeleton(layout: SkeletonLayout.actions),
-          ),
-          const SizedBox(height: 8),
-          BookCollectionSkeleton(grid: grid, gridDensity: gridDensity),
+          if (collection) ...[
+            const SizedBox(height: 32),
+            const SizedBox(
+              height: 44,
+              child: LoadingSkeleton(layout: SkeletonLayout.actions),
+            ),
+            const SizedBox(height: 8),
+            BookCollectionSkeleton(grid: grid, gridDensity: gridDensity),
+          ],
         ],
       ),
     ),

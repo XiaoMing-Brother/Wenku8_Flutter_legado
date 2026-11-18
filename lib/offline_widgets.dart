@@ -7,6 +7,7 @@ import 'app_ui.dart';
 import 'archive_progress.dart';
 import 'app_interactions.dart';
 import 'catalog.dart';
+import 'feature_pages.dart';
 import 'offline_cache.dart';
 import 'offline_repository.dart';
 
@@ -54,7 +55,7 @@ class OfflineBookStatus extends StatelessWidget {
           style: TextStyle(
             color: Theme.of(context).colorScheme.onSurfaceVariant,
             fontSize: 12,
-            height: 1.5,
+            height: 1.4,
           ),
         );
       },
@@ -80,11 +81,13 @@ class OfflineBookMenu extends StatelessWidget {
     required this.novel,
     this.startChapter = 0,
     this.reduceMotion = false,
+    this.compact = false,
   });
   final OfflineNovelRepository repository;
   final Novel novel;
   final int startChapter;
   final bool reduceMotion;
+  final bool compact;
 
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
@@ -95,25 +98,31 @@ class OfflineBookMenu extends StatelessWidget {
       final done = job?.phase == DownloadPhase.completed;
       return GlassMenuAnchor(
         child: Builder(
-          builder: (anchor) => ArchiveTransferButton(
-            key: ValueKey('book-cache-action-${novel.id}'),
-            icon: done
-                ? CupertinoIcons.check_mark
-                : CupertinoIcons.cloud_download,
-            label: active ? '取消缓存' : '离线缓存',
-            working: active,
-            completed: done,
-            value: job?.phase == DownloadPhase.queued
-                ? 0
-                : (job?.total ?? 0) > 0
-                ? job!.completed / job.total
-                : null,
-            status: job?.label,
-            reduceMotion: reduceMotion,
-            onPressed: active
-                ? () => repository.cancel(novel.id)
-                : () => _show(anchor),
-          ),
+          builder: (anchor) => compact
+              ? CompactRowMenuButton(
+                  key: ValueKey('book-cache-menu-${novel.id}'),
+                  label: '${novel.title} 缓存操作',
+                  onPressed: () => _show(anchor),
+                )
+              : ArchiveTransferButton(
+                  key: ValueKey('book-cache-action-${novel.id}'),
+                  icon: done
+                      ? CupertinoIcons.check_mark
+                      : CupertinoIcons.cloud_download,
+                  label: active ? '取消缓存' : '离线缓存',
+                  working: active,
+                  completed: done,
+                  value: job?.phase == DownloadPhase.queued
+                      ? 0
+                      : (job?.total ?? 0) > 0
+                      ? job!.completed / job.total
+                      : null,
+                  status: job?.label,
+                  reduceMotion: reduceMotion,
+                  onPressed: active
+                      ? () => repository.cancel(novel.id)
+                      : () => _show(anchor),
+                ),
         ),
       );
     },
@@ -154,7 +163,7 @@ class OfflineBookMenu extends StatelessWidget {
           if (repository.cache.book(novel.id) != null)
             GlassMenuItem(
               order: 3,
-              label: '清除这本缓存',
+              label: '删除这本缓存',
               onPressed: () => Navigator.pop(menu, _BookAction.remove),
             ),
         ],
@@ -185,7 +194,7 @@ class OfflineBookMenu extends StatelessWidget {
       case _BookAction.remove:
         if (await _confirmClear(
           context,
-          '清除这本缓存',
+          bookTitle: novel.title,
           reduceMotion: reduceMotion,
         )) {
           try {
@@ -199,29 +208,21 @@ class OfflineBookMenu extends StatelessWidget {
 }
 
 Future<bool> _confirmClear(
-  BuildContext context,
-  String label, {
+  BuildContext context, {
+  String? bookTitle,
   bool reduceMotion = false,
-}) async =>
-    await showGlassMenu<bool>(
-      context: context,
-      reduceMotion: reduceMotion || MediaQuery.disableAnimationsOf(context),
-      builder: (menu) => Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          GlassMenuItem(
-            label: label,
-            onPressed: () => Navigator.pop(menu, true),
-          ),
-          GlassMenuItem(
-            order: 1,
-            label: '保留缓存',
-            onPressed: () => Navigator.pop(menu, false),
-          ),
-        ],
-      ),
-    ) ==
-    true;
+}) async {
+  final single = bookTitle != null;
+  return confirmNovelAction(
+    context,
+    title: single ? '删除离线缓存？' : '删除全部离线缓存？',
+    message: single
+        ? '「$bookTitle」的离线正文与插图会从本机缓存移除，书架、阅读进度和书签保留，也不需要重新导入书籍。'
+        : '所有离线正文与插图会从本机缓存移除，书架、阅读进度和书签保留。',
+    confirmLabel: single ? '删除离线缓存' : '删除全部离线缓存',
+    reduceMotion: reduceMotion || MediaQuery.disableAnimationsOf(context),
+  );
+}
 
 void _storageFailure(BuildContext context) =>
     showNovelFeedback(context, '缓存操作失败，请重试');
@@ -372,11 +373,9 @@ class _OfflineVolumeCacheSheetState extends State<OfflineVolumeCacheSheet> {
             ),
           ),
         Expanded(
-          child: ListView.separated(
+          child: ListView.builder(
             padding: const EdgeInsets.symmetric(horizontal: 24),
             itemCount: _volumes.length,
-            separatorBuilder: (_, _) =>
-                Divider(height: 1, color: Theme.of(context).dividerColor),
             itemBuilder: (context, index) {
               final volume = _volumes[index];
               final ids = _ids[volume.key]!;
@@ -390,17 +389,17 @@ class _OfflineVolumeCacheSheetState extends State<OfflineVolumeCacheSheet> {
               return Semantics(
                 checked: checked,
                 enabled: !cached && !active,
-                child: JellyTapSurface(
+                child: Padding(
                   key: ValueKey('cache-volume-${volume.key}'),
-                  onTap: cached || active
-                      ? null
-                      : () => setState(() {
-                          if (!_selected.add(volume.key)) {
-                            _selected.remove(volume.key);
-                          }
-                        }),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 16),
+                  padding: const EdgeInsets.only(bottom: 14),
+                  child: ContentPanel(
+                    onTap: cached || active
+                        ? null
+                        : () => setState(() {
+                            if (!_selected.add(volume.key)) {
+                              _selected.remove(volume.key);
+                            }
+                          }),
                     child: Row(
                       children: [
                         Expanded(
@@ -419,7 +418,11 @@ class _OfflineVolumeCacheSheetState extends State<OfflineVolumeCacheSheet> {
                                 count == 0
                                     ? '${ids.length} 章 · 未缓存'
                                     : '${cached ? '已缓存' : '已缓存 $count / ${ids.length} 章'} · 正文占用 ${formatCacheBytes(bytes)}',
-                                style: TextStyle(fontSize: 12, color: muted),
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  height: 1.4,
+                                  color: muted,
+                                ),
                               ),
                             ],
                           ),
@@ -522,174 +525,160 @@ class _OfflineCachePageState extends State<OfflineCachePage> {
   late Future<void> _loaded = widget.repository.loadCache();
 
   @override
-  Widget build(BuildContext context) => Scaffold(
-    body: Atmosphere(
-      child: GlassHeaderLayout(
-        header: ArchiveHeaderBar(
-          leading: GlassIconButton(
-            icon: CupertinoIcons.back,
-            label: '返回',
-            onPressed: () => Navigator.pop(context),
+  Widget build(BuildContext context) => ArchiveFeaturePage(
+    title: '离线缓存',
+    code: 'ARCHIVE / LOCAL STORAGE',
+    actions: [
+      GlassMenuAnchor(
+        child: Builder(
+          builder: (anchor) => GlassIconButton(
+            icon: CupertinoIcons.trash,
+            label: '删除全部缓存',
+            onPressed: () => _clear(anchor),
           ),
-          title: const ArchiveRouteTitle(
-            title: '离线缓存',
-            code: 'ARCHIVE / LOCAL STORAGE',
-          ),
-          actions: [
-            GlassMenuAnchor(
-              child: Builder(
-                builder: (anchor) => GlassIconButton(
-                  icon: CupertinoIcons.trash,
-                  label: '清空缓存',
-                  onPressed: () => _clear(anchor),
-                ),
-              ),
-            ),
-          ],
         ),
-        body: FutureBuilder<void>(
-          future: _loaded,
-          builder: (context, snapshot) => LoadedContentSequence(
-            generation:
-                snapshot.connectionState == ConnectionState.done ||
-                    widget.repository.cache.books.isNotEmpty
-                ? 'cache-ready'
-                : null,
-            child: AnimatedBuilder(
-              animation: widget.repository,
-              builder: (context, _) {
-                final books = widget.repository.cache.books;
-                final known = books.map((b) => b.novel.id).toSet();
-                final pending = widget.repository.jobs
-                    .where((j) => !known.contains(j.novel.id))
-                    .toList();
-                final count = books.length + pending.length;
-                final loading =
-                    snapshot.connectionState != ConnectionState.done &&
-                    count == 0;
-                return ListView.builder(
-                  padding: EdgeInsets.fromLTRB(
-                    24,
-                    MediaQuery.paddingOf(context).top +
-                        FrostedHeader.toolbarHeight +
-                        20,
-                    24,
-                    MediaQuery.paddingOf(context).bottom + 28,
-                  ),
-                  itemCount: loading ? 4 : count + 1,
-                  itemBuilder: (context, index) {
-                    if (index == 0) {
-                      return LoadedContentItem(
-                        index: 0,
-                        child: Padding(
-                          padding: const EdgeInsets.only(bottom: 22),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              sectionHeader(
-                                context,
-                                '本地存储',
-                                formatCacheBytes(widget.repository.cache.bytes),
-                              ),
-                              const SizedBox(height: 12),
-                              const AppText(
-                                '已缓存正文与插图可离线阅读。清理缓存不会移出书架，也不会删除阅读进度。',
-                                style: TextStyle(fontSize: 13, height: 1.7),
-                              ),
-                              if (snapshot.hasError ||
-                                  widget.repository.cacheError != null) ...[
-                                const SizedBox(height: 12),
-                                const AppText('缓存读取或写入失败，请释放存储后重试。'),
-                                GlassTextButton(
-                                  onPressed: () => setState(
-                                    () =>
-                                        _loaded = widget.repository.loadCache(),
-                                  ),
-                                  child: const AppText('重试'),
-                                ),
-                              ] else if (!loading && count == 0)
-                                const Padding(
-                                  padding: EdgeInsets.only(top: 24),
-                                  child: AppText('暂无离线缓存，在图书详情中缓存章节。'),
-                                ),
-                            ],
+      ),
+    ],
+    child: FutureBuilder<void>(
+      future: _loaded,
+      builder: (context, snapshot) => LoadedContentSequence(
+        generation:
+            snapshot.connectionState == ConnectionState.done ||
+                widget.repository.cache.books.isNotEmpty
+            ? 'cache-ready'
+            : null,
+        child: AnimatedBuilder(
+          animation: widget.repository,
+          builder: (context, _) {
+            final books = widget.repository.cache.books;
+            final known = books.map((b) => b.novel.id).toSet();
+            final pending = widget.repository.jobs
+                .where((j) => !known.contains(j.novel.id))
+                .toList();
+            final count = books.length + pending.length;
+            final loading =
+                snapshot.connectionState != ConnectionState.done && count == 0;
+            return ListView.builder(
+              padding: featurePadding(context),
+              itemCount: loading ? 4 : count + 1,
+              itemBuilder: (context, index) {
+                if (index == 0) {
+                  return LoadedContentItem(
+                    index: 0,
+                    child: Padding(
+                      padding: const EdgeInsets.only(bottom: 22),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          sectionHeader(
+                            context,
+                            '本地存储',
+                            formatCacheBytes(widget.repository.cache.bytes),
                           ),
-                        ),
-                      );
-                    }
-                    if (loading) return const BookRowSkeleton(label: '正在读取缓存');
-                    final novel = index <= books.length
-                        ? books[index - 1].novel
-                        : pending[index - books.length - 1].novel;
-                    return LoadedContentItem(
-                      key: ValueKey('offline-book-${novel.id}'),
-                      index: index,
-                      child: Padding(
-                        padding: const EdgeInsets.only(bottom: 12),
-                        child: ContentPanel(
-                          onTap: novel.chapters.isEmpty
-                              ? null
-                              : () => widget.onOpen(context, novel),
-                          child: Row(
-                            children: [
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    AppText(
-                                      novel.title,
-                                      maxLines: 2,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: const TextStyle(
-                                        fontWeight: FontWeight.w600,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 7),
-                                    OfflineBookStatus(
-                                      repository: widget.repository,
-                                      novel: novel,
-                                      reduceMotion: widget.reduceMotion,
-                                    ),
-                                    const SizedBox(height: 4),
-                                    AppText(
-                                      formatCacheBytes(
-                                        widget.repository.cache
-                                                .book(novel.id)
-                                                ?.bytes ??
-                                            0,
-                                      ),
-                                      style: const TextStyle(fontSize: 12),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              const SizedBox(width: 12),
-                              OfflineBookMenu(
-                                repository: widget.repository,
-                                novel: novel,
-                                reduceMotion: widget.reduceMotion,
-                              ),
-                            ],
+                          const SizedBox(height: 12),
+                          const AppText(
+                            '已缓存正文与插图可离线阅读。删除缓存不会移出书架，也不会删除阅读进度。',
+                            style: TextStyle(fontSize: 13, height: 1.7),
                           ),
-                        ),
+                          if (snapshot.hasError ||
+                              widget.repository.cacheError != null) ...[
+                            const SizedBox(height: 16),
+                            ContentNotice(
+                              icon: CupertinoIcons.exclamationmark_triangle,
+                              title: '缓存读取失败',
+                              message: '请释放存储空间后重试。',
+                              onRetry: () => setState(
+                                () => _loaded = widget.repository.loadCache(),
+                              ),
+                            ),
+                          ] else if (!loading && count == 0)
+                            const Padding(
+                              padding: EdgeInsets.only(top: 24),
+                              child: ContentNotice(
+                                icon: CupertinoIcons.tray,
+                                title: '还没有离线缓存',
+                                message: '在图书详情中缓存章节后，可在这里离线阅读。',
+                              ),
+                            ),
+                        ],
                       ),
-                    );
-                  },
+                    ),
+                  );
+                }
+                if (loading) return const BookRowSkeleton(label: '正在读取缓存');
+                final novel = index <= books.length
+                    ? books[index - 1].novel
+                    : pending[index - books.length - 1].novel;
+                return LoadedContentItem(
+                  key: ValueKey('offline-book-${novel.id}'),
+                  index: index,
+                  child: Padding(
+                    padding: const EdgeInsets.only(bottom: 14),
+                    child: ContentPanel(
+                      onTap: novel.chapters.isEmpty
+                          ? null
+                          : () => widget.onOpen(context, novel),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                AppText(
+                                  novel.title,
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                                const SizedBox(height: 7),
+                                OfflineBookStatus(
+                                  repository: widget.repository,
+                                  novel: novel,
+                                  reduceMotion: widget.reduceMotion,
+                                ),
+                                const SizedBox(height: 4),
+                                AppText(
+                                  formatCacheBytes(
+                                    widget.repository.cache
+                                            .book(novel.id)
+                                            ?.bytes ??
+                                        0,
+                                  ),
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    height: 1.4,
+                                    color: Theme.of(
+                                      context,
+                                    ).colorScheme.onSurfaceVariant,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          OfflineBookMenu(
+                            repository: widget.repository,
+                            novel: novel,
+                            reduceMotion: widget.reduceMotion,
+                            compact: true,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
                 );
               },
-            ),
-          ),
+            );
+          },
         ),
       ),
     ),
   );
 
   Future<void> _clear(BuildContext context) async {
-    if (!await _confirmClear(
-      context,
-      '清空全部缓存',
-      reduceMotion: widget.reduceMotion,
-    )) {
+    if (!await _confirmClear(context, reduceMotion: widget.reduceMotion)) {
       return;
     }
     try {

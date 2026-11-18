@@ -475,39 +475,34 @@ class ReadingMomentsHistorySheet extends StatelessWidget {
             const SizedBox(height: 14),
             Expanded(
               child: moments.isEmpty
-                  ? const Center(
-                      child: Padding(
-                        padding: EdgeInsets.symmetric(vertical: 24),
-                        child: AppText(
-                          '每天读满五分钟，留下一个阅读日。\n值得记住的时刻，会在这里相遇。',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(fontSize: 14, height: 1.8),
-                        ),
-                      ),
+                  ? const ContentNotice(
+                      icon: CupertinoIcons.sparkles,
+                      title: '还没有阅读纪念',
+                      message: '每天读满五分钟，留下一个阅读日。\n值得记住的时刻，会在这里相遇。',
                     )
-                  : ListView.separated(
+                  : ListView.builder(
                       key: const ValueKey('reading-moments-history-list'),
                       padding: const EdgeInsets.only(bottom: 12),
                       itemCount: moments.length,
-                      separatorBuilder: (_, _) => const Divider(height: 1),
                       itemBuilder: (context, index) {
                         final moment = moments[index];
                         final completion = moment.completion;
                         final title = completion?.title.trim();
-                        return InkWell(
-                          key: ValueKey('reading-moment-history-${moment.id}'),
-                          onTap: () => showReadingMoment(
-                            context,
-                            moment: moment,
-                            reduceMotion: reduceMotion,
-                            celebrate: false,
-                            theme: ReadingVisualTheme.fromId(
-                              store.preferences.themeId,
+                        return Padding(
+                          padding: const EdgeInsets.only(bottom: 14),
+                          child: ContentPanel(
+                            key: ValueKey(
+                              'reading-moment-history-${moment.id}',
                             ),
-                          ),
-                          borderRadius: BorderRadius.circular(14),
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(vertical: 18),
+                            onTap: () => showReadingMoment(
+                              context,
+                              moment: moment,
+                              reduceMotion: reduceMotion,
+                              celebrate: false,
+                              theme: ReadingVisualTheme.fromId(
+                                store.preferences.themeId,
+                              ),
+                            ),
                             child: Row(
                               children: [
                                 ArchiveIcon(
@@ -546,7 +541,7 @@ class ReadingMomentsHistorySheet extends StatelessWidget {
                                             : moment.subtitle}',
                                         style: TextStyle(
                                           fontSize: 12,
-                                          height: 1.5,
+                                          height: 1.4,
                                           color: Theme.of(
                                             context,
                                           ).colorScheme.onSurfaceVariant,

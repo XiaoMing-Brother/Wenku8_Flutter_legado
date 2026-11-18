@@ -11,3 +11,14 @@
 -dontwarn org.osgi.framework.**
 -dontwarn aQute.bnd.annotation.**
 -dontwarn edu.umd.cs.findbugs.annotations.**
+
+# Book source rules run JavaScript through Rhino and query JSONPath at
+# runtime, so keep the engine classes from being stripped or renamed.
+-keep class org.mozilla.javascript.** { *; }
+-keep class com.jayway.jsonpath.** { *; }
+-dontwarn org.mozilla.javascript.**
+-dontwarn jakarta.json.**
+-dontwarn org.apache.tapestry5.**
+-dontwarn org.codehaus.jettison.**
+-dontwarn com.google.gson.**
+-dontwarn com.fasterxml.jackson.**

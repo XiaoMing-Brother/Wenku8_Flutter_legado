@@ -1,9 +1,10 @@
 import 'package:flutter/cupertino.dart';
-import 'package:flutter/material.dart';
 
 import 'app_interactions.dart';
 import 'app_ui.dart';
+import 'book_list_import_page.dart';
 import 'bookmark_library_page.dart';
+import 'book_sources/book_sources_page.dart';
 import 'reading_statistics_page.dart';
 import 'catalog.dart';
 import 'dock_layout.dart';
@@ -14,7 +15,6 @@ import 'pages.dart' show SettingsPage;
 import 'ui_notifiers.dart';
 import 'updates/app_updates.dart';
 import 'updates/update_page.dart';
-import 'wenku_features.dart';
 
 class MyPage extends StatelessWidget {
   const MyPage({
@@ -29,12 +29,11 @@ class MyPage extends StatelessWidget {
 
   Widget buildHeader(BuildContext context) => const Align(
     alignment: Alignment.centerLeft,
-    child: ArchiveMasthead(title: '我的', code: '04 / PERSONAL ARCHIVE'),
+    child: ArchiveMasthead(title: '我的', code: 'PERSONAL / PROFILE'),
   );
 
   @override
   Widget build(BuildContext context) {
-    final features = WenkuFeaturesScope.maybeOf(context);
     final updates = AppUpdatesScope.maybeOf(context);
     return GlassHeaderLayout(
       showHeader: showHeader,
@@ -49,126 +48,6 @@ class MyPage extends StatelessWidget {
               context,
             ).copyWith(bottom: DockLayout.scrollPaddingOf(context)),
             children: [
-              AnimatedBuilder(
-                animation: Listenable.merge([
-                  features?.account ?? state.bookmarkChanges,
-                  ?features?.shelfSync,
-                ]),
-                builder: (context, _) {
-                  final account = features?.account;
-                  final profile = account?.profile;
-                  return ContentPanel(
-                    key: const ValueKey('my-account'),
-                    onTap: account == null
-                        ? null
-                        : () => pushNovelPage<void>(
-                            context,
-                            WenkuAccountPage(
-                              account: account,
-                              state: state,
-                              repository: repository,
-                            ),
-                            reduceMotion: state.reduceMotion,
-                          ),
-                    child: Row(
-                      children: [
-                        ClipRRect(
-                          borderRadius: BorderRadius.circular(16),
-                          child: account?.authenticated == true
-                              ? SizedBox(
-                                  width: 56,
-                                  height: 56,
-                                  child: account?.avatar == null
-                                      ? const ArchiveIcon(
-                                          CupertinoIcons.person_crop_circle,
-                                          size: 40,
-                                        )
-                                      : Image.memory(
-                                          account!.avatar!,
-                                          fit: BoxFit.cover,
-                                          cacheWidth:
-                                              (56 *
-                                                      MediaQuery.devicePixelRatioOf(
-                                                        context,
-                                                      ))
-                                                  .ceil(),
-                                          errorBuilder: (_, _, _) =>
-                                              const ArchiveIcon(
-                                                CupertinoIcons
-                                                    .person_crop_circle,
-                                                size: 40,
-                                              ),
-                                        ),
-                                )
-                              : Image.asset(
-                                  'assets/branding/app-icon.png',
-                                  width: 56,
-                                  height: 56,
-                                  cacheWidth:
-                                      (56 *
-                                              MediaQuery.devicePixelRatioOf(
-                                                context,
-                                              ))
-                                          .ceil(),
-                                  cacheHeight:
-                                      (56 *
-                                              MediaQuery.devicePixelRatioOf(
-                                                context,
-                                              ))
-                                          .ceil(),
-                                ),
-                        ),
-                        const SizedBox(width: 16),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              AppText(
-                                account?.authenticated == true
-                                    ? profile?.displayName ?? '文库账号'
-                                    : '登录文库账号',
-                                style: const TextStyle(
-                                  fontSize: 20,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                              const SizedBox(height: 7),
-                              AppText(
-                                account?.authenticated == true
-                                    ? profile == null
-                                          ? '账号已连接'
-                                          : '${profile.score} 积分 · ${profile.rank}${features?.shelfSync == null
-                                                ? ''
-                                                : features!.shelfSync!.syncing
-                                                ? '\n书架正在同步'
-                                                : features.shelfSync!.error != null
-                                                ? '\n书架待同步 · ${features.shelfSync!.error}'
-                                                : features.shelfSync!.syncedAt != null
-                                                ? '\n书架已与文库同步'
-                                                : ''}'
-                                    : '轻小说文库账号 · 云书架与每日签到',
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  height: 1.6,
-                                  color: Theme.of(
-                                    context,
-                                  ).colorScheme.onSurfaceVariant,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        const ArchiveIcon(
-                          CupertinoIcons.chevron_right,
-                          size: 14,
-                        ),
-                      ],
-                    ),
-                  );
-                },
-              ),
-              const SizedBox(height: 24),
               FeatureEntry(
                 key: const ValueKey('my-statistics'),
                 title: '统计',
@@ -202,6 +81,48 @@ class MyPage extends StatelessWidget {
                     ),
                   );
                 },
+              ),
+              const SizedBox(height: 14),
+              if (repository is OfflineNovelRepository &&
+                  (repository as OfflineNovelRepository).bookSources != null)
+                ActiveListenableBuilder(
+                  listenable: (repository as OfflineNovelRepository)
+                      .bookSources!
+                      .changes,
+                  builder: (context) {
+                    final sources =
+                        (repository as OfflineNovelRepository).bookSources!;
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 14),
+                      child: FeatureEntry(
+                        key: const ValueKey('my-book-sources'),
+                        title: '书源',
+                        subtitle: sources.sources.isEmpty
+                            ? '导入阅读（Legado）格式的书源'
+                            : '${sources.sources.length} 个书源 · ${sources.enabledCount} 个已启用',
+                        icon: CupertinoIcons.link,
+                        onTap: () => pushNovelPage<void>(
+                          context,
+                          BookSourcesPage(library: sources),
+                          reduceMotion: state.reduceMotion,
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              FeatureEntry(
+                key: const ValueKey('my-import-book-list'),
+                title: '导入书籍列表',
+                subtitle: '支持 Legado / legado_md3 导出的书架 JSON',
+                icon: CupertinoIcons.list_bullet,
+                onTap: () => pushNovelPage<void>(
+                  context,
+                  BookListImportPage(
+                    state: state,
+                    repository: repository,
+                  ),
+                  reduceMotion: state.reduceMotion,
+                ),
               ),
               const SizedBox(height: 14),
               FeatureEntry(

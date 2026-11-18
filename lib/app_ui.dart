@@ -15,6 +15,7 @@ import 'app_haptics.dart';
 import 'app_window_insets.dart';
 import 'catalog.dart';
 import 'local_book_media.dart';
+import 'cover_images.dart';
 import 'local_book_import_warning.dart';
 import 'cover_arrival.dart';
 import 'glass_optics.dart';
@@ -23,7 +24,6 @@ import 'app_palette.dart';
 import 'glass_controls.dart';
 import 'app_language.dart';
 export 'app_language.dart';
-import 'legacy_cover.dart';
 import 'loading_ui.dart';
 import 'motion_ui.dart';
 import 'native_effects.dart';
@@ -216,6 +216,7 @@ abstract final class AppControls {
   static easy.LiquidGlassStyle _material(
     BuildContext context, {
     bool plate = false,
+    bool liteGlass = false,
   }) {
     final appearance = GlassAppearance.of(context);
     final highContrast = MediaQuery.highContrastOf(context);
@@ -243,7 +244,8 @@ abstract final class AppControls {
       shadow: plate
           ? null
           : const easy.LiquidGlassShadow(blur: 6, opacity: .12, inset: 3),
-      liteGlass: !PerformanceScope.of(context).glass || highContrast,
+      liteGlass:
+          liteGlass || !PerformanceScope.of(context).glass || highContrast,
     );
   }
 
@@ -253,6 +255,7 @@ abstract final class AppControls {
     required bool value,
     required FutureOr<void> Function(bool)? onChanged,
     bool haptics = true,
+    bool liteGlass = false,
   }) {
     return AppGlassSwitch(
       key: key,
@@ -265,7 +268,7 @@ abstract final class AppControls {
           Theme.of(context).extension<GlassPalette>()?.thumb ??
           Theme.of(context).extension<AppTonalColors>()?.thumb ??
           ArchiveDesign.milk,
-      style: _material(context),
+      style: _material(context, liteGlass: liteGlass),
       reduceMotion: MediaQuery.disableAnimationsOf(context),
     );
   }
@@ -1144,6 +1147,51 @@ Widget _unscaleCompactContent({
     ? Transform.scale(scaleX: 1 / scaleX, scaleY: 1 / scaleY, child: child)
     : child;
 
+/// 列表行右侧的紧凑更多入口：下拉箭头比三点图标占用更少横向空间。
+class CompactRowMenuButton extends StatelessWidget {
+  const CompactRowMenuButton({
+    super.key,
+    required this.label,
+    required this.onPressed,
+  });
+
+  final String label;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final semanticLabel = appText(context, label);
+    return Tooltip(
+      message: semanticLabel,
+      triggerMode: TooltipTriggerMode.manual,
+      excludeFromSemantics: true,
+      child: Semantics(
+        button: true,
+        label: semanticLabel,
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: () {
+            AppHaptics.play(context, HapticCue.action);
+            onPressed();
+          },
+          child: SizedBox(
+            width: 20,
+            height: 48,
+            child: Center(
+              child: ArchiveIcon(
+                CupertinoIcons.chevron_down,
+                size: 14,
+                animate: false,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class GlassPillButton extends StatelessWidget {
   const GlassPillButton({
     super.key,
@@ -1375,6 +1423,8 @@ class ContentPanel extends StatefulWidget {
     this.padding = const EdgeInsets.all(16),
     this.radius = ArchiveDesign.panelRadius,
     this.backgroundColor,
+    this.borderColor,
+    this.borderWidth = .7,
     this.onTap,
     this.haptic = HapticCue.action,
   });
@@ -1382,6 +1432,8 @@ class ContentPanel extends StatefulWidget {
   final EdgeInsetsGeometry padding;
   final double radius;
   final Color? backgroundColor;
+  final Color? borderColor;
+  final double borderWidth;
   final VoidCallback? onTap;
   final HapticCue? haptic;
 
@@ -1408,7 +1460,10 @@ class _ContentPanelState extends State<ContentPanel> {
         color: widget.backgroundColor ?? Theme.of(context).colorScheme.surface,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(widget.radius),
-          side: BorderSide(color: Theme.of(context).dividerColor, width: .7),
+          side: BorderSide(
+            color: widget.borderColor ?? Theme.of(context).dividerColor,
+            width: widget.borderWidth,
+          ),
         ),
         clipBehavior: Clip.antiAlias,
         child: InkWell(
@@ -1444,12 +1499,14 @@ class JellyTapSurface extends StatefulWidget {
     this.tapKey,
     required this.child,
     required this.onTap,
+    this.onLongPress,
     this.haptic = HapticCue.action,
   });
 
   final Widget child;
   final Key? tapKey;
   final VoidCallback? onTap;
+  final VoidCallback? onLongPress;
   final HapticCue? haptic;
 
   @override
@@ -1496,6 +1553,12 @@ class _JellyTapSurfaceState extends State<JellyTapSurface> {
                   AppHaptics.play(context, widget.haptic);
                   setState(() => _iconActivation++);
                   widget.onTap!();
+                },
+          onLongPress: widget.onLongPress == null
+              ? null
+              : () {
+                  AppHaptics.play(context, HapticCue.selection);
+                  widget.onLongPress!();
                 },
           child: ArchiveIconContact(
             pressed: _pressed,
@@ -1587,7 +1650,7 @@ class NovelCover extends StatelessWidget {
                 )?.animation ??
                 animation,
             imageProvider: switch (LocalBookMedia.peek(novel.coverUrl) ??
-                LegacyCover.peek(novel.id)) {
+                peekNovelCover(novel)) {
               final bytes? => ResizeImage.resizeIfNeeded(
                 novelCoverDecodeWidth(
                   flightWidth,
@@ -1669,12 +1732,10 @@ class NovelCover extends StatelessWidget {
               );
               return FutureBuilder<Uint8List>(
                 key: ValueKey('cover-bytes-${novel.id}'),
-                future: novel.coverUrl?.startsWith('wenku-local:') == true
-                    ? LocalBookMedia.loadCover(novel.coverUrl!)
-                    : LegacyCover.bytes(novel.id, url: novel.coverUrl),
+                future: novelCoverBytes(novel),
                 initialData:
                     LocalBookMedia.peek(novel.coverUrl) ??
-                    LegacyCover.peek(novel.id),
+                    peekNovelCover(novel),
                 builder: (context, snapshot) {
                   final bytes = snapshot.data;
                   if (bytes == null) {
@@ -1744,7 +1805,7 @@ class CoverGlow extends StatelessWidget {
     final dark = Theme.of(context).brightness == Brightness.dark;
     final background = dark ? ArchiveDesign.darkBackground : Colors.white;
     return FutureBuilder(
-      future: LegacyCover.bytes(novel.id, url: novel.coverUrl),
+      future: novelCoverBytes(novel),
       builder: (context, snapshot) {
         if (!snapshot.hasData) return const SizedBox.shrink();
         return ShaderMask(
@@ -1941,6 +2002,7 @@ class _NovelPageRoute<T> extends CupertinoPageRoute<T> {
 Future<T?> showJellySheet<T>({
   required BuildContext context,
   required WidgetBuilder builder,
+  String barrierLabel = '关闭弹层',
   bool reduceMotion = false,
   bool guardDragDismiss = false,
   ValueListenable<bool>? previewing,
@@ -1953,6 +2015,7 @@ Future<T?> showJellySheet<T>({
 }) => _showGlassOverlay<T>(
   context: context,
   builder: builder,
+  barrierLabel: barrierLabel,
   reduceMotion: reduceMotion,
   kind: GlassOverlayKind.sheet,
   guardDragDismiss: guardDragDismiss,
@@ -2098,6 +2161,7 @@ Future<T?> showGlassMenu<T>({
 Future<T?> _showGlassOverlay<T>({
   required BuildContext context,
   required WidgetBuilder builder,
+  required String barrierLabel,
   required bool reduceMotion,
   required GlassOverlayKind kind,
   bool guardDragDismiss = false,
@@ -2120,6 +2184,7 @@ Future<T?> _showGlassOverlay<T>({
   final route = _GlassOverlayRoute<T>(
     builder: builder,
     kind: kind,
+    barrierLabel: barrierLabel,
     anchor: anchor,
     anchorBox: sourceBox is RenderBox && sourceBox.attached && sourceBox.hasSize
         ? sourceBox
@@ -2331,6 +2396,7 @@ class _GlassOverlayRoute<T> extends PopupRoute<T>
   _GlassOverlayRoute({
     required this.builder,
     required this.kind,
+    this.barrierLabel = '关闭弹层',
     required this.reduceMotion,
     required this.appearance,
     required this.themes,
@@ -2347,6 +2413,8 @@ class _GlassOverlayRoute<T> extends PopupRoute<T>
   });
   final WidgetBuilder builder;
   final GlassOverlayKind kind;
+  @override
+  final String barrierLabel;
   final bool reduceMotion;
   final GlassAppearance appearance;
   final CapturedThemes themes;
@@ -2386,9 +2454,6 @@ class _GlassOverlayRoute<T> extends PopupRoute<T>
       kind == GlassOverlayKind.menu || (previewing?.value ?? false)
       ? Colors.transparent
       : Colors.black.withValues(alpha: .16);
-  @override
-  String get barrierLabel => '关闭弹层';
-
   @override
   Widget buildPage(
     BuildContext context,

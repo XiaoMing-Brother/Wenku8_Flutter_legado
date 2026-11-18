@@ -86,7 +86,7 @@ final class NativeLibraryPlugin: NSObject, FlutterPlugin, UIDocumentPickerDelega
         } catch { completeFailure(error, result) }
         return
       }
-      if ["pickBook", "pickBooks", "pickDictionaryFiles", "pickImage", "pickFont", "pickTextReference", "pickOriginalReference", "selectScanFolder", "createSync", "openSync"].contains(call.method) {
+      if ["pickBook", "pickBooks", "pickBookSource", "pickDictionaryFiles", "pickImage", "pickFont", "pickTextReference", "pickOriginalReference", "selectScanFolder", "createSync", "openSync"].contains(call.method) {
         presentPicker(call.method, args, result)
         return
       }
@@ -295,16 +295,16 @@ final class NativeLibraryPlugin: NSObject, FlutterPlugin, UIDocumentPickerDelega
       return
     }
     let picker: UIDocumentPickerViewController
-    let copySelection = kind == "pickImage" || kind == "pickFont" ||
+    let copySelection = kind == "pickImage" || kind == "pickFont" || kind == "pickBookSource" ||
       kind == "pickDictionaryFiles" ||
       ((kind == "pickBook" || kind == "pickBooks") && !linkOriginals)
     if #available(iOS 14.0, *) {
       // File providers may label valid images/fonts as generic data. Let the
       // importer validate the actual file instead of making it untappable.
-      let types: [UTType] = kind == "selectScanFolder" ? [.folder] : kind == "pickTextReference" ? [.plainText] : kind == "openSync" ? [UTType(filenameExtension: "wenku8sync") ?? .data] : [.content, .data]
+      let types: [UTType] = kind == "selectScanFolder" ? [.folder] : kind == "pickBookSource" ? [.json, .plainText] : kind == "pickTextReference" ? [.plainText] : kind == "openSync" ? [UTType(filenameExtension: "wenku8sync") ?? .data] : [.content, .data]
       picker = UIDocumentPickerViewController(forOpeningContentTypes: types, asCopy: copySelection)
     } else {
-      let types = kind == "selectScanFolder" ? ["public.folder"] : kind == "pickTextReference" ? ["public.plain-text"] : ["public.content", "public.data"]
+      let types = kind == "selectScanFolder" ? ["public.folder"] : kind == "pickBookSource" ? ["public.json", "public.plain-text"] : kind == "pickTextReference" ? ["public.plain-text"] : ["public.content", "public.data"]
       picker = UIDocumentPickerViewController(documentTypes: types, in: copySelection ? .import : .open)
     }
     if #available(iOS 13.0, *), let initialDirectory { picker.directoryURL = initialDirectory }
@@ -386,7 +386,10 @@ final class NativeLibraryPlugin: NSObject, FlutterPlugin, UIDocumentPickerDelega
     if kind == "pickDictionaryFiles" && source.lastPathComponent.range(of: #"\.(mdx|mdd|mobi|ifo|idx(?:\.gz)?|dict(?:\.dz)?|syn|zip)$"#, options: [.regularExpression, .caseInsensitive]) == nil {
       throw BookDocumentFailure(code: "dictionary_format", message: "请选择 MDX、MDD、MOBI 词典、StarDict 文件或 ZIP 词典包")
     }
-    let maximum = kind == "pickDictionaryFiles" ? 512 * 1024 * 1024 : kind == "pickImage" ? 20 * 1024 * 1024 : kind == "pickFont" ? 32 * 1024 * 1024 : BookImportFormatPolicy.byteLimit(source.pathExtension)
+    if kind == "pickBookSource" && source.pathExtension.lowercased() != "json" && source.pathExtension.lowercased() != "txt" {
+      throw BookDocumentFailure(code: "source_format", message: "请选择书源 JSON 文件")
+    }
+    let maximum = kind == "pickDictionaryFiles" ? 512 * 1024 * 1024 : kind == "pickImage" ? 20 * 1024 * 1024 : kind == "pickFont" ? 32 * 1024 * 1024 : kind == "pickBookSource" ? 128 * 1024 * 1024 : BookImportFormatPolicy.byteLimit(source.pathExtension)
     let workspace = try store()
     var staged: URL?, failure: Error?, coordinationError: NSError?
     NSFileCoordinator().coordinate(readingItemAt: source, options: [], error: &coordinationError) { readable in

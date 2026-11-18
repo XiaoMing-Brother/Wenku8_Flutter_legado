@@ -2,6 +2,7 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'app_interactions.dart';
 import 'app_ui.dart';
+import 'feature_pages.dart';
 import 'glass_choices.dart';
 import 'library_state.dart';
 import 'local_import_settings_page.dart';
@@ -103,43 +104,39 @@ class _LocalImportPageState extends State<LocalImportPage> {
     required bool enabled,
     required Future<void> Function(BuildContext) onPressed,
   }) => Padding(
-    padding: const EdgeInsets.only(bottom: 12),
-    child: GlassTextButton(
+    padding: const EdgeInsets.only(bottom: 14),
+    child: ContentPanel(
       key: ValueKey('import-hub-$id'),
-      onPressed: enabled ? () => onPressed(context) : null,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 10),
-        child: Row(
-          children: [
-            ArchiveIcon(icon, size: 24),
-            const SizedBox(width: 16),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  AppText(
-                    title,
-                    style: const TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w600,
-                    ),
+      onTap: enabled ? () => onPressed(context) : null,
+      child: Row(
+        children: [
+          ArchiveIcon(icon, size: 24),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                AppText(
+                  title,
+                  style: const TextStyle(fontWeight: FontWeight.w600),
+                ),
+                const SizedBox(height: 5),
+                AppText(
+                  detail,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 12,
+                    height: 1.4,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
                   ),
-                  const SizedBox(height: 5),
-                  AppText(
-                    detail,
-                    style: TextStyle(
-                      fontSize: 13,
-                      height: 1.6,
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                    ),
-                  ),
-                ],
-              ),
+                ),
+              ],
             ),
-            const SizedBox(width: 8),
-            const ArchiveIcon(CupertinoIcons.chevron_right, size: 15),
-          ],
-        ),
+          ),
+          const SizedBox(width: 8),
+          const ArchiveIcon(CupertinoIcons.chevron_right, size: 15),
+        ],
       ),
     ),
   );
@@ -152,115 +149,95 @@ class _LocalImportPageState extends State<LocalImportPage> {
       final linked = widget.library.organization.linkLocalBooks;
       final progress = widget.progress();
       final error = _error ?? widget.failure();
-      return Scaffold(
+      return ArchiveFeaturePage(
         key: const ValueKey('local-import-page'),
-        body: Atmosphere(
-          child: GlassHeaderLayout(
-            header: ArchiveHeaderBar(
-              leading: GlassIconButton(
-                icon: CupertinoIcons.back,
-                label: '返回',
-                onPressed: () => Navigator.pop(context),
+        title: '导入书籍',
+        code: 'LOCAL / IMPORT',
+        actions: [
+          GlassMenuAnchor(
+            child: Builder(
+              builder: (anchor) => GlassIconButton(
+                key: const ValueKey('import-hub-settings'),
+                icon: CupertinoIcons.settings,
+                label: '导入设置',
+                onPressed: busy ? null : () => _settings(anchor),
               ),
-              title: const ArchiveRouteTitle(
-                title: '导入书籍',
-                code: 'LOCAL / IMPORT',
-              ),
-              actions: [
-                GlassMenuAnchor(
-                  child: Builder(
-                    builder: (anchor) => GlassIconButton(
-                      key: const ValueKey('import-hub-settings'),
-                      icon: CupertinoIcons.settings,
-                      label: '导入设置',
-                      onPressed: busy ? null : () => _settings(anchor),
-                    ),
-                  ),
-                ),
-              ],
             ),
-            body: Align(
-              alignment: Alignment.topCenter,
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 680),
-                child: ListView(
-                  padding: EdgeInsets.fromLTRB(
-                    24,
-                    MediaQuery.paddingOf(context).top +
-                        FrostedHeader.toolbarHeight +
-                        20,
-                    24,
-                    MediaQuery.paddingOf(context).bottom + 32,
+          ),
+        ],
+        child: Align(
+          alignment: Alignment.topCenter,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 680),
+            child: ListView(
+              padding: featurePadding(context),
+              children: [
+                GlassChoiceGroup<bool>(
+                  name: 'import-storage',
+                  label: '本地书籍保存方式',
+                  value: linked,
+                  options: const {true: '关联到 App', false: '复制到 App'},
+                  leading: (value) => ArchiveIcon(
+                    value ? CupertinoIcons.link : CupertinoIcons.doc_on_doc,
+                    size: 18,
                   ),
-                  children: [
-                    GlassChoiceGroup<bool>(
-                      name: 'import-storage',
-                      label: '本地书籍保存方式',
-                      value: linked,
-                      options: const {true: '关联到 App', false: '复制到 App'},
-                      leading: (value) => ArchiveIcon(
-                        value ? CupertinoIcons.link : CupertinoIcons.doc_on_doc,
-                        size: 18,
-                      ),
-                      enabled: !busy,
-                      onChanged: _storage,
-                    ),
-                    AppText(
-                      linked
-                          ? '保留原文件，不重复保存原书；移动文件或撤销授权后可重新关联。'
-                          : '将原书另存到 App，原文件不变。已有书籍不会自动转换。',
-                      style: TextStyle(
-                        fontSize: 13,
-                        height: 1.65,
-                        color: Theme.of(context).colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                    const SizedBox(height: 28),
-                    _entry(
-                      id: 'scan',
-                      title: '扫描本地文件夹',
-                      detail: '关联目录，选择格式并扫描书籍。',
-                      icon: CupertinoIcons.folder_open,
-                      enabled: !busy,
-                      onPressed: widget.onScan,
-                    ),
-                    _entry(
-                      id: 'manual',
-                      title: '手动导入',
-                      detail: '从系统文件选择器添加书籍。',
-                      icon: CupertinoIcons.arrow_down_doc,
-                      enabled: !busy,
-                      onPressed: widget.onManual,
-                    ),
-                    _entry(
-                      id: 'cloud',
-                      title: '从网盘、NAS、S3 同步',
-                      detail: '连接已有云端来源；原书下载到本机，不改动云端文件。',
-                      icon: CupertinoIcons.cloud,
-                      enabled: !busy,
-                      onPressed: widget.onCloud,
-                    ),
-                    if (widget.isBusy()) ...[
-                      const SizedBox(height: 12),
-                      RefreshProgress(
-                        label: progress == null
-                            ? '正在导入书籍'
-                            : '正在导入 ${progress.$1} / ${progress.$2} 本',
-                      ),
-                    ],
-                    if (error != null)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 12),
-                        child: AppText(
-                          error,
-                          style: TextStyle(
-                            color: Theme.of(context).colorScheme.error,
-                          ),
-                        ),
-                      ),
-                  ],
+                  enabled: !busy,
+                  onChanged: _storage,
                 ),
-              ),
+                AppText(
+                  linked
+                      ? '保留原文件，不重复保存原书；移动文件或撤销授权后可重新关联。'
+                      : '将原书另存到 App，原文件不变。已有书籍不会自动转换。',
+                  style: TextStyle(
+                    fontSize: 13,
+                    height: 1.65,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                ),
+                const SizedBox(height: 28),
+                _entry(
+                  id: 'scan',
+                  title: '扫描本地文件夹',
+                  detail: '关联目录，选择格式并扫描书籍。',
+                  icon: CupertinoIcons.folder_open,
+                  enabled: !busy,
+                  onPressed: widget.onScan,
+                ),
+                _entry(
+                  id: 'manual',
+                  title: '手动导入',
+                  detail: '从系统文件选择器添加书籍。',
+                  icon: CupertinoIcons.arrow_down_doc,
+                  enabled: !busy,
+                  onPressed: widget.onManual,
+                ),
+                _entry(
+                  id: 'cloud',
+                  title: '从网盘、NAS、S3 同步',
+                  detail: '连接已有云端来源；原书下载到本机，不改动云端文件。',
+                  icon: CupertinoIcons.cloud,
+                  enabled: !busy,
+                  onPressed: widget.onCloud,
+                ),
+                if (widget.isBusy()) ...[
+                  const SizedBox(height: 12),
+                  RefreshProgress(
+                    label: progress == null
+                        ? '正在导入书籍'
+                        : '正在导入 ${progress.$1} / ${progress.$2} 本',
+                  ),
+                ],
+                if (error != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 12),
+                    child: AppText(
+                      error,
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.error,
+                      ),
+                    ),
+                  ),
+              ],
             ),
           ),
         ),
