@@ -69,13 +69,6 @@ bool bookshelfMatchesSource(
   };
 }
 
-String bookshelfSourceLabel(String source) => switch (source) {
-  'local' => '本地导入',
-  'cached' => '已缓存',
-  'online' => '在线收藏',
-  _ => '全部来源',
-};
-
 String bookshelfSource(int id, OfflineNovelRepository? offline) {
   if (isPendingBook(id)) return '待匹配';
   if (offline?.local?.book(id) != null) return '本地';

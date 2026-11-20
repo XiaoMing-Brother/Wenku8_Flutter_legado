@@ -10,10 +10,6 @@ import 'local_books.dart';
 import 'reader_content.dart';
 import 'reader_find.dart';
 
-class ReaderFindWholeBook {
-  const ReaderFindWholeBook();
-}
-
 class BookTextMatch {
   const BookTextMatch(this.location, this.preview);
   final ReaderMatch location;

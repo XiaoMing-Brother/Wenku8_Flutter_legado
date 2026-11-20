@@ -767,19 +767,6 @@ class _ReaderToolsState extends State<ReaderTools>
     }
   }
 
-  Future<void> _openPaddingDialog() async {
-    await showJellySheet<void>(
-      context: context,
-      reduceMotion: widget.state.reduceMotion,
-      heightFactor: .62,
-      maxWidth: 560,
-      builder: (_) => _PaddingDialog(
-        initial: _readerPreferences,
-        onChanged: (value, persist) => _preferences(value, persist: persist),
-      ),
-    );
-  }
-
   Future<void> _changeStyleScope(bool book) async {
     if (_changingScope) return;
     setState(() => _changingScope = true);
@@ -2900,84 +2887,6 @@ class _ReaderValueSliderState extends State<ReaderValueSlider> {
             textAlign: TextAlign.end,
             style: TextStyle(fontSize: 12, color: muted),
           ),
-        ),
-      ],
-    );
-  }
-}
-
-/// 「页边距」调整弹窗：上 / 下 / 左 / 右分别可调（参考 legado_md3 的 padding 配置）。
-class _PaddingDialog extends StatefulWidget {
-  const _PaddingDialog({required this.initial, required this.onChanged});
-
-  final ReaderPreferences initial;
-  final void Function(ReaderPreferences value, bool persist) onChanged;
-
-  @override
-  State<_PaddingDialog> createState() => _PaddingDialogState();
-}
-
-class _PaddingDialogState extends State<_PaddingDialog> {
-  late ReaderPreferences _prefs = widget.initial;
-
-  void _set(ReaderPreferences next, {required bool persist}) {
-    setState(() => _prefs = next);
-    widget.onChanged(next, persist);
-  }
-
-  Widget _slider({
-    required Key sliderKey,
-    required String label,
-    required double value,
-    required ValueChanged<double> preview,
-    required ValueChanged<double> commit,
-  }) => ReaderValueSlider(
-    sliderKey: sliderKey,
-    label: label,
-    value: value,
-    min: 0,
-    max: 200,
-    divisions: 100,
-    format: (v) => '${v.round()} px',
-    onPreview: preview,
-    onCommitted: commit,
-  );
-
-  @override
-  Widget build(BuildContext context) {
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
-      children: [
-        const ArchiveSection(title: '页边距', code: 'SCREEN / PADDING'),
-        const SizedBox(height: 8),
-        _slider(
-          sliderKey: const ValueKey('reader-padding-top'),
-          label: '上边距',
-          value: _prefs.marginTop,
-          preview: (v) => _set(_prefs.copyWith(marginTop: v), persist: false),
-          commit: (v) => _set(_prefs.copyWith(marginTop: v), persist: true),
-        ),
-        _slider(
-          sliderKey: const ValueKey('reader-padding-bottom'),
-          label: '下边距',
-          value: _prefs.marginBottom,
-          preview: (v) =>
-              _set(_prefs.copyWith(marginBottom: v), persist: false),
-          commit: (v) => _set(_prefs.copyWith(marginBottom: v), persist: true),
-        ),
-        _slider(
-          sliderKey: const ValueKey('reader-padding-left'),
-          label: '左边距',
-          value: _prefs.leftMargin,
-          preview: (v) => _set(_prefs.copyWith(marginLeft: v), persist: false),
-          commit: (v) => _set(_prefs.copyWith(marginLeft: v), persist: true),
-        ),
-        _slider(
-          sliderKey: const ValueKey('reader-padding-right'),
-          label: '右边距',
-          value: _prefs.rightMargin,
-          preview: (v) => _set(_prefs.copyWith(marginRight: v), persist: false),
-          commit: (v) => _set(_prefs.copyWith(marginRight: v), persist: true),
         ),
       ],
     );

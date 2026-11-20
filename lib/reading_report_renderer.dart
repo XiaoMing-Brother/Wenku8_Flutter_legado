@@ -375,26 +375,3 @@ Future<ReadingReportComponents> captureReadingReportComponents(
     rethrow;
   }
 }
-
-Future<ReadingReportLayout> renderReadingReport(
-  BuildContext context,
-  ReadingStatisticsData data,
-  ReadingReportOptions options,
-) async {
-  final components = await captureReadingReportComponents(
-    context,
-    data,
-    options,
-  );
-  try {
-    return ReadingReportLayout.prepare(
-      data,
-      options,
-      components: components,
-      translate: (value) => appText(context, value),
-    );
-  } catch (_) {
-    components.dispose();
-    rethrow;
-  }
-}

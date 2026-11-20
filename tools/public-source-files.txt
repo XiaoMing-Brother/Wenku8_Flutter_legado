@@ -470,7 +470,6 @@ lib/book_navigation.dart
 lib/book_open_monitor.dart
 lib/book_search.dart
 lib/book_search_merger.dart
-lib/book_share_action.dart
 lib/book_shelf_content_preferences.dart
 lib/book_shelf_content_projection.dart
 lib/book_shelf_preferences.dart
@@ -503,7 +502,6 @@ lib/bookmark_library_page.dart
 lib/bookshelf_scope.dart
 lib/calligraphy_splash.dart
 lib/calligraphy_splash_policy.dart
-lib/canvas_halftone.dart
 lib/catalog.dart
 lib/cloud_book_sync_panel.dart
 lib/cloud_library_page.dart
@@ -660,7 +658,6 @@ lib/portable_markup_prepare.dart
 lib/portable_rtf_prepare.dart
 lib/portable_structured_prepare.dart
 lib/quote_card.dart
-lib/read_only_text.dart
 lib/reader_annotation_editor.dart
 lib/reader_annotation_range.dart
 lib/reader_annotation_source.dart
@@ -671,7 +668,6 @@ lib/reader_background.dart
 lib/reader_block_spacing.dart
 lib/reader_book_find.dart
 lib/reader_book_layout.dart
-lib/reader_book_progress.dart
 lib/reader_book_style.dart
 lib/reader_bookmark_excerpt.dart
 lib/reader_catalogue.dart
@@ -764,7 +760,6 @@ lib/reading_report_reference.dart
 lib/reading_report_reference_assets.dart
 lib/reading_report_renderer.dart
 lib/reading_report_seasons_film_255.dart
-lib/reading_report_timeline.dart
 lib/reading_statistics_analysis.dart
 lib/reading_statistics_analysis_view.dart
 lib/reading_statistics_charts.dart
@@ -801,7 +796,6 @@ lib/txt_toc_rules/txt_toc_rule.dart
 lib/txt_toc_rules/txt_toc_rule_engine.dart
 lib/txt_toc_rules/txt_toc_rule_store.dart
 lib/txt_toc_rules/txt_toc_rules_page.dart
-lib/ui_frame_capture.dart
 lib/ui_notifiers.dart
 lib/updates/app_updates.dart
 lib/updates/current_release_content.dart

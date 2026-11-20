@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:math' as math;
 import 'library_reflow.dart';
 import 'package:flutter/foundation.dart' show ValueListenable;
-import 'dart:ui' show ImageFilter, TileMode;
 
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
@@ -636,33 +635,6 @@ class GlassForeground extends StatelessWidget {
   Widget build(BuildContext context) => child;
 }
 
-/// Navigation typography uses the same crisp foreground as glass controls.
-class GlassText extends StatelessWidget {
-  const GlassText(
-    this.data, {
-    super.key,
-    this.style,
-    this.maxLines,
-    this.overflow,
-    this.textAlign,
-  });
-  final String data;
-  final TextStyle? style;
-  final int? maxLines;
-  final TextOverflow? overflow;
-  final TextAlign? textAlign;
-  @override
-  Widget build(BuildContext context) => AppText(
-    data,
-    maxLines: maxLines,
-    overflow: overflow,
-    textAlign: textAlign,
-    style: (style ?? const TextStyle()).copyWith(
-      shadows: GlassForeground.shadowsOf(context),
-    ),
-  );
-}
-
 class LiquidGlass extends StatefulWidget {
   const LiquidGlass({
     super.key,
@@ -805,32 +777,6 @@ class _LiquidGlassState extends State<LiquidGlass> {
       ),
     );
   }
-}
-
-/// A softly refracting meniscus, with no painted selection fill.
-class DockSelectionLens extends StatelessWidget {
-  const DockSelectionLens({
-    super.key,
-    this.radius = 29,
-    this.thickness = 24,
-    this.activation = 0,
-  });
-
-  final double radius;
-  final double thickness;
-  final double activation;
-
-  @override
-  Widget build(BuildContext context) => LiquidGlass(
-    radius: radius,
-    thickness: thickness,
-    activation: activation,
-    // No duplicate optical blur or tint over the plate's live background.
-    tintOpacity: 0,
-    elevated: activation > 0,
-    shadowStrength: activation * .65,
-    child: const SizedBox.expand(),
-  );
 }
 
 /// A compact icon action with the shared hit area, semantics and app haptic.
@@ -1785,107 +1731,6 @@ class NovelCover extends StatelessWidget {
               borderRadius: BorderRadius.circular(ArchiveDesign.coverRadius),
               child: face,
             ),
-    );
-  }
-}
-
-/// Extends grayscale cover luminance behind floating controls.
-class CoverGlow extends StatelessWidget {
-  const CoverGlow(this.novel, {super.key});
-
-  final Novel novel;
-
-  @override
-  Widget build(BuildContext context) {
-    if (novel.coverUrl == null ||
-        novel.coverUrl!.startsWith('wenku-local:') ||
-        !PerformanceScope.of(context).blur) {
-      return const SizedBox.shrink();
-    }
-    final dark = Theme.of(context).brightness == Brightness.dark;
-    final background = dark ? ArchiveDesign.darkBackground : Colors.white;
-    return FutureBuilder(
-      future: novelCoverBytes(novel),
-      builder: (context, snapshot) {
-        if (!snapshot.hasData) return const SizedBox.shrink();
-        return ShaderMask(
-          blendMode: BlendMode.dstIn,
-          shaderCallback: (rect) {
-            final top = MediaQuery.viewPaddingOf(context).top;
-            // Fade within the header, while the layer itself spans the screen.
-            // There is no fractional-height clipping edge below the app bar.
-            return LinearGradient(
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
-              colors: const [
-                Colors.white,
-                Colors.white,
-                Colors.transparent,
-                Colors.transparent,
-              ],
-              stops: [
-                0,
-                ((top + 36) / rect.height).clamp(0.0, 1.0),
-                ((top + 170) / rect.height).clamp(0.0, 1.0),
-                1,
-              ],
-            ).createShader(rect);
-          },
-          child: ClipRect(
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                ImageFiltered(
-                  imageFilter: ImageFilter.blur(
-                    sigmaX: 30,
-                    sigmaY: 30,
-                    tileMode: TileMode.clamp,
-                  ),
-                  child: ColorFiltered(
-                    colorFilter: const ColorFilter.matrix([
-                      .2126,
-                      .7152,
-                      .0722,
-                      0,
-                      0,
-                      .2126,
-                      .7152,
-                      .0722,
-                      0,
-                      0,
-                      .2126,
-                      .7152,
-                      .0722,
-                      0,
-                      0,
-                      0,
-                      0,
-                      0,
-                      1,
-                      0,
-                    ]),
-                    child: Image.memory(snapshot.data!, fit: BoxFit.cover),
-                  ),
-                ),
-                DecoratedBox(
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: [
-                        background.withValues(alpha: dark ? .45 : .53),
-                        background.withValues(alpha: .84),
-                        background,
-                      ],
-                      stops: const [0, .58, 1],
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        );
-      },
     );
   }
 }

@@ -699,7 +699,6 @@ class LibraryState extends ChangeNotifier {
   final _searchChanges = ChangeNotifier();
   final _blockedTagsChanges = ChangeNotifier();
   final _shelfViewChanges = ChangeNotifier();
-  final _discoveryViewChanges = ChangeNotifier();
   final _readerBehaviorChanges = ChangeNotifier();
   final _navigationChanges = ChangeNotifier();
   final Set<int> _shelf = {};
@@ -956,7 +955,6 @@ class LibraryState extends ChangeNotifier {
   Set<String> get blockedTags => _blockedTags.tags;
   Listenable get blockedTagsChanges => _blockedTagsChanges;
   Listenable get shelfViewChanges => _shelfViewChanges;
-  Listenable get discoveryViewChanges => _discoveryViewChanges;
   Set<int> get hiddenLocalBooks => Set.unmodifiable(_hiddenLocalBooks);
   bool localBookVisible(int id) => !_hiddenLocalBooks.contains(id);
   Future<void> setLocalBookHidden(int id, bool hidden) =>
@@ -1015,14 +1013,6 @@ class LibraryState extends ChangeNotifier {
   BookGridDensity get shelfGridDensity => _shelfGridDensity;
   BookShelfPreferences get shelfPreferences => _shelfPreferences;
   BookShelfContentPreferences get shelfContent => _shelfContent;
-  BookCollectionMode get discoveryViewMode => _discoveryViewMode;
-  BookGridDensity get discoveryGridDensity => _discoveryGridDensity;
-  BookShelfPreferences get discoveryShelfPreferences =>
-      _discoveryShelfPreferences;
-  BookShelfContentPreferences get discoveryShelfContent =>
-      _discoveryShelfContent;
-  DiscoveryShelfQuery get discoveryShelfQuery => _discoveryShelfQuery;
-  bool get hasDiscoveryShelfQuery => _hasDiscoveryShelfQuery;
   bool get keepScreenOn => _keepScreenOn;
   bool get forcePortrait => _forcePortrait;
   ReaderPreferences get readerPreferences => _readerPreferences;
@@ -1332,42 +1322,6 @@ class LibraryState extends ChangeNotifier {
     });
   }
 
-  Future<void> setDiscoveryView({
-    BookCollectionMode? mode,
-    BookGridDensity? gridDensity,
-    BookShelfPreferences? shelfPreferences,
-  }) async {
-    if (_restoreBarrier case final barrier?) {
-      return barrier.future.then(
-        (_) => setDiscoveryView(
-          mode: mode,
-          gridDensity: gridDensity,
-          shelfPreferences: shelfPreferences,
-        ),
-      );
-    }
-    await _queuePositionWrite(() async {
-      final nextMode = mode ?? _discoveryViewMode;
-      final nextDensity = gridDensity ?? _discoveryGridDensity;
-      final nextShelfPreferences =
-          shelfPreferences ?? _discoveryShelfPreferences;
-      if (nextMode == _discoveryViewMode &&
-          nextDensity == _discoveryGridDensity &&
-          nextShelfPreferences == _discoveryShelfPreferences) {
-        return;
-      }
-      await _commitLibraryRecords({
-        'discoveryLayout': nextMode.storageValue,
-        'discoveryGridDensity': nextDensity.value,
-        'discoveryShelfPreferences': nextShelfPreferences.record,
-      });
-      _discoveryViewMode = nextMode;
-      _discoveryGridDensity = nextDensity;
-      _discoveryShelfPreferences = nextShelfPreferences;
-      if (!_disposed) _discoveryViewChanges.notifyListeners();
-    });
-  }
-
   /// Only the featured region changes; existing collection controls stay put.
   Future<void> setShelfContent(BookShelfContentPreferences value) async {
     if (_restoreBarrier case final barrier?) {
@@ -1378,35 +1332,6 @@ class LibraryState extends ChangeNotifier {
       await _commitLibraryRecords({'shelfContent': value.record});
       _shelfContent = value;
       if (!_disposed) _shelfViewChanges.notifyListeners();
-    });
-  }
-
-  /// Discovery keeps its region selection separate from shelf/local choices.
-  Future<void> setDiscoveryShelfContent(
-    BookShelfContentPreferences value,
-  ) async {
-    if (_restoreBarrier case final barrier?) {
-      return barrier.future.then((_) => setDiscoveryShelfContent(value));
-    }
-    await _queuePositionWrite(() async {
-      if (_discoveryShelfContent == value) return;
-      await _commitLibraryRecords({'discoveryShelfContent': value.record});
-      _discoveryShelfContent = value;
-      if (!_disposed) _discoveryViewChanges.notifyListeners();
-    });
-  }
-
-  /// Persists only the upper region's remote query, without changing the lower feed.
-  Future<void> setDiscoveryShelfQuery(DiscoveryShelfQuery value) async {
-    if (_restoreBarrier case final barrier?) {
-      return barrier.future.then((_) => setDiscoveryShelfQuery(value));
-    }
-    await _queuePositionWrite(() async {
-      if (_hasDiscoveryShelfQuery && _discoveryShelfQuery == value) return;
-      await _commitLibraryRecords({'discoveryShelfQuery': value.record});
-      _discoveryShelfQuery = value;
-      _hasDiscoveryShelfQuery = true;
-      if (!_disposed) _discoveryViewChanges.notifyListeners();
     });
   }
 
@@ -4151,7 +4076,6 @@ class LibraryState extends ChangeNotifier {
             _readerBehaviorChanges.notifyListeners();
             _settings.notifyListeners();
             _navigationChanges.notifyListeners();
-            _discoveryViewChanges.notifyListeners();
             _blockedTagsChanges.notifyListeners();
           }
           notifyListeners();
@@ -4265,7 +4189,6 @@ class LibraryState extends ChangeNotifier {
     _searchChanges.dispose();
     _blockedTagsChanges.dispose();
     _shelfViewChanges.dispose();
-    _discoveryViewChanges.dispose();
     _readerBehaviorChanges.dispose();
     _navigationChanges.dispose();
     _organization?.dispose();

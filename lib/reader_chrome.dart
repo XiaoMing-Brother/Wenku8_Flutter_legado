@@ -250,39 +250,6 @@ class _ReaderChromeValueBuilderState<T>
       widget.builder(context, widget.valueListenable.value);
 }
 
-/// An independent secondary action using the same glass/press treatment as the
-/// follow control, without enlarging the header's full-width blur and shade.
-class ReaderHandoffChip extends StatelessWidget {
-  const ReaderHandoffChip({super.key, required this.onPressed});
-  final VoidCallback onPressed;
-
-  @override
-  Widget build(BuildContext context) => GlassTextButton(
-    compact: true,
-    compactMainPage: true,
-    onPressed: onPressed,
-    child: const Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        ArchiveIcon(CupertinoIcons.device_laptop, size: 17),
-        SizedBox(width: 8),
-        Flexible(
-          child: AppText(
-            '在其他设备上续读',
-            textAlign: TextAlign.center,
-            maxLines: 2,
-            style: TextStyle(
-              fontSize: 13,
-              height: 1.4,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-        ),
-      ],
-    ),
-  );
-}
-
 /// The location line is plain text/paper, not live glass. Its small alpha layer
 /// can dissolve while the header glides in, without filtering the article or
 /// changing the backdrop origin of any glass controls.

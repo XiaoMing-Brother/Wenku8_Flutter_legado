@@ -13,8 +13,6 @@ import 'reader_page_anchor.dart';
 import 'reader_page_physics.dart';
 import 'reader_sheet_motion.dart';
 import 'reader_spine_turn.dart';
-import 'reader_status.dart';
-import 'reader_scroll_location.dart';
 import 'reader_chrome.dart';
 import 'reader_header_footer.dart';
 import 'reader_tip.dart';
@@ -311,7 +309,6 @@ class ReaderPagedView extends StatefulWidget {
     required this.onBoundary,
     this.position,
     this.reduceMotion = false,
-    this.showPageCount = true,
     this.bottomDockReserve = 0,
     this.preservePositionStart = false,
     this.pageBuilderKey,
@@ -355,7 +352,6 @@ class ReaderPagedView extends StatefulWidget {
   final ValueChanged<int> onBoundary;
   final ReadingPosition? position;
   final bool reduceMotion;
-  final bool showPageCount;
 
   /// 底部标签栏显示时为其预留的高度，避免正文/页脚被遮挡。
   final double bottomDockReserve;
@@ -1500,10 +1496,6 @@ class _ReaderPagedViewState extends State<ReaderPagedView>
     final rawFirst =
         localSpread * perSpread - (adjacent == null ? _leadingPages : 0);
     final first = rawFirst.clamp(0, pagination.pages.length - 1);
-    final last = (rawFirst + perSpread - 1).clamp(
-      first,
-      pagination.pages.length - 1,
-    );
     final fraction = countSpreads < 2 ? 0 : localSpread / (countSpreads - 1);
     final anchor = pagination.pages[first].anchor;
     final title = adjacent == null
@@ -1517,13 +1509,6 @@ class _ReaderPagedViewState extends State<ReaderPagedView>
           ? name
           : '$name-$spread-$physicalLeaf',
     );
-    final count = widget.bookTitle == null
-        ? perSpread == 1
-              ? '${first + 1}/${pagination.pages.length}页 · ${(fraction * 100).round()}%'
-              : '${first + 1}–${last + 1}/${pagination.pages.length}页 · ${(fraction * 100).round()}%'
-        : perSpread == 1
-        ? '${first + 1} / ${pagination.pages.length} 页 · ${(fraction * 100).round()}%'
-        : '${first + 1}–${last + 1} / ${pagination.pages.length} 页 · ${(fraction * 100).round()}%';
     Widget part(Widget child) => ReaderTurnPart(
       motion: ReaderTurnScope(
         animation: _turn,
@@ -1559,9 +1544,6 @@ class _ReaderPagedViewState extends State<ReaderPagedView>
           .controlForeground(Theme.of(context).brightness == Brightness.dark)
           .withValues(alpha: .72),
     );
-    // 自定义页眉 / 页脚：仅在用户配置了槽位时接管，否则走下面原有分支。
-    final customHeader = true;
-    final customFooter = true;
     final tipContext = ReaderTipContext(
       bookName: widget.bookTitle ?? '',
       chapterTitle: title,
@@ -1569,189 +1551,63 @@ class _ReaderPagedViewState extends State<ReaderPagedView>
       pageCount: pagination.pages.length,
       readProgress: '${(fraction * 100).round()}%',
     );
-    final statusInsets =
-        widget.bookTitle != null && widget.preferences.hideSystemStatus
-        ? ReaderStatusFooter.horizontalInsetsFor(
-            context,
-            extra: widget.preferences.statusSideInset,
-            fontSize: widget.preferences.statusFontSize,
-          )
-        : EdgeInsets.zero;
     return IgnorePointer(
       ignoring: spread != _restingSpread,
       child: SelectionContainer.disabled(
         child: Stack(
           fit: StackFit.expand,
           children: [
-            if (!customHeader &&
-                widget.status != null &&
-                widget.bookTitle == null)
-              Positioned(
-                left: 0,
-                right: 0,
-                top: 0,
-                child: part(widget.status!),
-              ),
-            if (!customHeader &&
-                (widget.bookTitle == null ||
-                    widget.preferences.showReaderStatus))
-              Positioned(
-                top: widget.bookTitle == null
-                    ? padding.top
-                    : widget.preferences.statusTopOffset,
-                left: padding.left > statusInsets.left
-                    ? padding.left
-                    : statusInsets.left,
-                right: padding.right > statusInsets.right
-                    ? padding.right
-                    : statusInsets.right,
-                child: part(
-                  information(
-                    widget.bookTitle != null
-                        ? ReaderStatusFooter(
-                            key: key('reader-chapter-location'),
-                            compact: true,
-                            statusBand: true,
-                            fontSize: widget.preferences.statusFontSize,
-                            timeAtEnd: false,
-                            showBattery: widget.preferences.hideSystemStatus,
-                            ink: informationStyle.color,
-                          )
-                        : Row(
-                            key: key('reader-chapter-location'),
-                            children: [
-                              Expanded(
-                                child: ReaderChapterTitle(
-                                  text: title,
-                                  key: key('reader-chapter-title'),
-                                  style: _chapterHeadingStyle(
-                                    widget.style,
-                                    widget.preferences,
-                                  ),
-                                  textAlign: widget.preferences.titleTextAlign,
-                                  active: spread == _restingSpread,
-                                  chrome: widget.chrome,
-                                  showWithChrome: false,
-                                  reduceMotion: widget.reduceMotion,
-                                ),
-                              ),
-                              if (widget.showPageCount) ...[
-                                const SizedBox(width: 12),
-                                IgnorePointer(
-                                  child: AppText(
-                                    count,
-                                    key: key(
-                                      'reader-page-count',
-                                      leaf: leaves - 1,
-                                    ),
-                                    maxLines: 1,
-                                    textAlign: TextAlign.end,
-                                    style: widget.style.copyWith(
-                                      fontSize: 11,
-                                      height: 1.3,
-                                      color: widget.style.color?.withValues(
-                                        alpha: .55,
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ],
-                          ),
-                    interactive: true,
+            Positioned(
+              left: padding.left + widget.preferences.headerPadding.left,
+              right: padding.right + widget.preferences.headerPadding.right,
+              top:
+                  (widget.bookTitle == null
+                      ? padding.top
+                      : (widget.preferences.hideSystemStatus
+                            ? widget.preferences.statusTopOffset
+                            : MediaQuery.viewPaddingOf(context).top +
+                                  widget.preferences.statusTopOffset)) +
+                  widget.preferences.headerPadding.top,
+              child: part(
+                information(
+                  ReaderTipStrip(
+                    key: key('reader-custom-header'),
+                    tips: ReaderPreferences.fixedHeaderTips,
+                    baseContext: tipContext,
+                    style: informationStyle,
+                    slotKeys: [
+                      key('reader-custom-header-left'),
+                      key('reader-custom-header-center'),
+                      key('reader-custom-header-right'),
+                    ],
                   ),
+                  interactive: true,
                 ),
               ),
-            if (!customFooter && widget.bookTitle != null)
-              Positioned(
-                left: padding.left,
-                right: padding.right,
-                bottom:
-                    (padding.bottom - ReaderScrollLocation.extentOf(context))
-                        .clamp(0.0, double.infinity),
-                child: part(
-                  information(
-                    Row(
-                      key: key('reader-bottom-location'),
-                      children: [
-                        Expanded(
-                          child: ReaderChapterTitle(
-                            text: title,
-                            key: key('reader-bottom-chapter-title'),
-                            style: informationStyle,
-                            active: spread == _restingSpread,
-                            chrome: widget.chrome,
-                            showWithChrome: false,
-                            reduceMotion: widget.reduceMotion,
-                          ),
-                        ),
-                        if (widget.showPageCount) ...[
-                          const SizedBox(width: 12),
-                          AppText(
-                            count,
-                            key: key('reader-page-count', leaf: leaves - 1),
-                            maxLines: 1,
-                            style: informationStyle,
-                          ),
-                        ],
-                      ],
-                    ),
+            ),
+            Positioned(
+              left: padding.left + widget.preferences.footerPadding.left,
+              right: padding.right + widget.preferences.footerPadding.right,
+              bottom:
+                  MediaQuery.viewPaddingOf(context).bottom +
+                  widget.preferences.footerPadding.bottom,
+              child: part(
+                information(
+                  ReaderTipStrip(
+                    key: key('reader-custom-footer'),
+                    tips: ReaderPreferences.fixedFooterTips,
+                    baseContext: tipContext,
+                    style: informationStyle,
+                    slotKeys: [
+                      key('reader-custom-footer-left'),
+                      key('reader-custom-footer-center'),
+                      key('reader-custom-footer-right'),
+                    ],
                   ),
+                  interactive: true,
                 ),
               ),
-            if (customHeader)
-              Positioned(
-                left: padding.left + widget.preferences.headerPadding.left,
-                right: padding.right + widget.preferences.headerPadding.right,
-                top:
-                    (widget.bookTitle == null
-                        ? padding.top
-                        : (widget.preferences.hideSystemStatus
-                              ? widget.preferences.statusTopOffset
-                              : MediaQuery.viewPaddingOf(context).top +
-                                    widget.preferences.statusTopOffset)) +
-                    widget.preferences.headerPadding.top,
-                child: part(
-                  information(
-                    ReaderTipStrip(
-                      key: key('reader-custom-header'),
-                      tips: ReaderPreferences.fixedHeaderTips,
-                      baseContext: tipContext,
-                      style: informationStyle,
-                      slotKeys: [
-                        key('reader-custom-header-left'),
-                        key('reader-custom-header-center'),
-                        key('reader-custom-header-right'),
-                      ],
-                    ),
-                    interactive: true,
-                  ),
-                ),
-              ),
-            if (customFooter)
-              Positioned(
-                left: padding.left + widget.preferences.footerPadding.left,
-                right: padding.right + widget.preferences.footerPadding.right,
-                bottom:
-                    MediaQuery.viewPaddingOf(context).bottom +
-                    widget.preferences.footerPadding.bottom,
-                child: part(
-                  information(
-                    ReaderTipStrip(
-                      key: key('reader-custom-footer'),
-                      tips: ReaderPreferences.fixedFooterTips,
-                      baseContext: tipContext,
-                      style: informationStyle,
-                      slotKeys: [
-                        key('reader-custom-footer-left'),
-                        key('reader-custom-footer-center'),
-                        key('reader-custom-footer-right'),
-                      ],
-                    ),
-                    interactive: true,
-                  ),
-                ),
-              ),
+            ),
           ],
         ),
       ),

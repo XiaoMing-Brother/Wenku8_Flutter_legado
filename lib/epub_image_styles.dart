@@ -6,17 +6,6 @@ import 'reader_block_spacing.dart';
 
 /// Only image dimensions are carried into the text reader, not a second HTML
 /// renderer. csslib and html handle declarations and matching selectors.
-Map<Element, LocalImageLayout> epubImageStyles(
-  Document document,
-  String? Function(String) readStylesheet,
-) {
-  final properties = epubStyleProperties(document, readStylesheet);
-  return {
-    for (final image in document.querySelectorAll('img, image'))
-      image: LocalImageLayout.fromProperties(properties[image] ?? {}),
-  };
-}
-
 Map<Element, Map<String, String>> epubStyleProperties(
   Document document,
   String? Function(String) readStylesheet,

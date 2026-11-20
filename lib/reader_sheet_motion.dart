@@ -68,6 +68,7 @@ class ReaderSheetMotionRender extends RenderProxyBox {
     }
     return Offset.zero;
   }
+
   Matrix4 get _transform => Matrix4.translationValues(displacement.dx, 0, 0);
 
   Path _side(bool left, double shift) {
@@ -304,21 +305,4 @@ class ReaderSheetMotionRender extends RenderProxyBox {
     _opacity.layer = null;
     super.dispose();
   }
-}
-
-class ReaderPageMarginClipper extends CustomClipper<Rect> {
-  const ReaderPageMarginClipper(this.insets, {this.verticalOverflow = 0});
-  final EdgeInsets insets;
-  final double verticalOverflow;
-  @override
-  Rect getClip(Size size) => Rect.fromLTRB(
-    insets.left,
-    -verticalOverflow,
-    size.width - insets.right,
-    size.height + verticalOverflow,
-  );
-  @override
-  bool shouldReclip(ReaderPageMarginClipper oldClipper) =>
-      oldClipper.insets != insets ||
-      oldClipper.verticalOverflow != verticalOverflow;
 }

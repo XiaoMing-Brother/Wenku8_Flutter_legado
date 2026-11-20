@@ -3,7 +3,6 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 
 import 'catalog.dart';
-import 'novel_feed_controller.dart';
 import 'tag_catalogue.dart';
 
 /// One remote discovery region owns one source and cursor. Ranking and tag
@@ -23,19 +22,8 @@ class DiscoveryShelfQuery {
 
   const DiscoveryShelfQuery._(this.sort, this.tags);
 
-  factory DiscoveryShelfQuery.fromFeed(NovelFeedController feed) =>
-      DiscoveryShelfQuery(sort: feed.sort, tags: feed.tags);
-
   final NovelSort sort;
   final List<String> tags;
-
-  String get label => tags.isEmpty ? sort.label : tags.join(' · ');
-
-  DiscoveryShelfQuery withSort(NovelSort value) =>
-      DiscoveryShelfQuery(sort: value);
-
-  DiscoveryShelfQuery withTags(Iterable<String> values) =>
-      DiscoveryShelfQuery(sort: sort, tags: values);
 
   Map<String, Object> toJson() => {
     'version': 1,
@@ -68,19 +56,6 @@ class DiscoveryShelfQuery {
 
   static DiscoveryShelfQuery parseOrDefault(Object? value) =>
       tryParse(value) ?? const DiscoveryShelfQuery.defaults();
-
-  /// Restoring the default ranking still needs an initial request: the feed's
-  /// selectSort intentionally does nothing when that ranking is already selected.
-  Future<void> applyTo(NovelFeedController feed) async {
-    if (tags.isNotEmpty) {
-      await feed.selectTags(tags);
-    } else {
-      await feed.selectSort(sort);
-    }
-    if (!feed.hasLoaded && !feed.loading && feed.error == null) {
-      await feed.loadInitial();
-    }
-  }
 
   @override
   bool operator ==(Object other) =>
