@@ -6,6 +6,7 @@ import 'package:flutter/services.dart' show PlatformException;
 import 'catalog.dart';
 import 'book_tag_catalog.dart';
 import 'book_search.dart';
+import 'book_search_merger.dart';
 import 'tag_catalogue.dart';
 import 'blocked_tags.dart';
 
@@ -16,10 +17,12 @@ class NovelFeedController extends ChangeNotifier {
     this.repository, {
     this.search = false,
     this.groupAllSearch = false,
+    this.mergeSourceResults = false,
     this.initialItems = 0,
   }) : assert(initialItems >= 0);
   final NovelRepository repository;
   final bool search;
+  final bool mergeSourceResults;
 
   /// The shared search page keeps each real field's cursor and result state.
   /// Other feed callers retain their existing single-list contract.
@@ -69,7 +72,7 @@ class NovelFeedController extends ChangeNotifier {
   int? totalItems;
   Set<BookSearchField> incompleteSearchFields = const {};
   Set<String> incompleteSources = const {};
-  String? get searchNotice {
+  String? get failureScopeLabel {
     final fields = incompleteSearchFields.map((field) => field.label).join('、');
     final sources = incompleteSources.isEmpty
         ? ''
@@ -82,7 +85,12 @@ class NovelFeedController extends ChangeNotifier {
       if (sources.isNotEmpty) sources,
     ];
     if (scope.isEmpty) return null;
-    final scopeLabel = scope.join('；');
+    return scope.join('；');
+  }
+
+  String? get searchNotice {
+    final scopeLabel = failureScopeLabel;
+    if (scopeLabel == null) return null;
     return items.isEmpty
         ? '$scopeLabel搜索失败，目前没有可显示的结果。'
         : '$scopeLabel搜索失败，已保留其他搜索结果。';
@@ -135,6 +143,7 @@ class NovelFeedController extends ChangeNotifier {
   bool refreshing = false;
   bool _disposed = false;
   Timer? _searchDelay;
+  NovelSearchMerger? _searchMerger;
 
   List<Novel> get allItems => _items;
   List<Novel> get items {
@@ -318,6 +327,7 @@ class NovelFeedController extends ChangeNotifier {
     refreshFailed = false;
     loading = false;
     refreshing = false;
+    _searchMerger = null;
   }
 
   Future<void> _load({required bool replace, bool force = false}) async {
@@ -344,6 +354,22 @@ class NovelFeedController extends ChangeNotifier {
     final pendingIncompleteSources = replace
         ? <String>{}
         : {...incompleteSources};
+    final tagOnly =
+        requestedField == BookSearchField.tags ||
+        requestedField == BookSearchField.all &&
+            requestedQuery.trim().startsWith('#');
+    // 只对书源搜索做跨源合并；本地搜索和标签检索保留原有结果语义。
+    final mergingSearch =
+        mergeSourceResults &&
+        search &&
+        !filteringTags &&
+        !tagOnly &&
+        requestedQuery.isNotEmpty &&
+        !_usesSearchGroups;
+    if (mergingSearch) {
+      if (replace) _searchMerger = NovelSearchMerger(requestedQuery);
+      _searchMerger ??= NovelSearchMerger(requestedQuery);
+    }
     final progressiveRepository = repository is ProgressiveNovelSearch
         ? repository as ProgressiveNovelSearch
         : null;
@@ -356,6 +382,8 @@ class NovelFeedController extends ChangeNotifier {
     notifyListeners();
     try {
       while (true) {
+        final searchCountBeforePage = mergingSearch ? _searchMerger!.count : 0;
+
         void acceptTagProgress(TagSearchProgress progress) {
           if (_disposed || generation != _generation) return;
           _tagProgress = progress;
@@ -386,6 +414,23 @@ class NovelFeedController extends ChangeNotifier {
           if (_disposed || generation != _generation) return;
           _searchProgress = progress;
           if (!retaining) {
+            if (mergingSearch) {
+              pending = _searchMerger!.merge(
+                progress.items,
+                pinned: progress.officialItems,
+              );
+              replacing = false;
+              _items = pending;
+              _visibleItems = null;
+              _tagSuggestions.addAll(pending.expand((book) => book.tags));
+              BookTagCatalog.shared.observe(_tagSuggestions);
+              totalItems = _searchMerger!.count;
+              _resultStartIndex = 0;
+              _resultReplacesRetained = true;
+              _resultRevision++;
+              notifyListeners();
+              return;
+            }
             final oldCount = pending.length;
             final merged = <int, Novel>{
               if (!replacing)
@@ -409,10 +454,6 @@ class NovelFeedController extends ChangeNotifier {
           notifyListeners();
         }
 
-        final tagOnly =
-            requestedField == BookSearchField.tags ||
-            requestedField == BookSearchField.all &&
-                requestedQuery.trim().startsWith('#');
         final result =
             (search || filteringTags) &&
                 tagOnly &&
@@ -452,13 +493,17 @@ class NovelFeedController extends ChangeNotifier {
         pendingIncompleteFields.addAll(result.searchFailures.keys);
         pendingIncompleteSources.addAll(result.sourceFailures.keys);
         final oldCount = pending.length;
-        final merged = <int, Novel>{
-          if (!replacing)
-            for (final item in pending) item.id: item,
-          for (final item in result.items) item.id: item,
-        };
-        pending = List.unmodifiable(merged.values);
-        final first = replacing ? 0 : oldCount;
+        if (mergingSearch) {
+          pending = _searchMerger!.merge(result.items);
+        } else {
+          final merged = <int, Novel>{
+            if (!replacing)
+              for (final item in pending) item.id: item,
+            for (final item in result.items) item.id: item,
+          };
+          pending = List.unmodifiable(merged.values);
+        }
+        final first = mergingSearch || replacing ? 0 : oldCount;
         replacing = false;
         // Refresh the pages already visible as one transaction. Never shrink a
         // long list to page one while its remaining pages are still in flight.
@@ -483,14 +528,22 @@ class NovelFeedController extends ChangeNotifier {
           _visibleItems = null;
           _tagSuggestions.addAll(pending.expand((book) => book.tags));
           BookTagCatalog.shared.observe(_tagSuggestions);
-          if (first < _items.length || retaining) {
+          if (mergingSearch) {
+            _resultStartIndex = 0;
+            _resultReplacesRetained = true;
+            _resultRevision++;
+          } else if (first < _items.length || retaining) {
             _resultStartIndex = retaining ? 0 : first;
             _resultReplacesRetained = retaining;
             _resultRevision++;
           }
           page = requestedPage;
-          hasMore = result.hasMore;
-          totalItems = result.totalItems;
+          hasMore =
+              result.hasMore &&
+              !(mergingSearch &&
+                  (_searchMerger!.resultLimitReached ||
+                      _searchMerger!.count <= searchCountBeforePage));
+          totalItems = mergingSearch ? _searchMerger!.count : result.totalItems;
           incompleteSearchFields = Set.unmodifiable(pendingIncompleteFields);
           incompleteSources = Set.unmodifiable(pendingIncompleteSources);
         }

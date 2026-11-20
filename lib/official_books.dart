@@ -41,14 +41,17 @@ class OfficialRanking {
   final String? rankMold;
   final String? categoryId;
 
-  OfficialRanking copyWith({String? categoryId}) => OfficialRanking(
+  OfficialRanking copyWith({
+    String? categoryId,
+    bool clearCategoryId = false,
+  }) => OfficialRanking(
     id: id,
     title: title,
     site: site,
     kind: kind,
     gender: gender,
     rankMold: rankMold,
-    categoryId: categoryId ?? this.categoryId,
+    categoryId: clearCategoryId ? null : (categoryId ?? this.categoryId),
   );
 }
 
@@ -102,6 +105,33 @@ const fanqieFemaleCategories = <OfficialCategory>[
   OfficialCategory(id: '1017', name: '民国言情'),
 ];
 
+/// 七猫分类使用 `频道:一级分类` 编码：0 男生原创、1 女生原创。
+/// 选择「全部」时保持空串，继续走官方榜单页。
+const qimaoMaleCategories = <OfficialCategory>[
+  OfficialCategory(id: '', name: '全部'),
+  OfficialCategory(id: '0:202', name: '玄幻奇幻'),
+  OfficialCategory(id: '0:203', name: '都市'),
+  OfficialCategory(id: '0:204', name: '奇闻异事'),
+  OfficialCategory(id: '0:205', name: '武侠仙侠'),
+  OfficialCategory(id: '0:56', name: '历史'),
+  OfficialCategory(id: '0:60', name: '军事'),
+  OfficialCategory(id: '0:64', name: '科幻'),
+  OfficialCategory(id: '0:75', name: '游戏'),
+  OfficialCategory(id: '0:206', name: '体育'),
+  OfficialCategory(id: '0:207', name: 'N次元'),
+  OfficialCategory(id: '0:306', name: '现实题材'),
+];
+
+const qimaoFemaleCategories = <OfficialCategory>[
+  OfficialCategory(id: '', name: '全部'),
+  OfficialCategory(id: '1:1', name: '现代言情'),
+  OfficialCategory(id: '1:2', name: '古代言情'),
+  OfficialCategory(id: '1:4', name: '幻想言情'),
+  OfficialCategory(id: '1:200', name: '游戏竞技'),
+  OfficialCategory(id: '1:277', name: '衍生言情'),
+  OfficialCategory(id: '1:307', name: '现实主义'),
+];
+
 const qidianCategories = <OfficialCategory>[
   OfficialCategory(id: '', name: '全部'),
   OfficialCategory(id: '21', name: '玄幻'),
@@ -120,15 +150,60 @@ const qidianCategories = <OfficialCategory>[
 ];
 
 const officialRankings = <OfficialRanking>[
-  OfficialRanking(id: 'qidian-yuepiao', title: '月票榜', site: OfficialSite.qidian, kind: 'yuepiao'),
-  OfficialRanking(id: 'qidian-hotsales', title: '畅销榜', site: OfficialSite.qidian, kind: 'hotsales'),
-  OfficialRanking(id: 'qidian-readindex', title: '阅读榜', site: OfficialSite.qidian, kind: 'readindex'),
-  OfficialRanking(id: 'qidian-newfans', title: '书友榜', site: OfficialSite.qidian, kind: 'newfans'),
-  OfficialRanking(id: 'qidian-rec', title: '推荐榜', site: OfficialSite.qidian, kind: 'rec'),
-  OfficialRanking(id: 'qidian-update', title: '更新榜', site: OfficialSite.qidian, kind: 'update'),
-  OfficialRanking(id: 'qidian-sign', title: '签约榜', site: OfficialSite.qidian, kind: 'sign'),
-  OfficialRanking(id: 'qidian-newbook', title: '新书榜', site: OfficialSite.qidian, kind: 'newbook'),
-  OfficialRanking(id: 'qidian-newauthor', title: '新人榜', site: OfficialSite.qidian, kind: 'newauthor'),
+  OfficialRanking(
+    id: 'qidian-yuepiao',
+    title: '月票榜',
+    site: OfficialSite.qidian,
+    kind: 'yuepiao',
+  ),
+  OfficialRanking(
+    id: 'qidian-hotsales',
+    title: '畅销榜',
+    site: OfficialSite.qidian,
+    kind: 'hotsales',
+  ),
+  OfficialRanking(
+    id: 'qidian-readindex',
+    title: '阅读榜',
+    site: OfficialSite.qidian,
+    kind: 'readindex',
+  ),
+  OfficialRanking(
+    id: 'qidian-newfans',
+    title: '书友榜',
+    site: OfficialSite.qidian,
+    kind: 'newfans',
+  ),
+  OfficialRanking(
+    id: 'qidian-rec',
+    title: '推荐榜',
+    site: OfficialSite.qidian,
+    kind: 'rec',
+  ),
+  OfficialRanking(
+    id: 'qidian-update',
+    title: '更新榜',
+    site: OfficialSite.qidian,
+    kind: 'update',
+  ),
+  OfficialRanking(
+    id: 'qidian-sign',
+    title: '签约榜',
+    site: OfficialSite.qidian,
+    kind: 'sign',
+  ),
+  OfficialRanking(
+    id: 'qidian-newbook',
+    title: '新书榜',
+    site: OfficialSite.qidian,
+    kind: 'newbook',
+  ),
+  OfficialRanking(
+    id: 'qidian-newauthor',
+    title: '新人榜',
+    site: OfficialSite.qidian,
+    kind: 'newauthor',
+  ),
   OfficialRanking(
     id: 'fanqie-male-read',
     title: '男频阅读榜',
@@ -239,6 +314,20 @@ const officialRankings = <OfficialRanking>[
     title: '女生完结榜',
     site: OfficialSite.qimao,
     kind: 'over',
+    gender: 'girl',
+  ),
+  OfficialRanking(
+    id: 'qimao-girl-collect',
+    title: '女生收藏榜',
+    site: OfficialSite.qimao,
+    kind: 'collect',
+    gender: 'girl',
+  ),
+  OfficialRanking(
+    id: 'qimao-girl-update',
+    title: '女生更新榜',
+    site: OfficialSite.qimao,
+    kind: 'update',
     gender: 'girl',
   ),
   // 书旗：榜单页 /ranklist?rank={kind}&page={n}，kind 已含性别与维度。
@@ -411,22 +500,26 @@ class OfficialBookService {
     coverUrl: book.coverUrl,
   );
 
-  static int idFor(OfficialBook book) => _stableId(
-    'official:${book.site.name}:${book.bookId}',
-  );
+  static int idFor(OfficialBook book) =>
+      _stableId('official:${book.site.name}:${book.bookId}');
 
   static final Map<String, Uint8List> _coverCache = {};
 
   static Future<Map<int, String>>? _fanqieFontMapFuture;
+  static Future<Map<int, String>>? _fanqieLibraryFontMapFuture;
 
-  static Future<Map<int, String>> _fanqieFontMap() =>
-      _fanqieFontMapFuture ??= _loadFanqieFontMap();
+  static Future<Map<int, String>> _fanqieFontMap() => _fanqieFontMapFuture ??=
+      _loadFanqieFontMap('assets/book_sources/fanqie_font_map.json');
 
-  static Future<Map<int, String>> _loadFanqieFontMap() async {
-    try {
-      final raw = await rootBundle.loadString(
-        'assets/book_sources/fanqie_font_map.json',
+  /// 分类书库接口使用与榜单不同的字体置换表，不能共用榜单映射。
+  static Future<Map<int, String>> _fanqieLibraryFontMap() =>
+      _fanqieLibraryFontMapFuture ??= _loadFanqieFontMap(
+        'assets/book_sources/fanqie_library_font_map.json',
       );
+
+  static Future<Map<int, String>> _loadFanqieFontMap(String asset) async {
+    try {
+      final raw = await rootBundle.loadString(asset);
       final decoded = jsonDecode(raw);
       final mapping = decoded is Map ? _map(decoded['map']) : null;
       if (mapping == null) return const {};
@@ -493,6 +586,66 @@ class OfficialBookService {
     };
   }
 
+  /// 番茄分类书库：与榜单接口不同，使用独立的 author/library/book_list。
+  ///
+  /// [gender] 为 -1 全部、1 男生、0 女生；[categoryId] 为 -1 时表示全部书籍。
+  static Future<OfficialRankingPage> fanqieLibrary({
+    required String gender,
+    required String categoryId,
+    required String categoryName,
+    required int page,
+  }) async {
+    final uri =
+        Uri.https('fanqienovel.com', '/api/author/library/book_list/v0/', {
+          'page_count': '18',
+          'page_index': '${page - 1}',
+          'gender': gender,
+          'category_id': categoryId,
+          'book_type': '-1',
+          'creation_status': '-1',
+          'word_count': '-1',
+          'sort': '0',
+        });
+    final json = await _getJson(uri, headers: _fanqieHeaders);
+    if ((_int(json['code']) ?? -1) != 0) {
+      throw FormatException('番茄书库接口返回 code=${json['code']}');
+    }
+    final data = _map(json['data']);
+    final records = _list(data?['book_list']);
+    final fontMap = await _fanqieLibraryFontMap();
+    final books = <OfficialBook>[];
+    for (final value in records) {
+      final item = _map(value);
+      if (item == null) continue;
+      final bid = _string(item['book_id']);
+      if (bid.isEmpty) continue;
+      var cover = _string(item['thumb_url']);
+      if (cover.startsWith('http://')) {
+        cover = 'https://${cover.substring(7)}';
+      }
+      books.add(
+        OfficialBook(
+          site: OfficialSite.fanqie,
+          bookId: bid,
+          title: _decodeFanqieText(_string(item['book_name']), fontMap),
+          author: _decodeFanqieText(_string(item['author']), fontMap),
+          kind: categoryName,
+          summary: _decodeFanqieText(_string(item['abstract']), fontMap),
+          coverUrl: cover,
+          bookUrl: 'https://fanqienovel.com/page/$bid',
+          wordCount: _decodeFanqieText(_string(item['word_count']), fontMap),
+          votes: _decodeFanqieText(_string(item['read_count']), fontMap),
+        ),
+      );
+    }
+    final total = _int(data?['total_count']) ?? 0;
+    return OfficialRankingPage(
+      books: books,
+      hasMore: _truthy(data?['has_more']) && (total <= 0 || page * 18 < total),
+      page: page,
+    );
+  }
+
   static Future<OfficialBookData> detail(BookSourceRef ref) async {
     return switch (siteForKey(ref.sourceKey)) {
       OfficialSite.qidian => _qidianDetail(ref),
@@ -512,10 +665,7 @@ class OfficialBookService {
   }
 
   /// 返回官网原始正文 HTML；VIP/锁定章节返回占位标记，由仓库层转成可见提示。
-  static Future<String> content(
-    BookSourceRef ref,
-    String chapterUrl,
-  ) async {
+  static Future<String> content(BookSourceRef ref, String chapterUrl) async {
     return switch (siteForKey(ref.sourceKey)) {
       OfficialSite.qidian => _qidianContent(chapterUrl),
       OfficialSite.fanqie => _fanqieContent(chapterUrl),
@@ -536,8 +686,7 @@ class OfficialBookService {
       'gender': 'male',
       'pageNum': '$page',
       '_csrfToken': 'wenku-official',
-      if ((ranking.categoryId ?? '').isNotEmpty)
-        'catId': ranking.categoryId!,
+      if ((ranking.categoryId ?? '').isNotEmpty) 'catId': ranking.categoryId!,
     });
     final json = await _getJson(
       uri,
@@ -630,8 +779,7 @@ class OfficialBookService {
     final total = complete ? allBooks.length : (_int(data?['total_num']) ?? 0);
     return OfficialRankingPage(
       books: books,
-      hasMore:
-          books.length >= 20 && (total <= 0 || page * 20 < total),
+      hasMore: books.length >= 20 && (total <= 0 || page * 20 < total),
       page: page,
     );
   }
@@ -640,6 +788,10 @@ class OfficialBookService {
     OfficialRanking ranking,
     int page,
   ) async {
+    final categoryId = ranking.categoryId ?? '';
+    if (categoryId.isNotEmpty) {
+      return _qimaoCategoryRanking(ranking, categoryId, page);
+    }
     // 七猫榜单为服务端渲染，单页固定前 20 本，不做翻页。
     if (page > 1) {
       return const OfficialRankingPage(books: [], hasMore: false, page: 1);
@@ -654,7 +806,8 @@ class OfficialBookService {
       headers: const {
         'User-Agent': _desktopUa,
         'Referer': 'https://www.qimao.com/paihang/',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept':
+            'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
         'Accept-Language': 'zh-CN,zh;q=0.9',
       },
     );
@@ -706,6 +859,72 @@ class OfficialBookService {
     return OfficialRankingPage(books: books, hasMore: false, page: page);
   }
 
+  static Future<OfficialRankingPage> _qimaoCategoryRanking(
+    OfficialRanking ranking,
+    String categoryId,
+    int page,
+  ) async {
+    final parts = categoryId.split(':');
+    final channel = parts.isNotEmpty ? parts.first : '0';
+    final category1 = parts.length > 1 ? parts[1] : 'a';
+    // 官方分类页只有点击/字数/更新/收藏四种排序，这里按榜单类型取最接近的维度。
+    final order = switch (ranking.kind) {
+      'collect' => 'favorite_uv',
+      'update' => 'update_time',
+      _ => 'click',
+    };
+    final json = await _getJson(
+      Uri.https('api-www.qimao.com', '/api/classify/book-list', {
+        'channel': channel,
+        'category1': category1,
+        'category2': 'a',
+        'words': 'a',
+        'update_time': 'a',
+        'is_vip': 'a',
+        'is_over': ranking.kind == 'over' ? '1' : 'a',
+        'order': order,
+        'page': '$page',
+      }),
+      headers: _qimaoHeaders,
+    );
+    final data = _map(json['data']);
+    final pageData = _map(data?['page_data']);
+    final pageSize = _int(pageData?['page_size']) ?? 15;
+    final total = _int(pageData?['count']) ?? 0;
+    final books = <OfficialBook>[];
+    for (final value in _list(data?['book_list'])) {
+      final item = _map(value);
+      if (item == null) continue;
+      final title = _string(item['title']);
+      final readUrl = _string(item['read_url']);
+      var bookId = _string(item['book_id']);
+      if (bookId.isEmpty) bookId = _qimaoBookId(readUrl);
+      if (title.isEmpty || bookId.isEmpty) continue;
+      var cover = _string(item['image_link']);
+      if (cover.startsWith('//')) cover = 'https:$cover';
+      books.add(
+        OfficialBook(
+          site: OfficialSite.qimao,
+          bookId: bookId,
+          title: title,
+          author: _string(item['author']),
+          kind: _string(item['category2_name']),
+          summary: _string(item['intro']),
+          coverUrl: cover,
+          bookUrl: readUrl.isEmpty
+              ? 'https://www.qimao.com/shuku/$bookId/'
+              : readUrl,
+          wordCount: _string(item['words_num']),
+        ),
+      );
+    }
+    return OfficialRankingPage(
+      books: books,
+      hasMore: books.isNotEmpty && (total <= 0 || page * pageSize < total),
+      page: page,
+    );
+  }
+
   static Future<OfficialRankingPage> _shuqiRanking(
     OfficialRanking ranking,
     int page,
@@ -719,7 +938,8 @@ class OfficialBookService {
       headers: const {
         'User-Agent': _desktopUa,
         'Referer': 'https://www.shuqi.com/ranklist',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept':
+            'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
         'Accept-Language': 'zh-CN,zh;q=0.9',
       },
     );
@@ -741,14 +961,13 @@ class OfficialBookService {
       }
       final bookId = _shuqiBookId(href);
       if (title.isEmpty || bookId.isEmpty) continue;
-      final author =
-          info.querySelector('.ranklist-autor a')?.text.trim() ?? '';
+      final author = info.querySelector('.ranklist-autor a')?.text.trim() ?? '';
       final category = info.querySelector('.bkcate-icon')?.text.trim() ?? '';
       final intro = info.querySelector('.ranklist-des')?.text.trim() ?? '';
       final img =
           li.querySelector('.ranklinst-bk img') ?? li.querySelector('img');
-      var cover =
-          (img?.attributes['src'] ?? img?.attributes['data-src'] ?? '').trim();
+      var cover = (img?.attributes['src'] ?? img?.attributes['data-src'] ?? '')
+          .trim();
       if (cover.startsWith('//')) cover = 'https:$cover';
       books.add(
         OfficialBook(
@@ -803,8 +1022,9 @@ class OfficialBookService {
     final complete = _truthy(bd?['is_over']) || upStatus.contains('完');
     final words = _num(bd?['words_num']);
     final updateRaw = _string(bd?['update_time']);
-    final updateDate =
-        RegExp(r'\d{4}-\d{2}-\d{2}').firstMatch(updateRaw)?.group(0);
+    final updateDate = RegExp(
+      r'\d{4}-\d{2}-\d{2}',
+    ).firstMatch(updateRaw)?.group(0);
     return OfficialBookData(
       title: _string(bd?['title']),
       author: _string(bd?['author']),
@@ -820,9 +1040,7 @@ class OfficialBookService {
     );
   }
 
-  static Future<List<OfficialChapter>> _qimaoChapters(
-    BookSourceRef ref,
-  ) async {
+  static Future<List<OfficialChapter>> _qimaoChapters(BookSourceRef ref) async {
     final bookId = _idFromUrl(ref.bookUrl, RegExp(r'/shuku/(\d+)'));
     if (bookId.isEmpty) throw const FormatException('七猫书籍地址无效');
     final json = await _getJson(
@@ -860,7 +1078,8 @@ class OfficialBookService {
     );
     final article = html_parser.parse(html).querySelector('.article');
     final paragraphs = <String>[];
-    for (final node in article?.querySelectorAll('p') ?? const <dom.Element>[]) {
+    for (final node
+        in article?.querySelectorAll('p') ?? const <dom.Element>[]) {
       final text = node.text.trim();
       if (text.isNotEmpty) paragraphs.add('<p>$text</p>');
     }
@@ -879,7 +1098,10 @@ class OfficialBookService {
     );
     final doc = html_parser.parse(html);
     final title =
-        doc.querySelector('.view-book-info-book-title-box .bname')?.text.trim() ??
+        doc
+            .querySelector('.view-book-info-book-title-box .bname')
+            ?.text
+            .trim() ??
         doc.querySelector('h1')?.text.trim() ??
         '';
     final author = doc.querySelector('.bauthor a')?.text.trim() ?? '';
@@ -901,7 +1123,8 @@ class OfficialBookService {
     }
     final titleText = doc.querySelector('.lastchapter .title')?.text ?? '';
     final countMatch = RegExp(r'共\s*(\d+)\s*章').firstMatch(titleText);
-    final img = doc.querySelector('img.cover') ?? doc.querySelector('.cover img');
+    final img =
+        doc.querySelector('img.cover') ?? doc.querySelector('.cover img');
     var cover = (img?.attributes['src'] ?? '').trim();
     if (cover.startsWith('//')) cover = 'https:$cover';
     final complete = status.contains('完');
@@ -920,9 +1143,7 @@ class OfficialBookService {
     );
   }
 
-  static Future<List<OfficialChapter>> _shuqiChapters(
-    BookSourceRef ref,
-  ) async {
+  static Future<List<OfficialChapter>> _shuqiChapters(BookSourceRef ref) async {
     final bookId = _idFromUrl(ref.bookUrl, RegExp(r'/book/(\d+)'));
     if (bookId.isEmpty) throw const FormatException('书旗书籍地址无效');
     final html = await _getText(
@@ -966,10 +1187,7 @@ class OfficialBookService {
         !chapterUrl.contains('/content')) {
       return '[[SHUQI_LOCKED]]';
     }
-    final json = await _getJson(
-      Uri.parse(chapterUrl),
-      headers: _shuqiHeaders,
-    );
+    final json = await _getJson(Uri.parse(chapterUrl), headers: _shuqiHeaders);
     final state = _int(json['state']) ?? _int(json['status']);
     if (state != 200) return '[[SHUQI_LOCKED]]';
     final raw = _string(json['ChapterContent'] ?? json['chapterContent']);
@@ -995,7 +1213,8 @@ class OfficialBookService {
     }
     final base = StringBuffer();
     for (final rune in shifted.toString().runes) {
-      final ok = (rune >= 65 && rune <= 90) ||
+      final ok =
+          (rune >= 65 && rune <= 90) ||
           (rune >= 97 && rune <= 122) ||
           (rune >= 48 && rune <= 57) ||
           rune == 43 ||
@@ -1124,6 +1343,23 @@ class OfficialBookService {
   }
 
   static Future<OfficialBookData> _fanqieDetail(BookSourceRef ref) async {
+    final bookId = _fanqieBookId(ref.bookUrl);
+    if (bookId.isNotEmpty) {
+      try {
+        final json = await _getJson(
+          Uri.https('fanqienovel.com', '/api/book/info', {'bookId': bookId}),
+          headers: _fanqieHeaders,
+        );
+        if ((_int(json['code']) ?? -1) == 0) {
+          final data = _map(json['data']);
+          if (data != null && _string(data['bookName']).isNotEmpty) {
+            return _fanqieDetailFromApi(data, ref);
+          }
+        }
+      } on Object {
+        // 老页面仍可解析时继续走 HTML 兜底。
+      }
+    }
     final html = await _getText(
       Uri.parse(ref.bookUrl),
       headers: _fanqieHeaders,
@@ -1135,10 +1371,7 @@ class OfficialBookService {
       final raw = page['categoryV2'];
       final decoded = raw is String ? jsonDecode(raw) : raw;
       for (final value in _list(decoded)) {
-        final name = _decodeFanqieText(
-          _string(_map(value)?['Name']),
-          fontMap,
-        );
+        final name = _decodeFanqieText(_string(_map(value)?['Name']), fontMap);
         if (name.isNotEmpty) category.add(name);
       }
     } on Object {
@@ -1177,6 +1410,55 @@ class OfficialBookService {
     );
   }
 
+  static OfficialBookData _fanqieDetailFromApi(
+    Map<String, dynamic> data,
+    BookSourceRef ref,
+  ) {
+    final categories = _fanqieCategoryNames(data['categoryV2'], const {});
+    final fallback = _string(data['category']);
+    if (categories.isEmpty && fallback.isNotEmpty) {
+      categories.add(fallback);
+    }
+    final lastTitle = _string(data['lastChapterTitle']);
+    final complete =
+        _string(data['creationStatus']) == '0' ||
+        lastTitle.contains('完');
+    final cover = _httpsUrl(_string(data['thumbUrl']));
+    return OfficialBookData(
+      title: _string(data['bookName']),
+      author: _string(data['author']),
+      intro: _plainText(_string(data['abstract'])),
+      kind: categories.toSet().join(' · '),
+      coverUrl: cover.isEmpty ? _httpsUrl(_string(data['thumbUri'])) : cover,
+      tocUrl: ref.bookUrl,
+      status: complete ? '已完结' : '连载中',
+      isComplete: complete,
+      chapterCount: 0,
+      wordCount: _int(data['wordNumber']),
+      updateTime: _epoch(_int(data['lastPublishTime'])),
+    );
+  }
+
+  static List<String> _fanqieCategoryNames(
+    Object? raw,
+    Map<int, String> fontMap,
+  ) {
+    final result = <String>[];
+    try {
+      final decoded = raw is String ? jsonDecode(raw) : raw;
+      for (final value in _list(decoded)) {
+        final name = _decodeFanqieText(_string(_map(value)?['Name']), fontMap);
+        if (name.isNotEmpty) result.add(name);
+      }
+    } on Object {
+      // 接口偶发没有 categoryV2 时由调用方退回 category 字段。
+    }
+    return result;
+  }
+
+  static String _httpsUrl(String value) =>
+      value.startsWith('http://') ? 'https://${value.substring(7)}' : value;
+
   static Future<List<OfficialChapter>> _qidianChapters(
     BookSourceRef ref,
   ) async {
@@ -1193,8 +1475,8 @@ class OfficialBookService {
     for (final anchor in document.querySelectorAll('a[data-cid]')) {
       final cid = anchor.attributes['data-cid']?.trim() ?? '';
       if (cid.isEmpty || !seen.add(cid)) continue;
-      final title = anchor.querySelector('h2')?.text.trim() ??
-          anchor.text.trim();
+      final title =
+          anchor.querySelector('h2')?.text.trim() ?? anchor.text.trim();
       final href = anchor.attributes['href']?.trim() ?? '';
       final url = href.startsWith('//') ? 'https:$href' : href;
       if (title.isEmpty || url.isEmpty) continue;
@@ -1213,6 +1495,26 @@ class OfficialBookService {
   static Future<List<OfficialChapter>> _fanqieChapters(
     BookSourceRef ref,
   ) async {
+    final bookId = _fanqieBookId(ref.tocUrl ?? ref.bookUrl);
+    if (bookId.isNotEmpty) {
+      try {
+        final json = await _getJson(
+          Uri.https(
+            'fanqienovel.com',
+            '/api/reader/directory/detail',
+            {'bookId': bookId},
+          ),
+          headers: _fanqieHeaders,
+        );
+        if ((_int(json['code']) ?? -1) == 0) {
+          final data = _map(json['data']);
+          final chapters = _fanqieChaptersFromApi(data);
+          if (chapters.isNotEmpty) return chapters;
+        }
+      } on Object {
+        // 详情/目录接口不可用时保留原来的 HTML 解析。
+      }
+    }
     final html = await _getText(
       Uri.parse(ref.tocUrl ?? ref.bookUrl),
       headers: _fanqieHeaders,
@@ -1242,6 +1544,37 @@ class OfficialBookService {
     return chapters;
   }
 
+  static List<OfficialChapter> _fanqieChaptersFromApi(
+    Map<String, dynamic>? data,
+  ) {
+    final chapters = <OfficialChapter>[];
+    for (final volume in _list(data?['chapterListWithVolume'])) {
+      for (final value in _list(volume)) {
+        final item = _map(value);
+        if (item == null) continue;
+        final itemId = _string(item['itemId']);
+        final title = _string(item['title']);
+        if (itemId.isEmpty || title.isEmpty) continue;
+        chapters.add(
+          OfficialChapter(
+            title: title,
+            url: 'https://fanqienovel.com/reader/$itemId',
+            isLocked:
+                _truthy(item['isChapterLock']) ||
+                (_int(item['needPay']) ?? 0) > 0,
+          ),
+        );
+      }
+    }
+    return chapters;
+  }
+
+  static String _fanqieBookId(String url) {
+    final path = RegExp(r'/(?:page|book)/(\d+)').firstMatch(url)?.group(1);
+    if (path != null && path.isNotEmpty) return path;
+    return RegExp(r'[?&]bookId=(\d+)').firstMatch(url)?.group(1) ?? '';
+  }
+
   static Future<String> _qidianContent(String chapterUrl) async {
     final html = await _getText(
       Uri.parse(chapterUrl),
@@ -1257,10 +1590,7 @@ class OfficialBookService {
   }
 
   static Future<String> _fanqieContent(String chapterUrl) async {
-    final html = await _getText(
-      Uri.parse(chapterUrl),
-      headers: _fanqieHeaders,
-    );
+    final html = await _getText(Uri.parse(chapterUrl), headers: _fanqieHeaders);
     if (RegExp(
       r'购买|登录后阅读|本章为付费|isChapterLock[\s\S]{0,40}true',
     ).hasMatch(html)) {
@@ -1269,7 +1599,11 @@ class OfficialBookService {
     final match = RegExp(
       r'<div class="muye-reader-content noselect">([\s\S]*?)</div></div>',
     ).firstMatch(html);
-    return match?.group(1) ?? '';
+    final body = match?.group(1) ?? '';
+    if (body.isEmpty) return body;
+    // 番茄阅读页正文同样使用私用区字体编码，不解码会显示为方框。
+    final fontMap = await _fanqieFontMap();
+    return _decodeFanqieText(body, fontMap);
   }
 
   static const _fanqieHeaders = {

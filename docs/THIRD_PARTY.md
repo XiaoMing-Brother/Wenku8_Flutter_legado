@@ -52,6 +52,10 @@ OpenJDK 兼容库通过 Gradle 依赖引入，源码与构建脚本见 [google/d
 
 液态玻璃基于 [liquid_glass_easy 5.0.0](https://pub.dev/packages/liquid_glass_easy/versions/5.0.0)，作者 Ahmed Gamil，使用 MIT License。源码和原许可保留于 [`third_party/liquid_glass_easy`](../third_party/liquid_glass_easy)；本地 GPU 性能修改单独记录在 [`PATCHES.md`](../third_party/liquid_glass_easy/PATCHES.md)。应用保留原作者署名，版权与许可随源码及 Flutter 的开源许可集合分发。
 
+### 阅读主题数据
+
+`assets/reader_themes.json` 是 Legado 内置的 LightInk 阅读主题清单快照，仅包含主题名称、配色和远程缩略图/背景图地址，不包含 Legado 应用源码。主题名称、配色和图片归各自作者及原服务方所有；应用仅在选择后缓存背景图到本机，不重新分发图片文件。
+
 ## 内容与展示图
 
 中文显示使用 [OpenCC ver.1.1.9](https://github.com/BYVoid/OpenCC/tree/ver.1.1.9) 的原始字词典（BYVoid 及贡献者，Apache-2.0）。词典及来源说明位于 `assets/opencc/`，完整许可位于 `assets/licenses/opencc.txt`，注册到应用开源许可页。区域字形转换与有界缓存由 Dart 实现，不包含 OpenCC 原生二进制。

@@ -30,6 +30,8 @@ abstract interface class BookSourceLibrary {
   List<BookSource> get sources;
   BookSourceSearchScope get searchScope;
   String get searchScopeLabel;
+  BookSourceSearchScope get changeSourceScope;
+  bool get changeSourceCheckAuthor;
 
   Future<void> prepare({bool force = false});
   Future<BookSourceImportResult> importSources(String text);
@@ -45,6 +47,8 @@ abstract interface class BookSourceLibrary {
     String? removeGroup,
   });
   Future<void> setSearchScope(BookSourceSearchScope scope);
+  Future<void> setChangeSourceScope(BookSourceSearchScope scope);
+  Future<void> setChangeSourceCheckAuthor(bool value);
   Future<void> cancelSearch();
   String exportSources({Set<String>? keys});
   Future<Novel> switchSource(Novel current, Novel candidate);
@@ -101,5 +105,22 @@ abstract interface class BookSourceLibrary {
     String author = '',
     String intro = '',
     String coverUrl = '',
+  });
+}
+
+/// 换源候选按书源库顺序排序（`customOrder`，其次书源名），与原书源列表
+/// 保持一致，也对应 Legado 换源结果按书源评分配置与 `originOrder` 排序。
+void sortSourceCandidates(List<Novel> items, Iterable<BookSource> sources) {
+  final byKey = {for (final source in sources) source.key: source};
+  items.sort((a, b) {
+    final left = byKey[a.source?.sourceKey];
+    final right = byKey[b.source?.sourceKey];
+    final order = (left?.customOrder ?? 0).compareTo(right?.customOrder ?? 0);
+    if (order != 0) return order;
+    final names = (left?.name ?? a.source?.sourceName ?? '').compareTo(
+      right?.name ?? b.source?.sourceName ?? '',
+    );
+    if (names != 0) return names;
+    return a.title.compareTo(b.title);
   });
 }

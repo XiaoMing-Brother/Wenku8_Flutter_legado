@@ -32,6 +32,7 @@ class ParagraphReviewService {
       for (final row in rows)
         ParagraphReview(
           avatarUrl: _str(row['avatarUrl'] ?? row['avatar']),
+          authorName: _str(row['authorName'] ?? row['name']),
           content: _str(row['content']),
           postTime: _str(row['postTime']),
           quoteUrl: _str(row['quoteUrl']),

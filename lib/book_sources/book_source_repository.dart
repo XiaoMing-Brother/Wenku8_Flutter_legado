@@ -66,6 +66,10 @@ class BookSourceRepository extends NovelRepository
   BookSourceSearchScope get searchScope => store.searchScope;
   @override
   String get searchScopeLabel => searchScope.describe(store.sources);
+  @override
+  BookSourceSearchScope get changeSourceScope => store.changeSourceScope;
+  @override
+  bool get changeSourceCheckAuthor => store.changeSourceCheckAuthor;
 
   static Future<BookSourceRepository> open() async {
     final store = await BookSourceStore.forApp();
@@ -239,6 +243,14 @@ class BookSourceRepository extends NovelRepository
       // next search and stale workers are ignored by their generation token.
     }
   }
+
+  @override
+  Future<void> setChangeSourceScope(BookSourceSearchScope scope) =>
+      store.setChangeSourceScope(scope);
+
+  @override
+  Future<void> setChangeSourceCheckAuthor(bool value) =>
+      store.setChangeSourceCheckAuthor(value);
 
   @override
   String exportSources({Set<String>? keys}) => store.exportJson(keys: keys);
@@ -532,19 +544,15 @@ class BookSourceRepository extends NovelRepository
       return false;
     }
 
-    final reportStep = math.max(1, (sources.length / 12).ceil());
-    var lastReported = 0;
+    final reportClock = Stopwatch()..start();
+    var lastReportedAt = Duration.zero;
+    const reportInterval = Duration(milliseconds: 80);
 
     void report({bool force = false}) {
       if (stopped() || onProgress == null) return;
-      final complete = completed == sources.length;
-      if (!force &&
-          !complete &&
-          completed > 3 &&
-          completed - lastReported < reportStep) {
-        return;
-      }
-      lastReported = completed;
+      final now = reportClock.elapsed;
+      if (!force && now - lastReportedAt < reportInterval) return;
+      lastReportedAt = now;
       onProgress(
         NovelSearchProgress(
           items: List<Novel>.unmodifiable(found.values),
@@ -571,8 +579,12 @@ class BookSourceRepository extends NovelRepository
           if (stopped()) return;
           hasMore = hasMore || result.hasMore;
           for (final row in result.items) {
+            if (stopped()) return;
             final novel = await _novelFromSearch(source, row);
-            if (novel != null) found[novel.id] = novel;
+            if (novel == null) continue;
+            found[novel.id] = novel;
+            // 单个书源可能一次返回较多书籍；逐本刷新让长请求也能尽早看到结果。
+            report();
           }
         } on Object catch (error) {
           if (!stopped()) {
@@ -745,16 +757,8 @@ class BookSourceRepository extends NovelRepository
     if (stopped() && !done.isCompleted) done.complete();
     await done.future;
     if (identical(_activeCandidateSearch, run)) _activeCandidateSearch = null;
-    final items = found.values.toList()
-      ..sort((a, b) {
-        final chapters = b.chapterCount.compareTo(a.chapterCount);
-        if (chapters != 0) return chapters;
-        final source = (a.source?.sourceName ?? '').compareTo(
-          b.source?.sourceName ?? '',
-        );
-        if (source != 0) return source;
-        return a.title.compareTo(b.title);
-      });
+    final items = found.values.toList();
+    sortSourceCandidates(items, store.sources);
     return BookSourceCandidateSearchResult(
       items: List<Novel>.unmodifiable(items),
       failedSources: failures,

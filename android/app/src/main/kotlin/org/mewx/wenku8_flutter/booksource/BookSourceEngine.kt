@@ -571,6 +571,7 @@ internal class BookSourceEngine(
             readSubContent: Boolean = false,
         ): ContentPage {
             val chapter = ChapterData(
+                title = chapterTitle.orEmpty(),
                 url = url,
                 nextUrl = nextUrl,
             )
@@ -589,7 +590,10 @@ internal class BookSourceEngine(
             )
             val context = RuleContext(
                 content = response.text,
-                baseUrl = response.url,
+                // Legado 的 baseUrl 保持请求前的章节地址，跳转后的地址单独
+                // 通过 redirectUrl/url 暴露；部分书源依赖原始地址解析路由。
+                baseUrl = url,
+                redirectUrl = response.url,
                 book = book,
                 chapter = chapter,
             )

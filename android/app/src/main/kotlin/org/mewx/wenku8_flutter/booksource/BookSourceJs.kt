@@ -44,7 +44,9 @@ internal class BookSourceJs(private val http: BookSourceHttp) {
                 cx,
                 scope,
                 "url",
-                env.response?.url?.takeIf { it.isNotBlank() } ?: env.baseUrl,
+                env.redirectUrl.takeIf { it.isNotBlank() }
+                    ?: env.response?.url?.takeIf { it.isNotBlank() }
+                    ?: env.baseUrl,
                 variables,
             )
             bind(cx, scope, "key", env.key, variables)
@@ -797,6 +799,7 @@ internal data class JsEnv(
     val onSearchBook: ((String) -> Unit)? = null,
     val isLongClick: Boolean = false,
     val response: BookSourceResponse? = null,
+    val redirectUrl: String = "",
 ) {
     fun toRuleContext(): RuleContext = RuleContext(
         content = content,
@@ -805,6 +808,7 @@ internal data class JsEnv(
         page = page,
         book = book,
         chapter = chapter,
+        redirectUrl = redirectUrl,
     )
 }
 

@@ -5,6 +5,7 @@
 class ParagraphReview {
   const ParagraphReview({
     this.avatarUrl = '',
+    this.authorName = '',
     this.content = '',
     this.postTime = '',
     this.quoteUrl = '',
@@ -14,6 +15,9 @@ class ParagraphReview {
 
   /// 发布者头像。
   final String avatarUrl;
+
+  /// 发布者昵称。
+  final String authorName;
 
   /// 段评正文。
   final String content;
@@ -37,6 +41,7 @@ class ChapterReviewData {
     required this.chapterId,
     required this.reviewUrl,
     this.items = const [],
+    this.paragraphCounts = const {},
     this.fetchedAt,
   });
 
@@ -47,10 +52,32 @@ class ChapterReviewData {
 
   final List<ParagraphReview> items;
 
+  /// 每段的官方评论总数；没有该数据的书源保持为空，回落到 [items] 计数。
+  final Map<int, int> paragraphCounts;
+
   /// 抓取时间（毫秒），用于缓存过期判断。
   final int? fetchedAt;
 
-  bool get isEmpty => items.isEmpty;
+  bool get isEmpty => items.isEmpty && paragraphCounts.isEmpty;
+
+  int countFor(int paraIndex) {
+    final total = paragraphCounts[paraIndex];
+    if (total != null) return total;
+    var count = 0;
+    for (final item in items) {
+      if (item.paraIndex == paraIndex) count++;
+    }
+    return count;
+  }
+
+  int get totalCount {
+    if (paragraphCounts.isEmpty) return items.length;
+    var total = 0;
+    for (final value in paragraphCounts.values) {
+      total += value;
+    }
+    return total;
+  }
 }
 
 /// 段评的内存缓存：按 书 id + 章 id 保存已抓取结果，避免重复请求。

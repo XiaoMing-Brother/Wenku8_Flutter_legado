@@ -21,8 +21,8 @@ const updateRepository = String.fromEnvironment(
   'UPDATE_REPOSITORY',
   defaultValue: defaultUpdateRepository,
 );
-const currentAppVersion = '0.5.7.261120.1048';
-const currentAppBuild = 2026112010;
+const currentAppVersion = '0.5.7.261120.1605';
+const currentAppBuild = 2026112016;
 
 class ReleaseVersion implements Comparable<ReleaseVersion> {
   const ReleaseVersion(this.parts, [this.build = 0]);
@@ -124,8 +124,7 @@ class AppRelease {
       final url = Uri.tryParse(raw['browser_download_url']?.toString() ?? '');
       final size = raw['size'];
       if (name is! String ||
-          !(name.startsWith('legado-wenku8-${version.name}-') ||
-              name.startsWith('wenku8-${version.name}-')) ||
+          !name.startsWith('legado-wenku8-${version.name}-') ||
           !const ['.apk', '.ipa', '.hap'].any(name.endsWith) ||
           url == null ||
           url.scheme != 'https' ||

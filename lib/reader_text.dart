@@ -11,18 +11,18 @@ const readerIndentPlaceholder = '\ufffc';
 TextSpan readerParagraphSpan({
   required List<InlineSpan> children,
   required TextStyle style,
-  required bool indent,
+  required int indent,
   double? continuationWidth,
 }) => TextSpan(
   style: style,
   children: [
-    if (indent)
+    if (indent > 0)
       WidgetSpan(
         alignment: PlaceholderAlignment.baseline,
         baseline: TextBaseline.alphabetic,
         child: ExcludeSemantics(
           // Text.rich scales inline widgets with its TextScaler already.
-          child: SizedBox(width: (style.fontSize ?? 19) * 2, height: 0),
+          child: SizedBox(width: (style.fontSize ?? 19) * indent, height: 0),
         ),
       ),
     ...children,
@@ -39,13 +39,12 @@ TextSpan readerParagraphSpan({
   ],
 );
 
-List<PlaceholderDimensions> readerIndentDimensions(bool indent, double font) =>
-    [
-      if (indent)
-        PlaceholderDimensions(
-          size: Size(font * 2, 0),
-          alignment: PlaceholderAlignment.baseline,
-          baseline: TextBaseline.alphabetic,
-          baselineOffset: 0,
-        ),
-    ];
+List<PlaceholderDimensions> readerIndentDimensions(int indent, double font) => [
+  if (indent > 0)
+    PlaceholderDimensions(
+      size: Size(font * indent, 0),
+      alignment: PlaceholderAlignment.baseline,
+      baseline: TextBaseline.alphabetic,
+      baselineOffset: 0,
+    ),
+];

@@ -45,11 +45,11 @@ class _BatchChangeSourcePageState extends State<BatchChangeSourcePage> {
 
   BatchChangeSourceRunner<Novel, Novel> get _runner =>
       BatchChangeSourceRunner<Novel, Novel>(
-        search: (book) async =>
-            (await widget.library.searchSourceCandidates(
-              book,
-              checkAuthor: true,
-            )).items,
+        search: (book) async => (await widget.library.searchSourceCandidates(
+          book,
+          checkAuthor: true,
+          scope: widget.library.changeSourceScope,
+        )).items,
         apply: (book, candidate) async {
           final Novel switched;
           final repository = widget.repository;

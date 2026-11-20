@@ -31,10 +31,13 @@ Android 默认只构建 `arm64-v8a`，将输出文件
 附件大小不能超过 300 MB；APK 的包名、`versionName`、`versionCode` 和签名
 必须与已安装版本兼容。
 
-客户端同时接受 `legado-wenku8-` 与旧的 `wenku8-` 附件前缀。已安装的
-`0.5.7.261118.1707` 及更早构建只识别旧前缀，因此第一次切换到新名称时，
-需要同时上传一份旧前缀的 `arm64-v8a` 附件，或让用户手动安装一次新版。
-完成过渡后可以只保留 `legado-wenku8-` 名称。
+客户端只接受 `legado-wenku8-` 附件前缀。仍在识别旧 `wenku8-` 前缀的
+旧版客户端无法通过应用内更新获取本版，需要手动安装一次新版，后续版本
+即可继续自动更新。
+
+七猫段评的签名密钥只在构建时通过
+`--dart-define-from-file=<本地密钥文件>` 注入 `QIMAO_REVIEW_SECRET`，
+不得写入仓库；未提供时该来源的段评会自动跳过，不影响正文阅读。
 
 Android 的 `applicationId` 固定为 `legado.wenku`，Kotlin 源码命名空间仍为
 `org.mewx.wenku8_flutter`。从旧的 `org.mewx.wenku8_flutter.source_preview`

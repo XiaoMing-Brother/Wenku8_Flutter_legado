@@ -19,11 +19,10 @@ import 'reader_chrome.dart';
 import 'reader_header_footer.dart';
 import 'reader_tip.dart';
 
-TextStyle _chapterHeadingStyle(TextStyle style) => style.copyWith(
-  fontSize: 13,
-  height: 1.4,
-  color: style.color?.withValues(alpha: .6),
-);
+TextStyle _chapterHeadingStyle(
+  TextStyle style,
+  ReaderPreferences preferences,
+) => preferences.titleStyle(style);
 
 List<String> _localImagePriority(ReaderContent content, int? paragraph) {
   final local = content.illustrations.where(
@@ -61,15 +60,28 @@ Offset _bodyOrigin(
   TextStyle style,
   EdgeInsets padding,
   double width,
+  ReaderPreferences preferences,
 ) {
+  if (!preferences.showTitle) {
+    return Offset(padding.left, padding.top);
+  }
   final painter = TextPainter(
-    text: TextSpan(text: title, style: _chapterHeadingStyle(style)),
+    text: TextSpan(
+      text: title,
+      style: _chapterHeadingStyle(style, preferences),
+    ),
     textDirection: Directionality.of(context),
     textScaler: MediaQuery.textScalerOf(context),
     maxLines: 1,
     ellipsis: '…',
   )..layout(maxWidth: width);
-  final origin = Offset(padding.left, padding.top + painter.height + 8);
+  final origin = Offset(
+    padding.left,
+    padding.top +
+        preferences.titleTopSpacing +
+        painter.height +
+        preferences.titleBottomSpacing,
+  );
   painter.dispose();
   return origin;
 }
@@ -224,12 +236,14 @@ class ReaderPageSkeleton extends StatelessWidget {
     required this.padding,
     required this.style,
     required this.vertical,
+    required this.preferences,
     this.margin = 26,
   });
   final String title;
   final EdgeInsets padding;
   final TextStyle style;
   final bool vertical;
+  final ReaderPreferences preferences;
   final double margin;
   @override
   Widget build(BuildContext context) => Padding(
@@ -237,13 +251,18 @@ class ReaderPageSkeleton extends StatelessWidget {
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        AppText(
-          title,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: _chapterHeadingStyle(style),
-        ),
-        const SizedBox(height: 8),
+        if (preferences.showTitle) ...[
+          if (preferences.titleTopSpacing > 0)
+            SizedBox(height: preferences.titleTopSpacing),
+          AppText(
+            title,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            textAlign: preferences.titleTextAlign,
+            style: _chapterHeadingStyle(style, preferences),
+          ),
+          SizedBox(height: preferences.titleBottomSpacing),
+        ],
         Expanded(
           child: LayoutBuilder(
             builder: (context, constraints) {
@@ -257,6 +276,7 @@ class ReaderPageSkeleton extends StatelessWidget {
                   style,
                   padding,
                   constraints.maxWidth,
+                  preferences,
                 ),
               );
               return ReaderBookSpread(
@@ -467,14 +487,20 @@ class _ReaderPagedViewState extends State<ReaderPagedView>
   );
   double get _headingExtent => _headingExtentFor(widget.title);
   double _headingExtentFor(String title) {
-    if (widget.bookTitle != null) return 0;
+    if (widget.bookTitle != null || !widget.preferences.showTitle) return 0;
     final painter = TextPainter(
-      text: TextSpan(text: title, style: _chapterHeadingStyle(widget.style)),
+      text: TextSpan(
+        text: title,
+        style: _chapterHeadingStyle(widget.style, widget.preferences),
+      ),
       textDirection: Directionality.of(context),
       textScaler: MediaQuery.textScalerOf(context),
       maxLines: 1,
     )..layout();
-    final height = painter.height + 8;
+    final height =
+        painter.height +
+        widget.preferences.titleTopSpacing +
+        widget.preferences.titleBottomSpacing;
     painter.dispose();
     return height;
   }
@@ -499,6 +525,7 @@ class _ReaderPagedViewState extends State<ReaderPagedView>
                   1,
                   double.infinity,
                 ),
+                widget.preferences,
               ),
       );
 
@@ -1597,7 +1624,11 @@ class _ReaderPagedViewState extends State<ReaderPagedView>
                                 child: ReaderChapterTitle(
                                   text: title,
                                   key: key('reader-chapter-title'),
-                                  style: _chapterHeadingStyle(widget.style),
+                                  style: _chapterHeadingStyle(
+                                    widget.style,
+                                    widget.preferences,
+                                  ),
+                                  textAlign: widget.preferences.titleTextAlign,
                                   active: spread == _restingSpread,
                                   chrome: widget.chrome,
                                   showWithChrome: false,
@@ -1811,6 +1842,7 @@ class _ReaderPagedViewState extends State<ReaderPagedView>
               padding: widget.padding,
               style: widget.style,
               vertical: widget.preferences.mode == ReaderMode.vertical,
+              preferences: widget.preferences,
               margin: widget.preferences.bindingMargin,
             ),
             if (widget.status != null)

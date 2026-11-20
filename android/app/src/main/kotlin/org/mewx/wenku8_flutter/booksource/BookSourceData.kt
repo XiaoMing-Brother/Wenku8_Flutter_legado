@@ -25,4 +25,5 @@ internal data class RuleContext(
     val page: Int = 1,
     val book: BookData? = null,
     val chapter: ChapterData? = null,
+    val redirectUrl: String = "",
 )

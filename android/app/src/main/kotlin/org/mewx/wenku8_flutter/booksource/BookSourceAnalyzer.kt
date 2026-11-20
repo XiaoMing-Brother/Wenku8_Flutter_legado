@@ -496,6 +496,7 @@ internal class BookSourceAnalyzer(
         page = context.page,
         book = context.book,
         chapter = context.chapter,
+        redirectUrl = context.redirectUrl,
     )
 
     private fun css(rule: String, context: RuleContext): List<Any?> {

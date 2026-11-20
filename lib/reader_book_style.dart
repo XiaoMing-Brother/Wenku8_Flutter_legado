@@ -65,6 +65,7 @@ class ReaderBookStyle {
 
   static const _layoutKeys = {
     'paper',
+    'theme',
     'mode',
     'verticalLatinOrientation',
     'margin',
@@ -74,11 +75,18 @@ class ReaderBookStyle {
     'marginBottom',
     'paragraphGap',
     'paragraphGapOverride',
+    'indentCount',
     'indent',
     'justify',
+    'italic',
     'nightTextBrightness',
     'letterSpacing',
     'textWeight',
+    'titleScale',
+    'titleWeight',
+    'titlePosition',
+    'titleTopSpacing',
+    'titleBottomSpacing',
     'backgroundImage',
     'backgroundOpacity',
     'backgroundFit',
@@ -87,8 +95,7 @@ class ReaderBookStyle {
   Map<String, Object?> toJson() => {
     'enabled': enabled,
     if (onlyLanguage != null) 'onlyLanguage': onlyLanguage,
-    if (replaceRulesEnabled != null)
-      'replaceRulesEnabled': replaceRulesEnabled,
+    if (replaceRulesEnabled != null) 'replaceRulesEnabled': replaceRulesEnabled,
     if (hiddenLanguages.isNotEmpty)
       'hiddenLanguages': hiddenLanguages.toList()..sort(),
     'fontSize': fontSize,

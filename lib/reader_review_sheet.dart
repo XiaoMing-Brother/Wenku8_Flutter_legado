@@ -20,6 +20,7 @@ class ReaderReviewSheet extends StatefulWidget {
     this.sourceSupportsReview = true,
     this.loader,
     this.focusPara,
+    this.providerLabel = '官方',
   });
 
   final int bookId;
@@ -35,6 +36,9 @@ class ReaderReviewSheet extends StatefulWidget {
   /// 若指定，则只显示该段落号（paraIndex）的段评（点段落气泡时传入）。
   final int? focusPara;
 
+  /// 评论来源的应用名称，用于提示更多评论的查看入口。
+  final String providerLabel;
+
   @override
   State<ReaderReviewSheet> createState() => _ReaderReviewSheetState();
 }
@@ -47,7 +51,11 @@ class _ReaderReviewSheetState extends State<ReaderReviewSheet> {
   void initState() {
     super.initState();
     _data = ChapterReviewCache.shared.lookup(widget.bookId, widget.chapterId);
-    if (_data == null || _data!.items.isEmpty) {
+    final focus = widget.focusPara;
+    if (_data == null ||
+        _data!.items.isEmpty ||
+        (focus != null &&
+            !_data!.items.any((item) => item.paraIndex == focus))) {
       _refresh();
     }
   }
@@ -78,18 +86,23 @@ class _ReaderReviewSheetState extends State<ReaderReviewSheet> {
             for (final item in allItems)
               if (item.paraIndex == widget.focusPara) item,
           ];
-    final sorted = [...items]..sort((a, b) {
-      final ai = a.paraIndex, bi = b.paraIndex;
-      if (ai == null && bi == null) return 0;
-      if (ai == null) return 1;
-      if (bi == null) return -1;
-      return ai.compareTo(bi);
-    });
+    final sorted = [...items]
+      ..sort((a, b) {
+        final ai = a.paraIndex, bi = b.paraIndex;
+        if (ai == null && bi == null) return 0;
+        if (ai == null) return 1;
+        if (bi == null) return -1;
+        return ai.compareTo(bi);
+      });
     final coveredParagraphs = items
         .map((item) => item.paraIndex)
         .whereType<int>()
         .toSet()
         .length;
+    final loadedCount = items.length;
+    final totalCount = widget.focusPara == null
+        ? (_data?.totalCount ?? loadedCount)
+        : (_data?.countFor(widget.focusPara!) ?? loadedCount);
     return ListView(
       padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
       children: [
@@ -103,12 +116,19 @@ class _ReaderReviewSheetState extends State<ReaderReviewSheet> {
             style: TextStyle(fontSize: 13, color: muted),
           ),
         ],
-        if (items.isNotEmpty) ...[
+        if (loadedCount > 0 || totalCount > 0) ...[
           const SizedBox(height: 2),
           AppText(
-            '共 ${items.length} 条 · 覆盖 $coveredParagraphs 段',
+            _reviewSummary(loadedCount, totalCount, coveredParagraphs),
             style: TextStyle(fontSize: 12, color: muted),
           ),
+          if (totalCount > loadedCount) ...[
+            const SizedBox(height: 4),
+            AppText(
+              '仅展示首屏评论，更多评论可在${widget.providerLabel} App 查看。',
+              style: TextStyle(fontSize: 11, height: 1.4, color: muted),
+            ),
+          ],
         ],
         if (widget.sourceSupportsReview && widget.loader != null)
           Align(
@@ -130,9 +150,7 @@ class _ReaderReviewSheetState extends State<ReaderReviewSheet> {
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 20),
             child: AppText(
-              widget.sourceSupportsReview
-                  ? '本章暂无段评，可能尚未抓取；稍后重试或确认网络后可再查看。'
-                  : '当前书源未配置段评规则，无法显示段评。',
+              _emptyMessage(totalCount),
               style: TextStyle(fontSize: 13, height: 1.6, color: muted),
             ),
           )
@@ -140,6 +158,23 @@ class _ReaderReviewSheetState extends State<ReaderReviewSheet> {
           for (final item in sorted) _row(context, item, muted),
       ],
     );
+  }
+
+  String _reviewSummary(int loaded, int total, int covered) {
+    final coverage = covered > 0 ? ' · 覆盖 $covered 段' : '';
+    if (loaded == total) return '共 $total 条$coverage';
+    return '已加载 $loaded 条 / 共 $total 条$coverage';
+  }
+
+  String _emptyMessage(int total) {
+    if (total > 0) {
+      return widget.focusPara == null
+          ? '本章共有 $total 条段评，暂未加载到评论正文；可稍后重试或在${widget.providerLabel} App 查看。'
+          : '本段共有 $total 条段评，暂未加载到评论正文；可稍后重试或在${widget.providerLabel} App 查看。';
+    }
+    return widget.sourceSupportsReview
+        ? '本章暂无段评，可能尚未抓取；稍后重试或确认网络后可再查看。'
+        : '当前书源未配置段评规则，无法显示段评。';
   }
 
   Widget _row(BuildContext context, ParagraphReview item, Color muted) {
@@ -150,57 +185,69 @@ class _ReaderReviewSheetState extends State<ReaderReviewSheet> {
         if (context.mounted) showNovelFeedback(context, '已复制段评');
       },
       child: Padding(
-      padding: const EdgeInsets.only(bottom: 16),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          item.avatarUrl.isEmpty
-              ? ArchiveIcon(
-                  CupertinoIcons.person_crop_circle,
-                  size: 26,
-                  color: muted,
-                )
-              : ClipOval(
-                  child: Image.network(
-                    item.avatarUrl,
-                    width: 26,
-                    height: 26,
-                    fit: BoxFit.cover,
-                    errorBuilder: (context, error, stack) => ArchiveIcon(
-                      CupertinoIcons.person_crop_circle,
-                      size: 26,
-                      color: muted,
+        padding: const EdgeInsets.only(bottom: 16),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            item.avatarUrl.isEmpty
+                ? ArchiveIcon(
+                    CupertinoIcons.person_crop_circle,
+                    size: 26,
+                    color: muted,
+                  )
+                : ClipOval(
+                    child: Image.network(
+                      item.avatarUrl,
+                      width: 26,
+                      height: 26,
+                      fit: BoxFit.cover,
+                      errorBuilder: (context, error, stack) => ArchiveIcon(
+                        CupertinoIcons.person_crop_circle,
+                        size: 26,
+                        color: muted,
+                      ),
                     ),
                   ),
-                ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                if (item.paraIndex != null) ...[
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (item.paraIndex != null) ...[
+                    AppText(
+                      '第 ${item.paraIndex! + 1} 段',
+                      style: TextStyle(fontSize: 11, color: muted),
+                    ),
+                    const SizedBox(height: 2),
+                  ],
+                  if (item.authorName.isNotEmpty) ...[
+                    AppText(
+                      item.authorName,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                  ],
                   AppText(
-                    '第 ${item.paraIndex! + 1} 段',
-                    style: TextStyle(fontSize: 11, color: muted),
+                    item.content,
+                    style: const TextStyle(fontSize: 13, height: 1.6),
                   ),
-                  const SizedBox(height: 2),
+                  if (item.postTime.isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    AppText(
+                      item.postTime,
+                      style: TextStyle(fontSize: 11, color: muted),
+                    ),
+                  ],
                 ],
-                AppText(
-                  item.content,
-                  style: const TextStyle(fontSize: 13, height: 1.6),
-                ),
-                if (item.postTime.isNotEmpty) ...[
-                  const SizedBox(height: 4),
-                  AppText(
-                    item.postTime,
-                    style: TextStyle(fontSize: 11, color: muted),
-                  ),
-                ],
-              ],
+              ),
             ),
-          ),
-        ],
-      ),
+          ],
+        ),
       ),
     );
   }

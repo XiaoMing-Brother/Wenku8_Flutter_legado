@@ -14,7 +14,8 @@ import 'reader_annotation_editor.dart';
 import 'reader_bookmark_excerpt.dart';
 import 'local_platform.dart';
 import 'reader_preferences.dart';
-import 'reader_tip.dart';
+import 'reader_theme_picker.dart';
+import 'reader_theme_presets.dart';
 import 'font_settings_page.dart';
 import 'reader_header_footer_page.dart';
 import 'glass_choices.dart';
@@ -408,6 +409,7 @@ class _ReaderToolsState extends State<ReaderTools>
         'behavior' => 'turn',
         'layout' => 'page',
         'screen' => 'page',
+        'font' || 'paragraph' => 'body',
         final String category => category,
         _ => 'bookmarks',
       };
@@ -483,6 +485,26 @@ class _ReaderToolsState extends State<ReaderTools>
     });
   }
 
+  Future<void> _openLegadoThemes() async {
+    final selected = await showJellySheet<ReaderThemeSelection>(
+      context: context,
+      reduceMotion: widget.state.reduceMotion,
+      heightFactor: .92,
+      maxWidth: 720,
+      builder: (_) =>
+          ReaderThemePicker(selectedId: _readerPreferences.theme?.id),
+    );
+    if (!mounted || selected == null) return;
+    _preferences(
+      _readerPreferences.copyWith(theme: selected, clearBackground: true),
+    );
+    unawaited(
+      widget.state.backgrounds
+          .cacheThemeImage(selected.id, selected.imageCandidates)
+          .catchError((Object _) => null),
+    );
+  }
+
   Future<void> _importBackground() async {
     if (_backgroundBusy) return;
     setState(() => _backgroundBusy = true);
@@ -493,7 +515,12 @@ class _ReaderToolsState extends State<ReaderTools>
       try {
         final id = await widget.state.backgrounds.import(selected.path!);
         if (!mounted) return;
-        _preferences(_readerPreferences.copyWith(backgroundImage: id));
+        _preferences(
+          _readerPreferences.copyWith(
+            backgroundImage: id,
+            clearThemeImage: true,
+          ),
+        );
         setState(() {
           _backgrounds = widget.state.backgrounds.list();
         });
@@ -594,14 +621,19 @@ class _ReaderToolsState extends State<ReaderTools>
                               key: ValueKey(
                                 'reader-background-${id ?? 'plain'}',
                               ),
-                              selected:
-                                  _readerPreferences.backgroundImage == id,
+                              selected: id == null
+                                  ? _readerPreferences.backgroundImage ==
+                                            null &&
+                                        _readerPreferences.theme?.imageUrl ==
+                                            null
+                                  : _readerPreferences.backgroundImage == id,
                               onPressed: _backgroundBusy
                                   ? null
                                   : () => _preferences(
                                       id == null
                                           ? _readerPreferences.copyWith(
                                               clearBackground: true,
+                                              clearThemeImage: true,
                                             )
                                           : _readerPreferences.copyWith(
                                               backgroundImage: id,
@@ -671,7 +703,9 @@ class _ReaderToolsState extends State<ReaderTools>
             ),
           ),
           AnimatedOptionSection(
-            expanded: _readerPreferences.backgroundImage != null,
+            expanded:
+                _readerPreferences.backgroundImage != null ||
+                _readerPreferences.theme?.imageUrl != null,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
@@ -1034,9 +1068,9 @@ class _ReaderToolsState extends State<ReaderTools>
   );
 
   static const _categories = <(String, String, IconData)>[
-    ('font', '字体', CupertinoIcons.textformat),
-    ('paragraph', '段落', CupertinoIcons.text_alignleft),
-    ('page', '屏幕', CupertinoIcons.rectangle),
+    ('body', '正文', CupertinoIcons.textformat),
+    ('title', '标题', CupertinoIcons.text_alignleft),
+    ('page', '页面', CupertinoIcons.rectangle),
     ('theme', '主题', CupertinoIcons.paintbrush),
     ('replace', '净化', CupertinoIcons.slider_horizontal_3),
     ('turn', '翻页', CupertinoIcons.arrow_left_right),
@@ -1051,12 +1085,8 @@ class _ReaderToolsState extends State<ReaderTools>
       widget.scope == ReaderToolsScope.appearance
       ? _categories
             .where(
-              (item) => const {
-                'font',
-                'paragraph',
-                'page',
-                'theme',
-              }.contains(item.$1),
+              (item) =>
+                  const {'body', 'title', 'page', 'theme'}.contains(item.$1),
             )
             .toList()
       : _categories;
@@ -1090,10 +1120,12 @@ class _ReaderToolsState extends State<ReaderTools>
     final p = _readerPreferences;
     final categories = _visibleCategories;
     final summaries = <String, String>{
-      'font': '${_fontSize.round()} pt · ${p.textWeight.label}',
-      'paragraph': '${_lineHeight.toStringAsFixed(2)} 倍行距',
+      'body': '${_fontSize.round()} pt · ${_lineHeight.toStringAsFixed(2)} 倍行距',
+      'title': p.showTitle
+          ? '${p.titleScale.toStringAsFixed(1)} 倍 · ${p.titlePosition.label}'
+          : '隐藏章节标题',
       'page': '页边距 · 状态栏 · 阅读信息',
-      'theme': p.paper.label,
+      'theme': p.theme?.name ?? p.paper.label,
       'replace': '替换净化 · 阅读页显示',
       'turn': p.mode.label,
       'screen': p.hideSystemStatus ? '隐藏状态栏' : '显示状态栏',
@@ -1362,9 +1394,7 @@ class _ReaderToolsState extends State<ReaderTools>
           name: 'reader-image-tap',
           label: '点按图片',
           value: _readerPreferences.imageTap,
-          options: {
-            for (final tap in ReaderImageTap.values) tap: tap.label,
-          },
+          options: {for (final tap in ReaderImageTap.values) tap: tap.label},
           onChanged: (tap) =>
               _preferences(_readerPreferences.copyWith(imageTap: tap)),
         ),
@@ -1458,6 +1488,66 @@ class _ReaderToolsState extends State<ReaderTools>
                 onChanged: (paper) =>
                     _preferences(_readerPreferences.copyWith(paper: paper)),
               ),
+            if (category == 'theme')
+              _adjustment(
+                GlassTextButton(
+                  key: const ValueKey('reader-legado-themes'),
+                  selected: _readerPreferences.theme != null,
+                  onPressed: _openLegadoThemes,
+                  child: Row(
+                    children: [
+                      const ArchiveIcon(CupertinoIcons.paintbrush, size: 20),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const AppText(
+                              'Legado 内置主题',
+                              style: TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            AppText(
+                              _readerPreferences.theme == null
+                                  ? '1027 套 · 含远程背景图'
+                                  : '当前：${_readerPreferences.theme!.name}',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: 12,
+                                height: 1.4,
+                                color: Theme.of(
+                                  context,
+                                ).colorScheme.onSurfaceVariant,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      const ArchiveIcon(
+                        CupertinoIcons.chevron_forward,
+                        size: 14,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            if (category == 'theme')
+              _adjustment(
+                AppText(
+                  '微信读书来自 Legado 内置阅读样式；只应用底色和文字色，不覆盖排版。Legado 主题库会应用主题底色和远程背景图，选择上方基础配色可退出主题库。',
+                  style: TextStyle(
+                    fontSize: 12,
+                    height: 1.6,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ),
           ],
         ),
       ),
@@ -1501,10 +1591,12 @@ class _ReaderToolsState extends State<ReaderTools>
           active: _replaceRulesEnabled,
         ),
       ),
-    if (category == 'font' && widget.languages.length > 1)
+    if (category == 'body')
+      const ArchiveSection(title: '字体与语言', code: 'READER / FONT'),
+    if (category == 'body' && widget.languages.length > 1)
       _adjustment(_languageOptions()),
     if (category == 'theme') ..._backgroundOptions(),
-    if (category == 'font')
+    if (category == 'body')
       _adjustment(
         GlassTextButton(
           key: const ValueKey('reader-font-choice'),
@@ -1536,9 +1628,11 @@ class _ReaderToolsState extends State<ReaderTools>
       ),
     if (category == 'theme')
       AnimatedOptionSection(
-        expanded: _readerPreferences.darkPaper(
-          Theme.of(context).brightness == Brightness.dark,
-        ),
+        expanded:
+            !_readerPreferences.usesThemeInk &&
+            _readerPreferences.darkPaper(
+              Theme.of(context).brightness == Brightness.dark,
+            ),
         child: _adjustment(
           ReaderValueSlider(
             sliderKey: const ValueKey('reader-night-text-brightness'),
@@ -1560,14 +1654,14 @@ class _ReaderToolsState extends State<ReaderTools>
           const ValueKey('reader-night-text-brightness'),
         ),
       ),
-    if (category == 'font')
+    if (category == 'body')
       _adjustment(
         LanguageSettingMenu(
           key: const ValueKey('reader-language'),
           state: widget.state,
         ),
       ),
-    if (category == 'font')
+    if (category == 'body')
       _adjustment(
         ReaderValueSlider(
           sliderKey: const ValueKey('reader-font-slider'),
@@ -1585,7 +1679,9 @@ class _ReaderToolsState extends State<ReaderTools>
         ),
         const ValueKey('reader-font-slider'),
       ),
-    if (category == 'paragraph')
+    if (category == 'body')
+      const ArchiveSection(title: '段落与对齐', code: 'READER / PARAGRAPH'),
+    if (category == 'body')
       _adjustment(
         ReaderValueSlider(
           sliderKey: const ValueKey('reader-line-height-slider'),
@@ -1602,7 +1698,7 @@ class _ReaderToolsState extends State<ReaderTools>
         ),
         const ValueKey('reader-line-height-slider'),
       ),
-    if (category == 'paragraph')
+    if (category == 'body')
       _adjustment(
         Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1660,7 +1756,7 @@ class _ReaderToolsState extends State<ReaderTools>
         ),
         const ValueKey('reader-paragraph-gap-slider'),
       ),
-    if (category == 'font')
+    if (category == 'body')
       Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -1700,7 +1796,23 @@ class _ReaderToolsState extends State<ReaderTools>
           ),
         ],
       ),
-    if (category == 'paragraph')
+    if (category == 'body')
+      _adjustment(
+        ReaderValueSlider(
+          sliderKey: const ValueKey('reader-indent-count'),
+          label: '首行缩进',
+          stepper: true,
+          value: _readerPreferences.indentCount.toDouble(),
+          min: 0,
+          max: 4,
+          divisions: 4,
+          format: (v) => v == 0 ? '不缩进' : '${v.round()} 字',
+          onCommitted: (v) =>
+              _preferences(_readerPreferences.copyWith(indentCount: v.round())),
+        ),
+        const ValueKey('reader-indent-count'),
+      ),
+    if (category == 'body')
       _adjustment(
         Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1708,9 +1820,9 @@ class _ReaderToolsState extends State<ReaderTools>
           children: [
             _switch(
               context,
-              '首行缩进',
-              _readerPreferences.indent,
-              (v) => _preferences(_readerPreferences.copyWith(indent: v)),
+              '正文斜体',
+              _readerPreferences.italic,
+              (v) => _preferences(_readerPreferences.copyWith(italic: v)),
             ),
             _switch(
               context,
@@ -1721,14 +1833,121 @@ class _ReaderToolsState extends State<ReaderTools>
           ],
         ),
       ),
+    if (category == 'title')
+      const ArchiveSection(title: '章节标题', code: 'READER / TITLE'),
+    if (category == 'title')
+      _adjustment(
+        ReaderChoicePicker<ReaderTitlePosition>(
+          name: 'reader-title-position',
+          label: '标题位置',
+          value: _readerPreferences.titlePosition,
+          options: {
+            for (final position in ReaderTitlePosition.values)
+              position: position.label,
+          },
+          onChanged: (position) => _preferences(
+            _readerPreferences.copyWith(titlePosition: position),
+          ),
+        ),
+      ),
+    if (category == 'title')
+      _adjustment(
+        ReaderValueSlider(
+          sliderKey: const ValueKey('reader-title-scale'),
+          label: '标题字号',
+          stepper: true,
+          value: _readerPreferences.titleScale,
+          min: .6,
+          max: 2.5,
+          divisions: 19,
+          format: (v) => '${v.toStringAsFixed(1)} 倍',
+          onPreview: (v) => _preferences(
+            _readerPreferences.copyWith(titleScale: v),
+            persist: false,
+          ),
+          onInteractionChanged: (v) =>
+              _preview(const ValueKey('reader-title-scale'), v),
+          onCommitted: (v) =>
+              _preferences(_readerPreferences.copyWith(titleScale: v)),
+        ),
+        const ValueKey('reader-title-scale'),
+      ),
+    if (category == 'title')
+      _adjustment(
+        ReaderChoicePicker<ReaderTextWeight>(
+          name: 'reader-title-weight',
+          label: '标题字重',
+          value: _readerPreferences.titleWeight,
+          options: {
+            for (final weight in ReaderTextWeight.values) weight: weight.label,
+          },
+          onChanged: (weight) =>
+              _preferences(_readerPreferences.copyWith(titleWeight: weight)),
+        ),
+      ),
+    if (category == 'title')
+      _adjustment(
+        ReaderValueSlider(
+          sliderKey: const ValueKey('reader-title-top-spacing'),
+          label: '标题上方留白',
+          stepper: true,
+          value: _readerPreferences.titleTopSpacing,
+          min: 0,
+          max: 200,
+          divisions: 200,
+          format: (v) => '${v.round()} px',
+          onPreview: (v) => _preferences(
+            _readerPreferences.copyWith(titleTopSpacing: v),
+            persist: false,
+          ),
+          onInteractionChanged: (v) =>
+              _preview(const ValueKey('reader-title-top-spacing'), v),
+          onCommitted: (v) =>
+              _preferences(_readerPreferences.copyWith(titleTopSpacing: v)),
+        ),
+        const ValueKey('reader-title-top-spacing'),
+      ),
+    if (category == 'title')
+      _adjustment(
+        ReaderValueSlider(
+          sliderKey: const ValueKey('reader-title-bottom-spacing'),
+          label: '标题下方留白',
+          stepper: true,
+          value: _readerPreferences.titleBottomSpacing,
+          min: 0,
+          max: 200,
+          divisions: 200,
+          format: (v) => '${v.round()} px',
+          onPreview: (v) => _preferences(
+            _readerPreferences.copyWith(titleBottomSpacing: v),
+            persist: false,
+          ),
+          onInteractionChanged: (v) =>
+              _preview(const ValueKey('reader-title-bottom-spacing'), v),
+          onCommitted: (v) =>
+              _preferences(_readerPreferences.copyWith(titleBottomSpacing: v)),
+        ),
+        const ValueKey('reader-title-bottom-spacing'),
+      ),
+    if (category == 'title')
+      _adjustment(
+        AppText(
+          '标题只在滚动阅读的章节开头显示；翻页模式的章节名仍由页眉页脚信息位控制。',
+          style: TextStyle(
+            fontSize: 12,
+            height: 1.6,
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
+          ),
+        ),
+      ),
     if (category == 'turn') _adjustment(_turnAdvancedToggle(context)),
     if (category == 'turn' && _turnAdvancedExpanded)
       ..._behaviorItems(context, 'turn'),
     if (category == 'page')
       const ArchiveSection(title: '阅读信息', code: 'SCREEN / STATUS'),
     if (category == 'page') ..._behaviorItems(context, 'screen'),
-    if (category == 'font' ||
-        category == 'paragraph' ||
+    if (category == 'body' ||
+        category == 'title' ||
         category == 'page' ||
         category == 'theme')
       _adjustment(
@@ -2717,8 +2936,8 @@ class _PaddingDialogState extends State<_PaddingDialog> {
     label: label,
     value: value,
     min: 0,
-    max: 80,
-    divisions: 40,
+    max: 200,
+    divisions: 100,
     format: (v) => '${v.round()} px',
     onPreview: preview,
     onCommitted: commit,
@@ -2742,7 +2961,8 @@ class _PaddingDialogState extends State<_PaddingDialog> {
           sliderKey: const ValueKey('reader-padding-bottom'),
           label: '下边距',
           value: _prefs.marginBottom,
-          preview: (v) => _set(_prefs.copyWith(marginBottom: v), persist: false),
+          preview: (v) =>
+              _set(_prefs.copyWith(marginBottom: v), persist: false),
           commit: (v) => _set(_prefs.copyWith(marginBottom: v), persist: true),
         ),
         _slider(

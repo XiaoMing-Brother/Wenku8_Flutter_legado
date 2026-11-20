@@ -183,6 +183,7 @@ android/gradle/wrapper/gradle-wrapper.properties
 android/settings.gradle.kts
 assets/book_sources/builtin_sources.json
 assets/book_sources/fanqie_font_map.json
+assets/book_sources/fanqie_library_font_map.json
 assets/branding/README.md
 assets/branding/app-icon-source.png
 assets/branding/app-icon.png
@@ -234,6 +235,7 @@ assets/opencc/TWPhrasesIT.txt
 assets/opencc/TWPhrasesName.txt
 assets/opencc/TWPhrasesOther.txt
 assets/opencc/TWVariants.txt
+assets/reader_themes.json
 assets/reading_art/README.md
 assets/reading_art/archive-110.png
 assets/reading_art/archive-110.webp
@@ -467,6 +469,7 @@ lib/book_list_import_page.dart
 lib/book_navigation.dart
 lib/book_open_monitor.dart
 lib/book_search.dart
+lib/book_search_merger.dart
 lib/book_share_action.dart
 lib/book_shelf_content_preferences.dart
 lib/book_shelf_content_projection.dart
@@ -486,8 +489,11 @@ lib/book_sources/book_source_search_scope.dart
 lib/book_sources/book_source_store.dart
 lib/book_sources/book_source_transport.dart
 lib/book_sources/book_sources_page.dart
+lib/book_sources/fanqie_library_categories.dart
+lib/book_sources/fanqie_review_service.dart
 lib/book_sources/library_sources_repository.dart
 lib/book_sources/paragraph_review_service.dart
+lib/book_sources/qimao_review_service.dart
 lib/book_sources/review_rule.dart
 lib/book_sync.dart
 lib/book_tag_catalog.dart
@@ -711,6 +717,8 @@ lib/reader_status.dart
 lib/reader_tap_surface.dart
 lib/reader_text.dart
 lib/reader_text_picker.dart
+lib/reader_theme_picker.dart
+lib/reader_theme_presets.dart
 lib/reader_tip.dart
 lib/reader_tools.dart
 lib/reader_touch_surface.dart

@@ -181,6 +181,23 @@ class Novel {
     source: source,
   );
 
+  Novel withCoverUrl(String? value) => Novel(
+    id: id,
+    title: title,
+    author: author,
+    genre: genre,
+    summary: summary,
+    colors: colors,
+    chapters: chapters,
+    isComplete: isComplete,
+    coverUrl: value,
+    lastUpdate: lastUpdate,
+    chapterCount: chapterCount,
+    wordCount: wordCount,
+    navigation: navigation,
+    source: source,
+  );
+
   Map<String, Object?> toSnapshot() => {
     'id': id,
     'title': title,
@@ -478,11 +495,13 @@ class NovelSearchProgress {
     required this.items,
     required this.completedSources,
     required this.totalSources,
+    this.officialItems = const [],
   });
 
   final List<Novel> items;
   final int completedSources;
   final int totalSources;
+  final List<Novel> officialItems;
 }
 
 typedef NovelSearchProgressCallback =

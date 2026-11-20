@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
@@ -893,6 +894,7 @@ class LibraryState extends ChangeNotifier {
   void notifyReaderBehaviorChanged() {
     if (!_disposed) _readerBehaviorChanges.notifyListeners();
   }
+
   Future<void> markReaderChromeHintSeen() => _queuePositionWrite(
     () => writeLibraryPreference(_prefs, 'readerChromeHintSeen', true),
   );
@@ -1480,7 +1482,11 @@ class LibraryState extends ChangeNotifier {
     }
     await _queuePositionWrite(() async {
       if (_calligraphySplashOncePerDay == value) return;
-      await writeLibraryPreference(_prefs, 'calligraphySplashOncePerDay', value);
+      await writeLibraryPreference(
+        _prefs,
+        'calligraphySplashOncePerDay',
+        value,
+      );
       _calligraphySplashOncePerDay = value;
       if (!_disposed) _settings.notifyListeners();
     });
@@ -1505,7 +1511,9 @@ class LibraryState extends ChangeNotifier {
     final day = calligraphySplashDayNumber(today ?? DateTime.now());
     if (_calligraphySplashLastShownDay == day) return;
     if (_restoreBarrier case final barrier?) {
-      return barrier.future.then((_) => markCalligraphySplashShown(today: today));
+      return barrier.future.then(
+        (_) => markCalligraphySplashShown(today: today),
+      );
     }
     await _queuePositionWrite(() async {
       if (_calligraphySplashLastShownDay == day) return;
@@ -2403,8 +2411,7 @@ class LibraryState extends ChangeNotifier {
     int id,
     Future<Map<String, dynamic>> Function(Map<String, dynamic>) resolve, {
     bool includeActiveReader = false,
-  }) =>
-      _queuePositionWrite(() async {
+  }) => _queuePositionWrite(() async {
     final position = _positions[id];
     final marks = _bookmarks[id] ?? const <ReaderBookmark>[];
     final nextPosition =
@@ -2513,6 +2520,8 @@ class LibraryState extends ChangeNotifier {
     } on Object {
       // 元数据落盘失败不影响本次换源，后续写入可重试。
     }
+    // 换源会改写封面与书源坐标；书架和“我的”页依赖这次通知刷新元数据。
+    if (!_disposed) notifyListeners();
   }
 
   Future<void> applySyncedBookmarks(
@@ -4265,11 +4274,14 @@ class LibraryState extends ChangeNotifier {
   }
 }
 
+/// 换源后依次按章节 ID、完整标题、标题相似度、章节序号匹配（参考 Legado
+/// `BookHelp.getDurChapter`），最后按阅读比例回退到新目录。
 int sourceChapterIndex(
   List<NovelChapter> chapters,
   NovelChapter previous,
-  int fallback,
-) {
+  int fallback, {
+  int previousCount = 0,
+}) {
   if (chapters.isEmpty) return 0;
   final byId = chapters.indexWhere((chapter) => chapter.id == previous.id);
   if (byId >= 0) return byId;
@@ -4280,11 +4292,137 @@ int sourceChapterIndex(
     );
     if (byTitle >= 0) return byTitle;
   }
-  return fallback.clamp(0, chapters.length - 1);
+
+  final oldIndex = fallback.clamp(0, chapters.length - 1);
+  final scaled = previousCount > 1 && chapters.length > 1
+      ? ((fallback / (previousCount - 1)) * (chapters.length - 1)).round()
+      : oldIndex;
+  final center = scaled.clamp(0, chapters.length - 1);
+  final start = math.max(0, math.min(oldIndex, center) - 10);
+  final end = math.min(chapters.length - 1, math.max(oldIndex, center) + 10);
+
+  final number = _chapterNumberInTitle(previous.title);
+  final pure = _pureChapterTitle(previous.title);
+  if (pure.isNotEmpty) {
+    var bestIndex = -1;
+    var bestScore = 0.0;
+    for (var i = start; i <= end; i++) {
+      final candidate = _chapterNumberInTitle(chapters[i].title);
+      // 纯标题相同但章节号不同（如「第3章 重生」「第4章 重生」）不能当同一章。
+      if (number > 0 && candidate > 0 && candidate != number) continue;
+      final score = _titleSimilarity(
+        pure,
+        _pureChapterTitle(chapters[i].title),
+      );
+      if (score > bestScore) {
+        bestScore = score;
+        bestIndex = i;
+      }
+    }
+    if (bestScore >= .96) return bestIndex;
+  }
+
+  if (number > 0) {
+    for (var i = start; i <= end; i++) {
+      if (_chapterNumberInTitle(chapters[i].title) == number) return i;
+    }
+  }
+  return center;
 }
 
+final _chapterWhitespace = RegExp(r'[\s\u3000]+');
+final _chapterNumberPrefix = RegExp(
+  r'^(?:第\s*[0-9０-９〇零一二三四五六七八九十百千万两]+\s*[章节節卷部篇回话]|'
+  r'(?:chapter|volume|part|book)\s+[0-9ivxlcdm]+|'
+  r'[0-9０-９]{1,6}\s*[、.．:：\-—]+\s*)',
+  caseSensitive: false,
+);
+final _chapterNumberPattern = RegExp(
+  r'第\s*([0-9０-９]+|[〇零一二三四五六七八九十百千万两]+)\s*[章节節卷部篇回话]',
+);
+final _leadingNumberPattern = RegExp(r'^\s*([0-9０-９]{1,6})(?:\s|[、.．:：\-—])');
+
 String _normalizedChapterTitle(String value) =>
-    value.replaceAll(RegExp(r'[\s\u3000]+'), '').toLowerCase();
+    value.replaceAll(_chapterWhitespace, '').toLowerCase();
+
+String _pureChapterTitle(String value) {
+  final text = value
+      .replaceAll(_chapterWhitespace, ' ')
+      .trim()
+      .toLowerCase()
+      .replaceFirst(_chapterNumberPrefix, '');
+  return text.replaceAll(_chapterWhitespace, '');
+}
+
+/// 与 Apache commons-text 的 JaccardSimilarity 一致，按字符集合计算。
+double _titleSimilarity(String a, String b) {
+  if (a.isEmpty || b.isEmpty) return 0;
+  if (a == b) return 1;
+  final left = a.split('').toSet();
+  final right = b.split('').toSet();
+  var common = 0;
+  for (final char in left) {
+    if (right.contains(char)) common++;
+  }
+  return common / (left.length + right.length - common);
+}
+
+int _chapterNumberInTitle(String value) {
+  final match =
+      _chapterNumberPattern.firstMatch(value) ??
+      _leadingNumberPattern.firstMatch(value);
+  final digits = match?.group(1);
+  if (digits == null) return -1;
+  return _parseChapterNumber(digits) ?? -1;
+}
+
+int? _parseChapterNumber(String value) {
+  final halfWidth = value.replaceAllMapped(
+    RegExp('[０-９]'),
+    (match) => '${match[0]!.codeUnitAt(0) - 0xFF10}',
+  );
+  final arabic = int.tryParse(halfWidth);
+  if (arabic != null) return arabic;
+  const digits = {
+    '〇': 0,
+    '零': 0,
+    '一': 1,
+    '二': 2,
+    '两': 2,
+    '三': 3,
+    '四': 4,
+    '五': 5,
+    '六': 6,
+    '七': 7,
+    '八': 8,
+    '九': 9,
+  };
+  const units = {'十': 10, '百': 100, '千': 1000};
+  var total = 0;
+  var section = 0;
+  var digit = 0;
+  for (final char in value.split('')) {
+    final number = digits[char];
+    if (number != null) {
+      digit = number;
+      continue;
+    }
+    final unit = units[char];
+    if (unit != null) {
+      section += (digit == 0 ? 1 : digit) * unit;
+      digit = 0;
+      continue;
+    }
+    if (char == '万') {
+      total += (section + digit) * 10000;
+      section = 0;
+      digit = 0;
+      continue;
+    }
+    return null;
+  }
+  return total + section + digit;
+}
 
 Map<String, dynamic> remapSourceCoordinate(
   Map<String, dynamic> value,
@@ -4304,6 +4442,11 @@ Map<String, dynamic> remapSourceCoordinate(
       : 0;
   final old =
       previous.chapters[fallback.clamp(0, previous.chapters.length - 1)];
-  final index = sourceChapterIndex(target.chapters, old, fallback);
+  final index = sourceChapterIndex(
+    target.chapters,
+    old,
+    fallback,
+    previousCount: previous.chapters.length,
+  );
   return {...value, 'chapter': index, 'chapterId': target.chapters[index].id};
 }

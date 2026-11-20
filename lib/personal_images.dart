@@ -73,12 +73,21 @@ bool validBackgroundId(Object? id) =>
     id is String && RegExp(r'^paper_[0-9]+\.png$').hasMatch(id);
 
 class ReaderBackgroundStore {
-  ReaderBackgroundStore({Directory? directory}) : _directory = directory;
+  ReaderBackgroundStore({Directory? directory, Directory? themeDirectory})
+    : _directory = directory,
+      _themeDirectory = themeDirectory;
   Directory? _directory;
+  Directory? _themeDirectory;
   final _resolvedFiles = <String, File>{};
+  final _resolvedThemeFiles = <int, File>{};
+  final _themeDownloads = <int, Future<File?>>{};
   File? resolvedFile(String? id) => _resolvedFiles[id];
+  File? resolvedThemeFile(int? id) => _resolvedThemeFiles[id];
   Future<Directory> get directory async => _directory ??= Directory(
     '${(await getApplicationSupportDirectory()).path}/reader-backgrounds',
+  );
+  Future<Directory> get themeDirectory async => _themeDirectory ??= Directory(
+    '${(await getApplicationSupportDirectory()).path}/reader-theme-backgrounds',
   );
   Future<File?> file(String? id) async {
     if (!validBackgroundId(id)) return null;
@@ -86,6 +95,104 @@ class ReaderBackgroundStore {
     if (await value.exists()) return _resolvedFiles[id!] = value;
     _resolvedFiles.remove(id);
     return null;
+  }
+
+  Future<File?> themeFile(int? id) async {
+    if (id == null) return null;
+    final value = File('${(await themeDirectory).path}/theme_$id.png');
+    if (await value.exists()) return _resolvedThemeFiles[id] = value;
+    _resolvedThemeFiles.remove(id);
+    return null;
+  }
+
+  Future<File?> cacheThemeImage(int? id, List<String> urls) {
+    if (id == null || urls.isEmpty) return Future<File?>.value();
+    final pending = _themeDownloads[id];
+    if (pending != null) return pending;
+    final operation = _cacheThemeImage(id, urls);
+    _themeDownloads[id] = operation;
+    return operation.whenComplete(() => _themeDownloads.remove(id));
+  }
+
+  Future<File?> _cacheThemeImage(int id, List<String> urls) async {
+    final cached = await themeFile(id);
+    if (cached != null) return cached;
+    final root = await themeDirectory;
+    await root.create(recursive: true);
+    for (final raw in urls) {
+      final uri = Uri.tryParse(raw);
+      if (uri == null || (uri.scheme != 'http' && uri.scheme != 'https')) {
+        continue;
+      }
+      final client = HttpClient()
+        ..connectionTimeout = const Duration(seconds: 15);
+      try {
+        final request =
+            await client.getUrl(uri).timeout(const Duration(seconds: 20))
+              ..followRedirects = true
+              ..maxRedirects = 5;
+        request.headers
+          ..set(HttpHeaders.acceptHeader, 'image/*')
+          ..set(HttpHeaders.userAgentHeader, 'Wenku/1.0');
+        final response = await request.close().timeout(
+          const Duration(seconds: 30),
+        );
+        if (response.statusCode < 200 || response.statusCode >= 300) {
+          await response.drain<void>();
+          continue;
+        }
+        const limit = 20 * 1024 * 1024;
+        if (response.contentLength > limit) {
+          await response.drain<void>();
+          continue;
+        }
+        final builder = BytesBuilder(copy: false);
+        await for (final part in response) {
+          if (builder.length + part.length > limit) {
+            throw const FormatException('主题背景图超过 20 MiB');
+          }
+          builder.add(part);
+        }
+        final prepared = await preparePersonalImageBytes(builder.takeBytes());
+        final part = File('${root.path}/theme_$id.png.part');
+        try {
+          await part.writeAsBytes(prepared, flush: true);
+          final file = await part.rename('${root.path}/theme_$id.png');
+          _resolvedThemeFiles[id] = file;
+          await _pruneThemeImages(root, keep: id);
+          return file;
+        } finally {
+          if (await part.exists()) await part.delete();
+        }
+      } catch (_) {
+        // 试下一个候选地址；主题底色仍然可用。
+      } finally {
+        client.close(force: true);
+      }
+    }
+    return null;
+  }
+
+  Future<void> _pruneThemeImages(Directory root, {required int keep}) async {
+    final files = <File>[];
+    await for (final entry in root.list()) {
+      if (entry is File && entry.path.endsWith('.png')) files.add(entry);
+    }
+    if (files.length <= 12) return;
+    final stats = <(File, DateTime)>[];
+    for (final file in files) {
+      if (file.uri.pathSegments.last == 'theme_$keep.png') continue;
+      final stat = await file.stat();
+      stats.add((file, stat.modified));
+    }
+    stats.sort((a, b) => a.$2.compareTo(b.$2));
+    for (final (file, _) in stats.take(files.length - 12)) {
+      try {
+        await file.delete();
+      } catch (_) {
+        // 清理失败不影响当前主题。
+      }
+    }
   }
 
   Future<List<String>> list() async {

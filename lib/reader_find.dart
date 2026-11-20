@@ -271,7 +271,7 @@ class ReaderHighlightText extends StatelessWidget {
     required this.text,
     required this.match,
     required this.style,
-    this.indent = false,
+    this.indent = 0,
     this.textAlign = TextAlign.start,
     this.sourceStart = 0,
     this.format,
@@ -281,13 +281,14 @@ class ReaderHighlightText extends StatelessWidget {
     this.underlines,
     this.annotations,
     this.continuesParagraph = false,
+    this.trailing,
   });
   final int index;
   final int? chapter;
   final String text;
   final ValueListenable<ReaderMatch?> match;
   final TextStyle style;
-  final bool indent;
+  final int indent;
   final TextAlign textAlign;
   final int sourceStart;
   final ReaderRichParagraph? format;
@@ -295,6 +296,7 @@ class ReaderHighlightText extends StatelessWidget {
   final Listenable? underlineChanges;
   final List<TextRange> Function()? underlines;
   final List<ReaderTextMark> Function()? annotations;
+  final Widget? trailing;
 
   /// A paginated slice ends before its source paragraph's real final line.
   final bool continuesParagraph;
@@ -306,7 +308,7 @@ class ReaderHighlightText extends StatelessWidget {
             DefaultTextStyle.of(context).style.merge(style),
           ),
           scaler: MediaQuery.textScalerOf(context),
-          prefix: indent ? readerIndentLength : 0,
+          prefix: indent > 0 ? readerIndentLength : 0,
           onNote: onNote ?? (_) {},
           child: text,
         );
@@ -314,9 +316,20 @@ class ReaderHighlightText extends StatelessWidget {
   Widget _paragraph(BuildContext context, List<InlineSpan> children) {
     final effectiveStyle = format?.textStyle(style) ?? style;
     final alignment = format?.textAlign(textAlign) ?? textAlign;
+    final spans = [
+      ...children,
+      if (trailing != null)
+        WidgetSpan(
+          alignment: PlaceholderAlignment.middle,
+          child: Padding(
+            padding: const EdgeInsets.only(left: 5),
+            child: SelectionContainer.disabled(child: trailing!),
+          ),
+        ),
+    ];
     Widget text({double? continuationWidth}) => Text.rich(
       readerParagraphSpan(
-        children: children,
+        children: spans,
         style: effectiveStyle,
         indent: indent,
         continuationWidth: continuationWidth,
@@ -439,7 +452,7 @@ class ReaderHighlightText extends StatelessWidget {
               foreground:
                   style.color ?? Theme.of(context).colorScheme.onSurface,
               dark: Theme.of(context).brightness == Brightness.dark,
-              prefix: indent ? readerIndentLength : 0,
+              prefix: indent > 0 ? readerIndentLength : 0,
               child: paragraph,
             );
     },

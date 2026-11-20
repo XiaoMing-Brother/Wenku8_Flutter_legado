@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'archive_design.dart';
 import 'personal_images.dart' show validBackgroundId;
+import 'reader_theme_presets.dart';
 import 'reader_tip.dart';
 
 const minimumReaderFontSize = 10.0;
@@ -9,13 +10,30 @@ const maximumReaderFontSize = 27.0;
 
 enum ReaderPaper {
   system('跟随外观'),
-  milk('奶白'),
-  parchment('羊皮纸'),
-  sage('浅苔'),
-  night('夜读');
+  milk('奶白', background: Color(0xFFF6F5EF)),
+  parchment('羊皮纸', background: Color(0xFFEDE2CA)),
+  sage('浅苔', background: Color(0xFFE4EBDD)),
+  night('夜读', background: ArchiveDesign.darkBackground),
 
-  const ReaderPaper(this.label);
+  /// Legado 内置阅读样式（`readConfig.json`）的配色。只应用底色与文字色，
+  /// 不覆盖字号、字体、边距等排版；夜间值在应用深色外观时使用。
+  legadoWechat(
+    '微信读书',
+    background: Color(0xFFC0EDC6),
+    ink: Color(0xFF0B0B0B),
+    nightBackground: Color(0xFF000000),
+    nightInk: Color(0xFFADADAD),
+  );
+
+  const ReaderPaper(
+    this.label, {
+    this.background,
+    this.ink,
+    this.nightBackground,
+    this.nightInk,
+  });
   final String label;
+  final Color? background, ink, nightBackground, nightInk;
 }
 
 enum ReaderMode {
@@ -97,6 +115,7 @@ enum ReaderPageSpeed {
 }
 
 enum ReaderTextWeight {
+  light('细体', FontWeight.w300),
   regular('常规', FontWeight.w400),
   medium('适中', FontWeight.w500),
   bold('加粗', FontWeight.w600);
@@ -104,6 +123,15 @@ enum ReaderTextWeight {
   const ReaderTextWeight(this.label, this.weight);
   final String label;
   final FontWeight weight;
+}
+
+enum ReaderTitlePosition {
+  start('左对齐'),
+  center('居中'),
+  hidden('隐藏标题');
+
+  const ReaderTitlePosition(this.label);
+  final String label;
 }
 
 /// 正文内图片的点按行为。默认沿用「点按查看大图」；选「禁用点按」后正文图片
@@ -121,6 +149,7 @@ enum ReaderImageTap {
 class ReaderPreferences {
   const ReaderPreferences({
     this.paper = ReaderPaper.system,
+    this.theme,
     this.margin = 26,
     this.marginLeft,
     this.marginRight,
@@ -129,8 +158,9 @@ class ReaderPreferences {
     this.paragraphGap = 12,
     this.paragraphGapOverride = false,
     this.catalogueReversed = false,
-    this.indent = false,
+    this.indentCount = 0,
     this.justify = false,
+    this.italic = false,
     this.tapPaging = false,
     this.tapBothSidesNext = false,
     this.volumePaging = false,
@@ -148,6 +178,11 @@ class ReaderPreferences {
     this.nightTextBrightness = .82,
     this.letterSpacing = .1,
     this.textWeight = ReaderTextWeight.regular,
+    this.titleScale = 1.2,
+    this.titleWeight = ReaderTextWeight.bold,
+    this.titlePosition = ReaderTitlePosition.start,
+    this.titleTopSpacing = 0,
+    this.titleBottomSpacing = 28,
     this.imageTap = ReaderImageTap.open,
     this.statusSideInset = 0,
     this.statusFontSize = 12,
@@ -162,6 +197,9 @@ class ReaderPreferences {
     this.dockActions = defaultDockActions,
   });
   final ReaderPaper paper;
+
+  /// Legado 远程主题；存在时覆盖 [paper] 的底色和文字色。
+  final ReaderThemeSelection? theme;
   final double margin, paragraphGap, autoScrollSpeed;
   final bool paragraphGapOverride, catalogueReversed;
   // Null horizontal edges preserve old records and existing margin callers.
@@ -170,7 +208,11 @@ class ReaderPreferences {
   double get leftMargin => marginLeft ?? margin;
   double get rightMargin => marginRight ?? margin;
   double get bindingMargin => (leftMargin + rightMargin) / 2;
-  final bool indent, justify, tapPaging, tapBothSidesNext, volumePaging;
+
+  /// 首行缩进字符数；0 表示不缩进。旧记录中的 `indent` 布尔值按 2 字迁移。
+  final int indentCount;
+  bool get indent => indentCount > 0;
+  final bool justify, italic, tapPaging, tapBothSidesNext, volumePaging;
   final double? brightness;
   final ReaderMode mode;
   final ReaderVerticalLatinOrientation verticalLatinOrientation;
@@ -185,6 +227,11 @@ class ReaderPreferences {
   final double nightTextBrightness;
   final double letterSpacing;
   final ReaderTextWeight textWeight;
+
+  /// 标题字号相对正文的倍数、字重、位置和上下留白。
+  final double titleScale, titleTopSpacing, titleBottomSpacing;
+  final ReaderTextWeight titleWeight;
+  final ReaderTitlePosition titlePosition;
   final ReaderImageTap imageTap;
   final double statusSideInset;
   final double statusFontSize, statusTopOffset;
@@ -233,6 +280,18 @@ class ReaderPreferences {
       headerTips.any((t) => t.value != ReaderTipValue.none) ||
       footerTips.any((t) => t.value != ReaderTipValue.none);
 
+  bool get showTitle => titlePosition != ReaderTitlePosition.hidden;
+  bool get usesThemeInk => theme != null || paper.ink != null;
+  TextAlign get titleTextAlign => titlePosition == ReaderTitlePosition.center
+      ? TextAlign.center
+      : TextAlign.start;
+  TextStyle titleStyle(TextStyle base) => base.copyWith(
+    fontSize: (base.fontSize ?? 19) * titleScale,
+    height: 1.35,
+    fontWeight: titleWeight.weight,
+    color: base.color?.withValues(alpha: .9),
+  );
+
   String get layoutKey {
     final geometry =
         leftMargin == 26 &&
@@ -240,48 +299,74 @@ class ReaderPreferences {
             marginTop == 8 &&
             marginBottom == 8 &&
             paragraphGap == 12 &&
-            !indent &&
+            indentCount == 0 &&
             !justify &&
             mode == ReaderMode.scroll
         ? ''
-        : '${leftMargin == rightMargin && marginTop == 8 && marginBottom == 8 ? '$leftMargin' : '$leftMargin,$marginTop,$rightMargin,$marginBottom'}:$paragraphGap:$indent:$justify';
+        : '${leftMargin == rightMargin && marginTop == 8 && marginBottom == 8 ? '$leftMargin' : '$leftMargin,$marginTop,$rightMargin,$marginBottom'}:$paragraphGap:$indentCount:$justify';
     final modeKey = mode == ReaderMode.scroll ? '' : ':${mode.name}';
     final gapKey = paragraphGapOverride ? ':gap=custom' : '';
     final textKey =
-        letterSpacing == .1 && textWeight == ReaderTextWeight.regular
+        letterSpacing == .1 && textWeight == ReaderTextWeight.regular && !italic
         ? ''
-        : ':text=$letterSpacing,${textWeight.name}';
+        : ':text=$letterSpacing,${textWeight.name}${italic ? ',italic' : ''}';
+    final titleKey =
+        titleScale == 1.2 &&
+            titleWeight == ReaderTextWeight.bold &&
+            titlePosition == ReaderTitlePosition.start &&
+            titleTopSpacing == 0 &&
+            titleBottomSpacing == 28
+        ? ''
+        : ':title=$titleScale,${titleWeight.name},${titlePosition.name},$titleTopSpacing,$titleBottomSpacing';
     if (mode == ReaderMode.vertical &&
         verticalLatinOrientation == ReaderVerticalLatinOrientation.upright) {
-      return '$geometry$gapKey$textKey:latin=upright$modeKey';
+      return '$geometry$gapKey$textKey$titleKey:latin=upright$modeKey';
     }
     // Existing preferences retain exactly the same persisted layout key.
-    return '$geometry$gapKey$modeKey$textKey';
+    return '$geometry$gapKey$modeKey$textKey$titleKey';
   }
 
-  Color background(bool dark) => switch (paper) {
-    ReaderPaper.system =>
-      dark ? ArchiveDesign.darkBackground : const Color(0xFFF7F7F2),
-    ReaderPaper.milk => const Color(0xFFF6F5EF),
-    ReaderPaper.parchment => const Color(0xFFEDE2CA),
-    ReaderPaper.sage => const Color(0xFFE4EBDD),
-    ReaderPaper.night => ArchiveDesign.darkBackground,
-  };
-  Color controlForeground(bool dark) =>
-      paper == ReaderPaper.night || paper == ReaderPaper.system && dark
-      ? ArchiveDesign.darkInk
-      : const Color(0xFF30352F);
+  Color background(bool dark) {
+    if (theme case final selected?) {
+      return dark ? selected.nightBackground : selected.background;
+    }
+    if (paper == ReaderPaper.system) {
+      return dark ? ArchiveDesign.darkBackground : const Color(0xFFF7F7F2);
+    }
+    final backgroundColor = paper.background ?? const Color(0xFFF7F7F2);
+    return dark ? paper.nightBackground ?? backgroundColor : backgroundColor;
+  }
+
+  Color controlForeground(bool dark) {
+    if (theme case final selected?) {
+      return dark ? selected.nightInk : selected.ink;
+    }
+    final themedInk = dark ? paper.nightInk ?? paper.ink : paper.ink;
+    if (themedInk != null) return themedInk;
+    return darkPaper(dark) ? ArchiveDesign.darkInk : const Color(0xFF30352F);
+  }
+
   bool darkPaper(bool dark) =>
-      paper == ReaderPaper.night || paper == ReaderPaper.system && dark;
-  Color foreground(bool dark) => darkPaper(dark)
-      ? Color.lerp(
-          background(dark),
-          controlForeground(dark),
-          nightTextBrightness,
-        )!
-      : controlForeground(dark);
+      ThemeData.estimateBrightnessForColor(background(dark)) == Brightness.dark;
+
+  Color foreground(bool dark) {
+    if (theme case final selected?) {
+      return dark ? selected.nightInk : selected.ink;
+    }
+    final themedInk = dark ? paper.nightInk ?? paper.ink : paper.ink;
+    if (themedInk != null) return themedInk;
+    return darkPaper(dark)
+        ? Color.lerp(
+            background(dark),
+            controlForeground(dark),
+            nightTextBrightness,
+          )!
+        : controlForeground(dark);
+  }
+
   Map<String, Object?> toJson() => {
     'paper': paper.name,
+    if (theme != null) 'theme': theme!.toJson(),
     'margin': margin,
     if (marginLeft != null) 'marginLeft': marginLeft,
     if (marginRight != null) 'marginRight': marginRight,
@@ -292,7 +377,9 @@ class ReaderPreferences {
       'paragraphGapOverride': paragraphGapOverride,
     if (catalogueReversed) 'catalogueReversed': true,
     'indent': indent,
+    'indentCount': indentCount,
     'justify': justify,
+    'italic': italic,
     'tapPaging': tapPaging,
     'tapBothSidesNext': tapBothSidesNext,
     'volumePaging': volumePaging,
@@ -310,6 +397,11 @@ class ReaderPreferences {
     'nightTextBrightness': nightTextBrightness,
     'letterSpacing': letterSpacing,
     'textWeight': textWeight.name,
+    'titleScale': titleScale,
+    'titleWeight': titleWeight.name,
+    'titlePosition': titlePosition.name,
+    'titleTopSpacing': titleTopSpacing,
+    'titleBottomSpacing': titleBottomSpacing,
     'imageTap': imageTap.name,
     'statusSideInset': statusSideInset,
     'statusFontSize': statusFontSize,
@@ -346,6 +438,7 @@ class ReaderPreferences {
     for (final key in [
       'indent',
       'justify',
+      'italic',
       'tapPaging',
       'tapBothSidesNext',
       'volumePaging',
@@ -364,26 +457,39 @@ class ReaderPreferences {
         !validBackgroundId(json['backgroundImage'])) {
       throw const FormatException('阅读背景记录有误');
     }
+    final rawTheme = json['theme'];
+    if (rawTheme != null && rawTheme is! Map) {
+      throw const FormatException('阅读主题记录有误');
+    }
+    final theme = rawTheme is Map
+        ? ReaderThemeSelection.fromJson(Map<String, dynamic>.from(rawTheme))
+        : null;
     return ReaderPreferences(
       paper: ReaderPaper.values.firstWhere(
         (p) => p.name == (json['paper'] ?? 'system'),
+        // 旧版本曾保存预设 1–5，移除后回退到跟随外观，避免整条偏好解析失败。
+        orElse: () => ReaderPaper.system,
       ),
-      margin: number('margin', 0, 80, 26),
+      theme: theme,
+      margin: number('margin', 0, 200, 26),
       marginLeft: json['marginLeft'] == null
           ? null
-          : number('marginLeft', 0, 80, 26),
+          : number('marginLeft', 0, 200, 26),
       marginRight: json['marginRight'] == null
           ? null
-          : number('marginRight', 0, 80, 26),
-      marginTop: number('marginTop', 0, 80, 8),
-      marginBottom: number('marginBottom', 0, 80, 8),
+          : number('marginRight', 0, 200, 26),
+      marginTop: number('marginTop', 0, 200, 8),
+      marginBottom: number('marginBottom', 0, 200, 8),
       paragraphGap: number('paragraphGap', 0, 32, 12),
       paragraphGapOverride:
           json['paragraphGapOverride'] as bool? ??
           number('paragraphGap', 0, 32, 12) != 12,
       catalogueReversed: json['catalogueReversed'] == true,
-      indent: json['indent'] == true,
+      indentCount: json['indentCount'] == null
+          ? (json['indent'] == true ? 2 : 0)
+          : number('indentCount', 0, 4, 0).toInt(),
       justify: json['justify'] == true,
+      italic: json['italic'] == true,
       tapPaging: json['tapPaging'] == true,
       tapBothSidesNext: json['tapBothSidesNext'] == true,
       volumePaging: json['volumePaging'] == true,
@@ -395,6 +501,15 @@ class ReaderPreferences {
       textWeight: ReaderTextWeight.values.byName(
         json['textWeight'] ?? 'regular',
       ),
+      titleScale: number('titleScale', .6, 2.5, 1.2),
+      titleWeight: ReaderTextWeight.values.byName(
+        json['titleWeight'] ?? 'bold',
+      ),
+      titlePosition: ReaderTitlePosition.values.byName(
+        json['titlePosition'] ?? 'start',
+      ),
+      titleTopSpacing: number('titleTopSpacing', 0, 200, 0),
+      titleBottomSpacing: number('titleBottomSpacing', 0, 200, 28),
       imageTap: ReaderImageTap.values.byName(json['imageTap'] ?? 'open'),
       statusSideInset: number('statusSideInset', 0, 96, 0),
       statusFontSize: number('statusFontSize', 9, 18, 12),
@@ -437,7 +552,10 @@ class ReaderPreferences {
 
   static List<String> _dockActionsFromJson(Object? raw) {
     if (raw is List) {
-      final ids = <String>[for (final item in raw) if (item is String) item];
+      final ids = <String>[
+        for (final item in raw)
+          if (item is String) item,
+      ];
       if (ids.isNotEmpty) return List<String>.unmodifiable(ids);
     }
     return defaultDockActions;
@@ -458,6 +576,7 @@ class ReaderPreferences {
     }
     return List<ReaderTip>.unmodifiable(tips.take(3));
   }
+
   static ReaderPreferences fromRecord(Object? record) {
     try {
       return ReaderPreferences.fromJson(jsonDecode(record as String));
@@ -468,6 +587,9 @@ class ReaderPreferences {
 
   ReaderPreferences copyWith({
     ReaderPaper? paper,
+    ReaderThemeSelection? theme,
+    bool clearTheme = false,
+    bool clearThemeImage = false,
     double? margin,
     double? marginLeft,
     double? marginRight,
@@ -476,8 +598,10 @@ class ReaderPreferences {
     double? paragraphGap,
     bool? paragraphGapOverride,
     bool? catalogueReversed,
+    int? indentCount,
     bool? indent,
     bool? justify,
+    bool? italic,
     bool? tapPaging,
     bool? tapBothSidesNext,
     bool? volumePaging,
@@ -496,6 +620,11 @@ class ReaderPreferences {
     double? nightTextBrightness,
     double? letterSpacing,
     ReaderTextWeight? textWeight,
+    double? titleScale,
+    ReaderTextWeight? titleWeight,
+    ReaderTitlePosition? titlePosition,
+    double? titleTopSpacing,
+    double? titleBottomSpacing,
     ReaderImageTap? imageTap,
     double? statusSideInset,
     double? statusFontSize,
@@ -511,6 +640,11 @@ class ReaderPreferences {
     EdgeInsets? footerPadding,
   }) => ReaderPreferences(
     paper: paper ?? this.paper,
+    theme: clearTheme || (paper != null && theme == null)
+        ? null
+        : clearThemeImage
+        ? (theme ?? this.theme)?.withoutImage
+        : theme ?? this.theme,
     margin: margin ?? this.margin,
     marginLeft: marginLeft ?? (margin ?? this.marginLeft),
     marginRight: marginRight ?? (margin ?? this.marginRight),
@@ -519,8 +653,10 @@ class ReaderPreferences {
     paragraphGap: paragraphGap ?? this.paragraphGap,
     paragraphGapOverride: paragraphGapOverride ?? this.paragraphGapOverride,
     catalogueReversed: catalogueReversed ?? this.catalogueReversed,
-    indent: indent ?? this.indent,
+    indentCount:
+        indentCount ?? (indent == null ? this.indentCount : (indent ? 2 : 0)),
     justify: justify ?? this.justify,
+    italic: italic ?? this.italic,
     tapPaging: tapPaging ?? this.tapPaging,
     tapBothSidesNext: tapBothSidesNext ?? this.tapBothSidesNext,
     volumePaging: volumePaging ?? this.volumePaging,
@@ -539,6 +675,11 @@ class ReaderPreferences {
     nightTextBrightness: nightTextBrightness ?? this.nightTextBrightness,
     letterSpacing: letterSpacing ?? this.letterSpacing,
     textWeight: textWeight ?? this.textWeight,
+    titleScale: titleScale ?? this.titleScale,
+    titleWeight: titleWeight ?? this.titleWeight,
+    titlePosition: titlePosition ?? this.titlePosition,
+    titleTopSpacing: titleTopSpacing ?? this.titleTopSpacing,
+    titleBottomSpacing: titleBottomSpacing ?? this.titleBottomSpacing,
     imageTap: imageTap ?? this.imageTap,
     statusSideInset: statusSideInset ?? this.statusSideInset,
     statusFontSize: statusFontSize ?? this.statusFontSize,
@@ -559,6 +700,7 @@ class ReaderPreferences {
   /// continue to follow the shared reader. Explicit null margins stay null.
   ReaderPreferences withLayoutOf(ReaderPreferences layout) => ReaderPreferences(
     paper: layout.paper,
+    theme: layout.theme,
     margin: layout.margin,
     marginLeft: layout.marginLeft,
     marginRight: layout.marginRight,
@@ -567,13 +709,19 @@ class ReaderPreferences {
     paragraphGap: layout.paragraphGap,
     paragraphGapOverride: layout.paragraphGapOverride,
     catalogueReversed: catalogueReversed,
-    indent: layout.indent,
+    indentCount: layout.indentCount,
     justify: layout.justify,
+    italic: layout.italic,
     mode: layout.mode,
     verticalLatinOrientation: layout.verticalLatinOrientation,
     nightTextBrightness: layout.nightTextBrightness,
     letterSpacing: layout.letterSpacing,
     textWeight: layout.textWeight,
+    titleScale: layout.titleScale,
+    titleWeight: layout.titleWeight,
+    titlePosition: layout.titlePosition,
+    titleTopSpacing: layout.titleTopSpacing,
+    titleBottomSpacing: layout.titleBottomSpacing,
     backgroundImage: layout.backgroundImage,
     backgroundOpacity: layout.backgroundOpacity,
     backgroundFit: layout.backgroundFit,

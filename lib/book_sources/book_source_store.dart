@@ -31,9 +31,12 @@ class BookSourceStore extends ChangeNotifier {
   final Directory directory;
   final Map<String, BookSource> _sources = {};
   BookSourceSearchScope _searchScope = const BookSourceSearchScope.all();
+  BookSourceSearchScope? _changeSourceScope;
+  bool _changeSourceCheckAuthor = false;
   Future<void>? _loading;
   Future<void> _writes = Future.value();
   Future<void> _scopeWrites = Future.value();
+  Future<void> _changeSourceWrites = Future.value();
   bool _loaded = false;
 
   static Future<BookSourceStore> forApp() async {
@@ -45,6 +48,11 @@ class BookSourceStore extends ChangeNotifier {
   List<BookSource> get enabled =>
       List.unmodifiable(_sources.values.where((source) => source.enabled));
   BookSourceSearchScope get searchScope => _searchScope;
+
+  /// 换源搜索范围独立于主搜索范围：未单独设置前沿用主搜索范围。
+  BookSourceSearchScope get changeSourceScope =>
+      _changeSourceScope ?? _searchScope;
+  bool get changeSourceCheckAuthor => _changeSourceCheckAuthor;
   int get length => _sources.length;
   BookSource? source(String key) => _sources[key];
   bool get loaded => _loaded;
@@ -63,6 +71,7 @@ class BookSourceStore extends ChangeNotifier {
     final file = _file;
     if (!await file.exists()) {
       await _loadScope();
+      await _loadChangeSource();
       _loaded = true;
       return;
     }
@@ -90,6 +99,7 @@ class BookSourceStore extends ChangeNotifier {
             MapEntry(source.key, source),
       ]);
     await _loadScope();
+    await _loadChangeSource();
     _loaded = true;
     notifyListeners();
   }
@@ -241,6 +251,32 @@ class BookSourceStore extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> setChangeSourceScope(BookSourceSearchScope scope) async {
+    if (_changeSourceScope == scope) return;
+    final previous = _changeSourceScope;
+    _changeSourceScope = scope;
+    try {
+      await _saveChangeSource();
+    } on Object {
+      _changeSourceScope = previous;
+      rethrow;
+    }
+    notifyListeners();
+  }
+
+  Future<void> setChangeSourceCheckAuthor(bool value) async {
+    if (_changeSourceCheckAuthor == value) return;
+    final previous = _changeSourceCheckAuthor;
+    _changeSourceCheckAuthor = value;
+    try {
+      await _saveChangeSource();
+    } on Object {
+      _changeSourceCheckAuthor = previous;
+      rethrow;
+    }
+    notifyListeners();
+  }
+
   Future<void> remove(String key) async {
     await removeMany([key]);
   }
@@ -276,10 +312,42 @@ class BookSourceStore extends ChangeNotifier {
     }
   }
 
+  Future<void> _loadChangeSource() async {
+    final file = _changeSourceFile;
+    if (!await file.exists()) return;
+    try {
+      if (await file.length() > 256 * 1024) return;
+      final decoded = jsonDecode(await file.readAsString());
+      if (decoded is! Map) return;
+      _changeSourceScope = BookSourceSearchScope.fromJson(decoded['scope']);
+      _changeSourceCheckAuthor = decoded['checkAuthor'] == true;
+    } on Object {
+      // 换源偏好损坏时退回主搜索范围，不影响书源库本身。
+      _changeSourceScope = null;
+      _changeSourceCheckAuthor = false;
+    }
+  }
+
   Future<void> _saveScope() {
     final document = jsonEncode(_searchScope.toJson());
     final result = _scopeWrites.then((_) => _atomicWrite(_scopeFile, document));
     _scopeWrites = result.then<void>(
+      (_) {},
+      onError: (Object _, StackTrace _) {},
+    );
+    return result;
+  }
+
+  Future<void> _saveChangeSource() {
+    final document = jsonEncode({
+      'version': 1,
+      'scope': changeSourceScope.toJson(),
+      'checkAuthor': _changeSourceCheckAuthor,
+    });
+    final result = _changeSourceWrites.then(
+      (_) => _atomicWrite(_changeSourceFile, document),
+    );
+    _changeSourceWrites = result.then<void>(
       (_) {},
       onError: (Object _, StackTrace _) {},
     );
@@ -309,6 +377,7 @@ class BookSourceStore extends ChangeNotifier {
 
   File get _file => File('${directory.path}/sources.json');
   File get _scopeFile => File('${directory.path}/search_scope.json');
+  File get _changeSourceFile => File('${directory.path}/change_source.json');
 
   @override
   void dispose() {

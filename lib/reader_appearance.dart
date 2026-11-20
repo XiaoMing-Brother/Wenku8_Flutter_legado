@@ -110,16 +110,20 @@ class ReaderAppearance extends StatefulWidget {
 class _ReaderAppearanceState extends State<ReaderAppearance> {
   ThemeData? _base, _theme;
   ReaderPaper? _paper;
+  Object? _themeSelection;
   String? _family;
   ThemeData _resolve() {
     final preferences = widget.state.readerPreferencesFor(widget.bookId);
     final paper = preferences.paper;
+    final themeSelection = preferences.theme;
     final family = widget.state.readerFontFamilyFor(widget.bookId);
     if (_base?.brightness != widget.appTheme.brightness ||
         _paper != paper ||
+        _themeSelection != themeSelection ||
         _family != family) {
       _base = widget.appTheme;
       _paper = paper;
+      _themeSelection = themeSelection;
       _family = family;
       _theme = readerTheme(_base!, preferences, fontFamily: family);
     }

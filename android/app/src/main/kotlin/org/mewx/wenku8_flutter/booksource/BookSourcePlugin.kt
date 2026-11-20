@@ -4,6 +4,7 @@ import android.app.Activity
 import android.content.Intent
 import android.os.Handler
 import android.os.Looper
+import android.util.Log
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.embedding.engine.plugins.activity.ActivityAware
 import io.flutter.embedding.engine.plugins.activity.ActivityPluginBinding
@@ -177,6 +178,7 @@ class BookSourcePlugin :
                 else -> result.notImplemented()
             }
         } catch (error: Throwable) {
+            Log.e("WenkuBookSource", "${call.method} failed: ${message(error)}", error)
             result.error("BOOK_SOURCE_ERROR", message(error), null)
         }
     }

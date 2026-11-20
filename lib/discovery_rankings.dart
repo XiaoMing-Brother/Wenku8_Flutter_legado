@@ -1,9 +1,13 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 
+import 'app_palette.dart';
+import 'app_search_field.dart';
 import 'app_ui.dart';
+import 'book_sources/fanqie_library_categories.dart';
 import 'catalog.dart';
 import 'dock_layout.dart';
 import 'feature_pages.dart';
@@ -44,6 +48,10 @@ class DiscoveryRankingsPageState extends State<DiscoveryRankingsPage> {
   String _rankingId = officialRankings.first.id;
   String _qidianCategoryId = '';
   String _fanqieCategoryId = '1141';
+  String _qimaoCategoryId = '';
+  bool _fanqieLibrary = false;
+  String _fanqieLibraryGender = '-1';
+  String _fanqieLibraryCategoryId = '';
   List<Novel> _items = const [];
   Object? _error;
   int _page = 0;
@@ -58,27 +66,57 @@ class DiscoveryRankingsPageState extends State<DiscoveryRankingsPage> {
   OfficialRanking get _ranking {
     for (final item in _rankings) {
       if (item.id == _rankingId) {
-        return switch (item.site) {
-          OfficialSite.qidian => item.copyWith(categoryId: _qidianCategoryId),
-          OfficialSite.fanqie => item.copyWith(categoryId: _fanqieCategoryId),
-          OfficialSite.qimao || OfficialSite.shuqi => item,
-        };
+        return _rankingWithCategory(item);
       }
     }
-    final first = _rankings.first;
-    return switch (first.site) {
-      OfficialSite.qidian => first.copyWith(categoryId: _qidianCategoryId),
-      OfficialSite.fanqie => first.copyWith(categoryId: _fanqieCategoryId),
-      OfficialSite.qimao || OfficialSite.shuqi => first,
+    return _rankingWithCategory(_rankings.first);
+  }
+
+  String get _contentKey {
+    if (_site == OfficialSite.fanqie && _fanqieLibrary) {
+      return 'fanqie-library-$_fanqieLibraryGender-'
+          '$_fanqieLibraryCategoryId';
+    }
+    return '${_ranking.id}-${_ranking.categoryId ?? ''}';
+  }
+
+  String get _fanqieLibraryCategoryName {
+    for (final category in fanqieLibraryCategories) {
+      if (category.id == _fanqieLibraryCategoryId) return category.name;
+    }
+    return '';
+  }
+
+  Set<String> _fanqieChannelCategoryIds(String gender) {
+    for (final channel in fanqieLibraryChannels) {
+      if (channel.gender == gender) return channel.categoryIds;
+    }
+    return const {};
+  }
+
+  OfficialRanking _rankingWithCategory(OfficialRanking item) {
+    return switch (item.site) {
+      OfficialSite.qidian => item.copyWith(categoryId: _qidianCategoryId),
+      OfficialSite.fanqie => item.copyWith(categoryId: _fanqieCategoryId),
+      OfficialSite.qimao => item.copyWith(
+        categoryId: _qimaoCategoryId,
+        clearCategoryId: item.kind == 'new' || _qimaoCategoryId.isEmpty,
+      ),
+      OfficialSite.shuqi => item,
     };
   }
 
   List<OfficialCategory> get _categories => switch (_site) {
     OfficialSite.qidian => qidianCategories,
-    OfficialSite.fanqie => _ranking.gender == '1'
-        ? fanqieMaleCategories
-        : fanqieFemaleCategories,
-    OfficialSite.qimao || OfficialSite.shuqi => const [],
+    OfficialSite.fanqie =>
+      _ranking.gender == '1' ? fanqieMaleCategories : fanqieFemaleCategories,
+    OfficialSite.qimao =>
+      _ranking.kind == 'new'
+          ? const []
+          : _ranking.gender == 'girl'
+          ? qimaoFemaleCategories
+          : qimaoMaleCategories,
+    OfficialSite.shuqi => const [],
   };
 
   @override
@@ -107,10 +145,9 @@ class DiscoveryRankingsPageState extends State<DiscoveryRankingsPage> {
   Future<void> _load({required bool reset}) async {
     final generation = ++_generation;
     final ranking = _ranking;
+    final library = _site == OfficialSite.fanqie && _fanqieLibrary;
     final page = reset ? 1 : _page + 1;
-    if (reset &&
-        _scrollController.hasClients &&
-        _scrollController.offset > 0) {
+    if (reset && _scrollController.hasClients && _scrollController.offset > 0) {
       _scrollController.jumpTo(0);
     }
     setState(() {
@@ -124,7 +161,16 @@ class DiscoveryRankingsPageState extends State<DiscoveryRankingsPage> {
       }
     });
     try {
-      final result = await OfficialBookService.ranking(ranking, page);
+      final result = library
+          ? await OfficialBookService.fanqieLibrary(
+              gender: _fanqieLibraryGender,
+              categoryId: _fanqieLibraryCategoryId.isEmpty
+                  ? '-1'
+                  : _fanqieLibraryCategoryId,
+              categoryName: _fanqieLibraryCategoryName,
+              page: page,
+            )
+          : await OfficialBookService.ranking(ranking, page);
       if (!mounted || generation != _generation) return;
       final next = result.books
           .map(_novelFromOfficial)
@@ -215,6 +261,11 @@ class DiscoveryRankingsPageState extends State<DiscoveryRankingsPage> {
         _qidianCategoryId = '';
       } else if (site == OfficialSite.fanqie) {
         _fanqieCategoryId = first.gender == '1' ? '1141' : '1139';
+        _fanqieLibrary = false;
+        _fanqieLibraryGender = '-1';
+        _fanqieLibraryCategoryId = '';
+      } else if (site == OfficialSite.qimao) {
+        _qimaoCategoryId = '';
       }
       _items = const [];
       _error = null;
@@ -227,29 +278,86 @@ class DiscoveryRankingsPageState extends State<DiscoveryRankingsPage> {
 
   Future<void> _selectRanking(OfficialRanking ranking) async {
     if (ranking.id == _rankingId && (_loaded || _loading)) return;
+    final genderChanged =
+        ranking.site == OfficialSite.qimao && ranking.gender != _ranking.gender;
     setState(() {
       _rankingId = ranking.id;
       if (ranking.site == OfficialSite.qidian) {
         _qidianCategoryId = '';
       } else if (ranking.site == OfficialSite.fanqie) {
         _fanqieCategoryId = ranking.gender == '1' ? '1141' : '1139';
+      } else if (genderChanged) {
+        _qimaoCategoryId = '';
       }
     });
     await _load(reset: true);
   }
 
   Future<void> _selectCategory(OfficialCategory category) async {
-    final current = _site == OfficialSite.qidian
-        ? _qidianCategoryId
-        : _fanqieCategoryId;
+    final current = switch (_site) {
+      OfficialSite.qidian => _qidianCategoryId,
+      OfficialSite.fanqie => _fanqieCategoryId,
+      OfficialSite.qimao => _qimaoCategoryId,
+      OfficialSite.shuqi => '',
+    };
     if (category.id == current && (_loaded || _loading)) return;
     setState(() {
       if (_site == OfficialSite.qidian) {
         _qidianCategoryId = category.id;
-      } else {
+      } else if (_site == OfficialSite.fanqie) {
         _fanqieCategoryId = category.id;
+      } else if (_site == OfficialSite.qimao) {
+        _qimaoCategoryId = category.id;
       }
     });
+    await _load(reset: true);
+  }
+
+  Future<void> _selectFanqieMode({required bool library}) async {
+    if (library == _fanqieLibrary) return;
+    setState(() {
+      _fanqieLibrary = library;
+      _items = const [];
+      _error = null;
+      _page = 0;
+      _hasMore = false;
+      _loaded = false;
+    });
+    await _load(reset: true);
+  }
+
+  Future<void> _selectFanqieLibraryChannel(String gender) async {
+    if (gender == _fanqieLibraryGender) return;
+    final allowed = _fanqieChannelCategoryIds(gender);
+    setState(() {
+      _fanqieLibraryGender = gender;
+      if (_fanqieLibraryCategoryId.isNotEmpty &&
+          !allowed.contains(_fanqieLibraryCategoryId)) {
+        _fanqieLibraryCategoryId = '';
+      }
+    });
+    await _load(reset: true);
+  }
+
+  Future<void> _chooseFanqieLibraryCategory() async {
+    final allowed = _fanqieChannelCategoryIds(_fanqieLibraryGender);
+    final categories = [
+      for (final category in fanqieLibraryCategories)
+        if (allowed.isEmpty || allowed.contains(category.id)) category,
+    ];
+    final selected = await showJellySheet<String>(
+      context: context,
+      reduceMotion: MediaQuery.disableAnimationsOf(context),
+      heightFactor: .8,
+      maxWidth: 560,
+      builder: (_) => _FanqieCategoryPicker(
+        categories: categories,
+        selectedId: _fanqieLibraryCategoryId,
+      ),
+    );
+    if (!mounted || selected == null) return;
+    if (selected == _fanqieLibraryCategoryId) return;
+    setState(() => _fanqieLibraryCategoryId = selected);
     await _load(reset: true);
   }
 
@@ -263,42 +371,12 @@ class DiscoveryRankingsPageState extends State<DiscoveryRankingsPage> {
         widget.state,
         widget.repository,
         coverHeroTag: CoverHeroTag(this, book.id),
+        showOpening: true,
+        promptAddToShelfOnExit: true,
       );
       return;
     }
     await openInSourceSearch(context, book, widget.state, widget.repository);
-  }
-
-  Future<void> _openActions(BuildContext anchor) async {
-    final action = await showGlassMenu<String>(
-      context: anchor,
-      reduceMotion: widget.state.reduceMotion,
-      builder: (menu) => Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          GlassMenuItem(
-            label: '搜索书籍',
-            icon: CupertinoIcons.search,
-            order: 0,
-            onPressed: () => Navigator.pop(menu, 'search'),
-          ),
-          GlassMenuItem(
-            label: '刷新当前榜单',
-            icon: CupertinoIcons.arrow_2_circlepath,
-            order: 1,
-            onPressed: () => Navigator.pop(menu, 'refresh'),
-          ),
-        ],
-      ),
-    );
-    if (!mounted) return;
-    switch (action) {
-      case 'search':
-        widget.onSearch();
-      case 'refresh':
-        await _refresh();
-    }
   }
 
   Widget buildHeader(BuildContext context) => Row(
@@ -306,15 +384,11 @@ class DiscoveryRankingsPageState extends State<DiscoveryRankingsPage> {
       const Expanded(
         child: ArchiveMasthead(title: '发现', code: 'DISCOVERY / BOOKS'),
       ),
-      GlassMenuAnchor(
-        child: Builder(
-          builder: (anchor) => GlassIconButton(
-            key: const ValueKey('discovery-actions'),
-            icon: CupertinoIcons.ellipsis,
-            label: '发现操作',
-            onPressed: () => _openActions(anchor),
-          ),
-        ),
+      GlassIconButton(
+        key: const ValueKey('discovery-search'),
+        icon: CupertinoIcons.search,
+        label: '搜索书籍',
+        onPressed: widget.onSearch,
       ),
     ],
   );
@@ -332,11 +406,12 @@ class DiscoveryRankingsPageState extends State<DiscoveryRankingsPage> {
   Widget _buildBody(BuildContext context) {
     final rankings = _rankings;
     final ranking = _ranking;
+    final library = _site == OfficialSite.fanqie && _fanqieLibrary;
     final bottomInset = DockLayout.scrollPaddingOf(context);
     return RefreshIndicator.noSpinner(
       onRefresh: _refresh,
       child: CustomScrollView(
-        key: PageStorageKey('official-discovery-${_site.name}'),
+        key: PageStorageKey('official-discovery-$_contentKey'),
         controller: _scrollController,
         physics: const AlwaysScrollableScrollPhysics(),
         slivers: [
@@ -347,10 +422,13 @@ class DiscoveryRankingsPageState extends State<DiscoveryRankingsPage> {
             ),
           ),
           if (_loading && _items.isEmpty)
-            const SliverToBoxAdapter(
+            SliverToBoxAdapter(
               child: Padding(
-                padding: EdgeInsets.fromLTRB(24, 20, 24, 0),
-                child: BookCollectionSkeleton(rows: 5, label: '正在读取榜单'),
+                padding: const EdgeInsets.fromLTRB(24, 20, 24, 0),
+                child: BookCollectionSkeleton(
+                  rows: 5,
+                  label: library ? '正在读取书库' : '正在读取榜单',
+                ),
               ),
             )
           else if (_error != null && _items.isEmpty)
@@ -358,7 +436,7 @@ class DiscoveryRankingsPageState extends State<DiscoveryRankingsPage> {
               hasScrollBody: false,
               child: ContentNotice(
                 icon: CupertinoIcons.wifi_exclamationmark,
-                title: '榜单加载失败',
+                title: library ? '书库加载失败' : '榜单加载失败',
                 message: _errorText(_error!),
                 onRetry: _refresh,
               ),
@@ -368,8 +446,8 @@ class DiscoveryRankingsPageState extends State<DiscoveryRankingsPage> {
               hasScrollBody: false,
               child: ContentNotice(
                 icon: CupertinoIcons.book,
-                title: '榜单暂无书籍',
-                message: '换一个榜单，或下拉刷新后重试。',
+                title: library ? '书库暂无书籍' : '榜单暂无书籍',
+                message: library ? '换一个分类，或下拉刷新后重试。' : '换一个榜单，或下拉刷新后重试。',
                 onRetry: _refresh,
               ),
             )
@@ -383,14 +461,11 @@ class DiscoveryRankingsPageState extends State<DiscoveryRankingsPage> {
                   crossAxisSpacing: 10,
                   childAspectRatio: .48,
                 ),
-                delegate: SliverChildBuilderDelegate(
-                  (context, index) {
-                    final book = _items[index];
-                    final hero = CoverHeroTag(this, book.id);
-                    return _bookGridCard(book, hero);
-                  },
-                  childCount: _items.length,
-                ),
+                delegate: SliverChildBuilderDelegate((context, index) {
+                  final book = _items[index];
+                  final hero = CoverHeroTag(this, book.id);
+                  return _bookGridCard(book, hero);
+                }, childCount: _items.length),
               ),
             ),
             SliverToBoxAdapter(
@@ -406,7 +481,7 @@ class DiscoveryRankingsPageState extends State<DiscoveryRankingsPage> {
   }
 
   Widget _bookGridCard(Novel book, Object hero) => JellyTapSurface(
-    key: ValueKey(('official-grid-book', _ranking.id, book.id)),
+    key: ValueKey(('official-grid-book', _contentKey, book.id)),
     onTap: () => _openBook(book),
     child: LayoutBuilder(
       builder: (context, constraints) {
@@ -467,80 +542,134 @@ class DiscoveryRankingsPageState extends State<DiscoveryRankingsPage> {
     List<OfficialRanking> rankings,
     OfficialRanking ranking,
   ) {
+    final library = _site == OfficialSite.fanqie && _fanqieLibrary;
+    final muted = Theme.of(context).colorScheme.onSurfaceVariant;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          child: Row(
-            children: [
-              for (final site in OfficialSite.values)
-                Padding(
-                  padding: const EdgeInsets.only(right: 8),
-                  child: GlassTextButton(
-                    key: ValueKey('official-site-${site.name}'),
-                    compact: true,
-                    selected: site == _site,
-                    onPressed: () => _selectSite(site),
-                    child: AppText(site.label),
-                  ),
-                ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 8),
-        SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          child: Row(
-            children: [
-              for (final item in rankings)
-                Padding(
-                  padding: const EdgeInsets.only(right: 8),
-                  child: GlassTextButton(
-                    key: ValueKey('official-rank-${item.id}'),
-                    compact: true,
-                    selected: item.id == ranking.id,
-                    onPressed: () => _selectRanking(item),
-                    child: AppText(item.title),
-                  ),
-                ),
-            ],
-          ),
-        ),
-        if (_categories.isNotEmpty) ...[
-          const SizedBox(height: 8),
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Row(
-              children: [
-                Padding(
-                  padding: const EdgeInsets.only(right: 8, top: 10, bottom: 10),
-                  child: AppText(
-                    '分类',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                    ),
-                  ),
-                ),
-                for (final category in _categories)
-                  Padding(
-                    padding: const EdgeInsets.only(right: 6),
-                    child: GlassTextButton(
-                      key: ValueKey('official-category-${category.id}'),
-                      compact: true,
-                      selected: category.id == (ranking.categoryId ?? ''),
-                      onPressed: () => _selectCategory(category),
-                      child: AppText(category.name),
-                    ),
-                  ),
-              ],
+        _chipRow([
+          for (final site in OfficialSite.values)
+            GlassTextButton(
+              key: ValueKey('official-site-${site.name}'),
+              compact: true,
+              selected: site == _site,
+              onPressed: () => _selectSite(site),
+              child: AppText(site.label),
             ),
+        ]),
+        if (_site == OfficialSite.fanqie) ...[
+          const SizedBox(height: 8),
+          _chipRow([
+            GlassTextButton(
+              key: const ValueKey('fanqie-mode-ranking'),
+              compact: true,
+              selected: !_fanqieLibrary,
+              onPressed: () => _selectFanqieMode(library: false),
+              child: const AppText('排行榜'),
+            ),
+            GlassTextButton(
+              key: const ValueKey('fanqie-mode-library'),
+              compact: true,
+              selected: _fanqieLibrary,
+              onPressed: () => _selectFanqieMode(library: true),
+              child: const AppText('分类书库'),
+            ),
+          ]),
+        ],
+        if (library) ...[
+          const SizedBox(height: 8),
+          _chipRow([
+            for (final channel in fanqieLibraryChannels)
+              GlassTextButton(
+                key: ValueKey('fanqie-library-channel-${channel.gender}'),
+                compact: true,
+                selected: channel.gender == _fanqieLibraryGender,
+                onPressed: () => _selectFanqieLibraryChannel(channel.gender),
+                child: AppText(channel.name),
+              ),
+          ]),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              AppText('分类', style: TextStyle(fontSize: 12, color: muted)),
+              const SizedBox(width: 10),
+              GlassTextButton(
+                key: const ValueKey('fanqie-library-category'),
+                compact: true,
+                onPressed: _chooseFanqieLibraryCategory,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    AppText(
+                      _fanqieLibraryCategoryId.isEmpty
+                          ? '全部书籍'
+                          : _fanqieLibraryCategoryName,
+                    ),
+                    const SizedBox(width: 4),
+                    const ArchiveIcon(CupertinoIcons.chevron_down, size: 12),
+                  ],
+                ),
+              ),
+            ],
           ),
+        ] else ...[
+          const SizedBox(height: 8),
+          _chipRow([
+            for (final item in rankings)
+              GlassTextButton(
+                key: ValueKey('official-rank-${item.id}'),
+                compact: true,
+                selected: item.id == ranking.id,
+                onPressed: () => _selectRanking(item),
+                child: AppText(item.title),
+              ),
+          ]),
+          if (_categories.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.only(
+                      right: 8,
+                      top: 10,
+                      bottom: 10,
+                    ),
+                    child: AppText(
+                      '分类',
+                      style: TextStyle(fontSize: 12, color: muted),
+                    ),
+                  ),
+                  for (final category in _categories)
+                    Padding(
+                      padding: const EdgeInsets.only(right: 6),
+                      child: GlassTextButton(
+                        key: ValueKey('official-category-${category.id}'),
+                        compact: true,
+                        selected: category.id == (ranking.categoryId ?? ''),
+                        onPressed: () => _selectCategory(category),
+                        child: AppText(category.name),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ],
         ],
       ],
     );
   }
+
+  Widget _chipRow(List<Widget> children) => SingleChildScrollView(
+    scrollDirection: Axis.horizontal,
+    child: Row(
+      children: [
+        for (final child in children)
+          Padding(padding: const EdgeInsets.only(right: 8), child: child),
+      ],
+    ),
+  );
 
   Widget _footer(BuildContext context) {
     if (_loading && _items.isNotEmpty) {
@@ -590,4 +719,210 @@ class DiscoveryRankingsPageState extends State<DiscoveryRankingsPage> {
   }
 
   String _errorText(Object error) => '$error';
+}
+
+class _FanqieCategoryPicker extends StatefulWidget {
+  const _FanqieCategoryPicker({
+    required this.categories,
+    required this.selectedId,
+  });
+
+  final List<FanqieLibraryCategory> categories;
+  final String selectedId;
+
+  @override
+  State<_FanqieCategoryPicker> createState() => _FanqieCategoryPickerState();
+}
+
+class _FanqieCategoryPickerState extends State<_FanqieCategoryPicker> {
+  final _query = TextEditingController();
+  String _group = fanqieLibraryGroups.first;
+
+  @override
+  void initState() {
+    super.initState();
+    for (final category in widget.categories) {
+      if (category.id == widget.selectedId) {
+        _group = category.group;
+        break;
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _query.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final keyword = _query.text.trim();
+    final searching = keyword.isNotEmpty;
+    final categories = [
+      for (final category in widget.categories)
+        if (searching
+            ? category.name.contains(keyword)
+            : category.group == _group)
+          category,
+    ];
+    final showAll = !searching && _group == fanqieLibraryGroups.first;
+    return SizedBox(
+      height: math.min(600, MediaQuery.sizeOf(context).height * .76),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const Padding(
+            padding: EdgeInsets.fromLTRB(24, 8, 24, 0),
+            child: ArchiveSection(title: '选择分类', code: 'LIBRARY / CATEGORIES'),
+          ),
+          const SizedBox(height: 10),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 24),
+            child: AppSearchField(
+              controller: _query,
+              hint: '搜索分类，如悬疑、种田',
+              onChanged: (_) => setState(() {}),
+            ),
+          ),
+          const SizedBox(height: 14),
+          Expanded(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                SizedBox(
+                  width: 92,
+                  child: ListView(
+                    padding: const EdgeInsets.fromLTRB(12, 2, 6, 24),
+                    children: [
+                      for (final group in fanqieLibraryGroups)
+                        _groupButton(context, group),
+                    ],
+                  ),
+                ),
+                Container(
+                  width: 1,
+                  margin: const EdgeInsets.symmetric(vertical: 4),
+                  color: Theme.of(context).dividerColor.withValues(alpha: .55),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: categories.isEmpty && !showAll
+                      ? const ContentNotice(
+                          icon: CupertinoIcons.search,
+                          title: '没有匹配的分类',
+                          message: '换个关键词再试试。',
+                        )
+                      : GridView.builder(
+                          key: ValueKey(
+                            'fanqie-category-grid-${searching ? keyword : _group}',
+                          ),
+                          padding: const EdgeInsets.fromLTRB(0, 2, 20, 24),
+                          gridDelegate:
+                              const SliverGridDelegateWithFixedCrossAxisCount(
+                                crossAxisCount: 3,
+                                mainAxisSpacing: 10,
+                                crossAxisSpacing: 10,
+                                mainAxisExtent: 44,
+                              ),
+                          itemCount: categories.length + (showAll ? 1 : 0),
+                          itemBuilder: (context, index) {
+                            if (showAll && index == 0) {
+                              return _tagChip(context, '', '全部书籍');
+                            }
+                            final category =
+                                categories[index - (showAll ? 1 : 0)];
+                            return _tagChip(
+                              context,
+                              category.id,
+                              category.name,
+                            );
+                          },
+                        ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _groupButton(BuildContext context, String group) {
+    final selected = group == _group;
+    final action = Theme.of(context).extension<AppTonalColors>()?.action;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 4),
+      child: Semantics(
+        button: true,
+        selected: selected,
+        child: JellyTapSurface(
+          onTap: () => setState(() {
+            _query.clear();
+            _group = group;
+          }),
+          haptic: HapticCue.selection,
+          child: AnimatedContainer(
+            duration: MediaQuery.disableAnimationsOf(context)
+                ? Duration.zero
+                : NovelMotion.enter,
+            curve: NovelMotion.settle,
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 13),
+            decoration: BoxDecoration(
+              color: selected && action != null
+                  ? action.withValues(alpha: .09)
+                  : Colors.transparent,
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: AppText(
+              _groupLabel(group),
+              maxLines: 2,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 14,
+                height: 1.3,
+                fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                color: selected ? action : null,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _tagChip(BuildContext context, String id, String name) {
+    final selected = id == widget.selectedId;
+    final action = Theme.of(context).extension<AppTonalColors>()?.action;
+    return ContentPanel(
+      key: ValueKey('fanqie-library-category-option-$id'),
+      padding: const EdgeInsets.symmetric(horizontal: 6),
+      radius: 9,
+      backgroundColor: selected && action != null
+          ? action.withValues(alpha: .10)
+          : Theme.of(
+              context,
+            ).colorScheme.surfaceContainerHighest.withValues(alpha: .55),
+      borderColor: selected && action != null
+          ? action.withValues(alpha: .42)
+          : Theme.of(context).dividerColor.withValues(alpha: .45),
+      onTap: () => Navigator.pop(context, id),
+      child: Center(
+        child: AppText(
+          name,
+          maxLines: 2,
+          textAlign: TextAlign.center,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+            fontSize: 13,
+            height: 1.2,
+            fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+            color: selected ? action : null,
+          ),
+        ),
+      ),
+    );
+  }
+
+  String _groupLabel(String group) => group == '主分类' ? '热门标签' : group;
 }

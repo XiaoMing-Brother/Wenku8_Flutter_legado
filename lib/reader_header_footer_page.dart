@@ -89,31 +89,31 @@ class _ReaderHeaderFooterConfigState extends State<ReaderHeaderFooterConfig> {
         const ArchiveSection(title: '页眉与页脚', code: 'READER / HEADER'),
         const SizedBox(height: 8),
         const ArchiveSection(title: '预览', code: 'HEADER / PREVIEW'),
-          const SizedBox(height: 8),
-          _HeaderFooterPreview(prefs: _prefs),
-          const SizedBox(height: 4),
-          Align(
-            alignment: Alignment.centerRight,
-            child: GlassTextButton(
-              key: const ValueKey('reader-header-footer-reset'),
-              compact: true,
-              onPressed: _reset,
-              child: const AppText('恢复默认'),
-            ),
+        const SizedBox(height: 8),
+        _HeaderFooterPreview(prefs: _prefs),
+        const SizedBox(height: 4),
+        Align(
+          alignment: Alignment.centerRight,
+          child: GlassTextButton(
+            key: const ValueKey('reader-header-footer-reset'),
+            compact: true,
+            onPressed: _reset,
+            child: const AppText('恢复默认'),
           ),
-          const SizedBox(height: 8),
-          const ArchiveSection(title: '页眉内边距', code: 'HEADER / PADDING'),
-          const SizedBox(height: 4),
-          ..._headerPadFields(),
-          const SizedBox(height: 8),
-          const ArchiveSection(title: '页脚内边距', code: 'FOOTER / PADDING'),
-          const SizedBox(height: 4),
-          ..._footerPadFields(),
-          const SizedBox(height: 8),
-          const ArchiveSection(title: '正文边距', code: 'BODY / PADDING'),
-          const SizedBox(height: 4),
-          ..._bodyPadFields(),
-        ],
+        ),
+        const SizedBox(height: 8),
+        const ArchiveSection(title: '页眉内边距', code: 'HEADER / PADDING'),
+        const SizedBox(height: 4),
+        ..._headerPadFields(),
+        const SizedBox(height: 8),
+        const ArchiveSection(title: '页脚内边距', code: 'FOOTER / PADDING'),
+        const SizedBox(height: 4),
+        ..._footerPadFields(),
+        const SizedBox(height: 8),
+        const ArchiveSection(title: '正文边距', code: 'BODY / PADDING'),
+        const SizedBox(height: 4),
+        ..._bodyPadFields(),
+      ],
     );
   }
 
@@ -125,8 +125,9 @@ class _ReaderHeaderFooterConfigState extends State<ReaderHeaderFooterConfig> {
         label: l,
         value: v,
         min: 0,
-        max: 60,
-        onChanged: (x) => setState(() => _prefs = _prefs.copyWith(headerPadding: m(x))),
+        max: 300,
+        onChanged: (x) =>
+            setState(() => _prefs = _prefs.copyWith(headerPadding: m(x))),
         onCommitted: (x) {
           final n = _prefs.copyWith(headerPadding: m(x));
           setState(() => _prefs = n);
@@ -150,8 +151,9 @@ class _ReaderHeaderFooterConfigState extends State<ReaderHeaderFooterConfig> {
         label: l,
         value: v,
         min: 0,
-        max: 60,
-        onChanged: (x) => setState(() => _prefs = _prefs.copyWith(footerPadding: m(x))),
+        max: 300,
+        onChanged: (x) =>
+            setState(() => _prefs = _prefs.copyWith(footerPadding: m(x))),
         onCommitted: (x) {
           final n = _prefs.copyWith(footerPadding: m(x));
           setState(() => _prefs = n);
@@ -175,7 +177,7 @@ class _ReaderHeaderFooterConfigState extends State<ReaderHeaderFooterConfig> {
             label: l,
             value: v,
             min: 0,
-            max: 120,
+            max: 200,
             onChanged: (x) => setState(() => _prefs = m(x)),
             onCommitted: (x) {
               final n = m(x);
@@ -191,6 +193,7 @@ class _ReaderHeaderFooterConfigState extends State<ReaderHeaderFooterConfig> {
       f('右', _prefs.rightMargin, (x) => _prefs.copyWith(marginRight: x)),
     ];
   }
+
   Widget _slotRow({
     required String label,
     required List<ReaderTip> tips,
@@ -366,7 +369,10 @@ class _TemplateEditorState extends State<_TemplateEditor> {
       GlassTextButton(
         key: const ValueKey('reader-template-save'),
         onPressed: () => Navigator.pop(context, _controller.text),
-        child: const AppText('保存', style: TextStyle(fontWeight: FontWeight.w600)),
+        child: const AppText(
+          '保存',
+          style: TextStyle(fontWeight: FontWeight.w600),
+        ),
       ),
       const SizedBox(height: 6),
       GlassTextButton(

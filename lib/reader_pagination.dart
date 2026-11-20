@@ -46,16 +46,24 @@ class ReaderPageFragment {
   final ReaderFragmentLines? lineMetrics;
   int get lineCount => lineMetrics?.count ?? 1;
   Iterable<ReaderPageLine> get lines =>
-      lineMetrics?.values ?? [ReaderPageLine(start, end, 0, rect.height)];
+      lineMetrics?.values ??
+      [ReaderPageLine(start, end, 0, rect.height, width: rect.width)];
 }
 
 /// Source boundaries and local line boxes reuse the compact shaping metrics.
 /// Only visible reflow builds line objects; pagination does not retain a widget
 /// or a native LineMetrics object for every line in a chapter.
 class ReaderPageLine {
-  const ReaderPageLine(this.start, this.end, this.top, this.height);
+  const ReaderPageLine(
+    this.start,
+    this.end,
+    this.top,
+    this.height, {
+    this.width = 0,
+  });
   final int start, end;
   final double top, height;
+  final double width;
 }
 
 class ReaderFragmentLines {
@@ -78,7 +86,7 @@ class ReaderFragmentLines {
         _sourceLength,
       );
       final height = _metrics.heights[i];
-      yield ReaderPageLine(start, end, top, height);
+      yield ReaderPageLine(start, end, top, height, width: _metrics.widths[i]);
       top += height;
     }
   }
@@ -178,14 +186,17 @@ class ReaderPagination {
 class _HorizontalMetrics {
   _HorizontalMetrics(List<ui.LineMetrics> lines, List<int> starts)
     : heights = Float64List(lines.length),
+      widths = Float64List(lines.length),
       starts = Uint32List.fromList(starts) {
     for (var i = 0; i < lines.length; i++) {
       heights[i] = lines[i].height;
+      widths[i] = lines[i].width;
     }
   }
-  // Repacking only needs exact line heights and source boundaries. Do not keep
-  // every native line descriptor's baseline, width, ascent and other fields.
+  // Repacking only needs exact line heights, widths and source boundaries. Do
+  // not keep every native line descriptor's baseline, ascent and other fields.
   final Float64List heights;
+  final Float64List widths;
   final Uint32List starts;
 }
 
@@ -364,7 +375,7 @@ Future<ReaderPagination?> paginateReader({
         vertical ? verticalStyle : style,
         preferences.mode,
         baseVertical ? latinOrientation : null,
-        vertical ? null : preferences.indent,
+        vertical ? null : preferences.indentCount,
         vertical ? null : preferences.justify,
         vertical ? preferences.letterSpacing : null,
         scaler.scale(style.fontSize ?? 19),
@@ -527,6 +538,7 @@ Future<ReaderPagination?> paginateReader({
       if (text.isEmpty) continue;
       if (!vertical) {
         final indent = preferences.indent && format.allowsIndent;
+        final indentCount = indent ? preferences.indentCount : 0;
         final prefix = indent ? readerIndentPlaceholder : '';
         final display = '$prefix$text';
         var metrics = measured.horizontal[index];
@@ -536,7 +548,7 @@ Future<ReaderPagination?> paginateReader({
           final span = readerParagraphSpan(
             children: format.spans(text),
             style: paragraphStyle,
-            indent: indent,
+            indent: indentCount,
           );
           final builder = ui.ParagraphBuilder(
             paragraphStyle.getParagraphStyle(
@@ -550,7 +562,7 @@ Future<ReaderPagination?> paginateReader({
           span.build(
             builder,
             textScaler: scaler,
-            dimensions: readerIndentDimensions(indent, font),
+            dimensions: readerIndentDimensions(indentCount, font),
           );
           final paragraph = builder.build();
           try {
@@ -732,7 +744,7 @@ Future<ReaderPagination?> paginateReader({
             flush();
           }
           final indent = first == 0 && preferences.indent && format.allowsIndent
-              ? font * 2
+              ? font * preferences.indentCount
               : 0.0;
           var height = indent;
           var end = first;

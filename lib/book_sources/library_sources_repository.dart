@@ -4,6 +4,7 @@ import 'dart:math' as math;
 import '../book_search.dart';
 import '../book_identity.dart';
 import '../catalog.dart';
+import '../online_component.dart';
 import '../tag_catalogue.dart';
 import 'book_source_repository.dart';
 
@@ -20,6 +21,7 @@ class LibrarySourcesRepository extends NovelRepository
   final BookSourceRepository bookSources;
   final Map<String, _SourceSearchSession> _sourceSearches = {};
   String? _scopeSignature;
+  int _searchGeneration = 0;
 
   bool _isSource(int id, [Novel? novel]) =>
       novel?.source != null || isBookSourceBook(id);
@@ -45,17 +47,22 @@ class LibrarySourcesRepository extends NovelRepository
     bool refresh = false,
   }) {
     if (refresh) _sourceSearches.clear();
-    return _merged(
-      library.searchPage(query, page: page, refresh: refresh),
-      _sourceSearchPage(query, page),
+    return _searchPrimaryThenSources(
+      () => library.searchPage(query, page: page, refresh: refresh),
+      () => _sourceSearchPage(query, page),
       page,
     );
   }
 
   @override
   Future<void> cancelSearch() async {
+    _searchGeneration++;
     _sourceSearches.clear();
-    await bookSources.cancelSearch();
+    try {
+      await Future.wait([bookSources.cancelSearch(), library.cancelSearch()]);
+    } on Object {
+      // 取消是尽力而为，任一来源失败都不应冒泡到页面生命周期。
+    }
   }
 
   @override
@@ -69,14 +76,14 @@ class LibrarySourcesRepository extends NovelRepository
       return searchPage(query, page: page, refresh: refresh);
     }
     if (refresh) _sourceSearches.clear();
-    return _merged(
-      library.searchFilteredPage(
+    return _searchPrimaryThenSources(
+      () => library.searchFilteredPage(
         query,
         field: field,
         page: page,
         refresh: refresh,
       ),
-      _filteredSourcePage(query, field: field, page: page),
+      () => _filteredSourcePage(query, field: field, page: page),
       page,
     );
   }
@@ -94,29 +101,57 @@ class LibrarySourcesRepository extends NovelRepository
     if (refresh || _sourceSearches.keys.any((key) => !key.startsWith(prefix))) {
       _sourceSearches.clear();
     }
-    final progress = onProgress == null
-        ? null
-        : (NovelSearchProgress value) {
-            if (current?.call() == false) return;
-            onProgress(value);
-          };
-    final primary = field == BookSearchField.all
-        ? library.searchPage(query, page: page, refresh: refresh)
-        : library.searchFilteredPage(
-            query,
-            field: field,
-            page: page,
-            refresh: refresh,
-          );
-    final external = field == BookSearchField.all
-        ? _sourceSearchPage(query, page, onProgress: progress)
-        : _filteredSourcePage(
-            query,
-            field: field,
-            page: page,
-            onProgress: progress,
-          );
-    return _merged(primary, external, page);
+    NovelPage? primaryResult;
+    NovelSearchProgress? latestSourceProgress;
+    NovelSearchProgressCallback? progress;
+    if (onProgress != null) {
+      progress = (NovelSearchProgress value) {
+        if (current?.call() == false) return;
+        latestSourceProgress = value;
+        onProgress(
+          NovelSearchProgress(
+            items: _officialFirst(primaryResult?.items, value.items),
+            completedSources: value.completedSources,
+            totalSources: value.totalSources,
+            officialItems: primaryResult?.items ?? const [],
+          ),
+        );
+      };
+    }
+    void acceptPrimary(NovelPage result) {
+      primaryResult = result;
+      final latest = latestSourceProgress;
+      progress?.call(
+        NovelSearchProgress(
+          items: _officialFirst(result.items, latest?.items ?? const []),
+          completedSources: latest?.completedSources ?? 0,
+          totalSources: latest?.totalSources ?? 0,
+          officialItems: result.items,
+        ),
+      );
+    }
+
+    return _searchPrimaryThenSources(
+      () => field == BookSearchField.all
+          ? library.searchPage(query, page: page, refresh: refresh)
+          : library.searchFilteredPage(
+              query,
+              field: field,
+              page: page,
+              refresh: refresh,
+            ),
+      () => field == BookSearchField.all
+          ? _sourceSearchPage(query, page, onProgress: progress)
+          : _filteredSourcePage(
+              query,
+              field: field,
+              page: page,
+              onProgress: progress,
+            ),
+      page,
+      current: current,
+      onPrimary: progress == null ? null : acceptPrimary,
+    );
   }
 
   @override
@@ -124,9 +159,10 @@ class LibrarySourcesRepository extends NovelRepository
     String author, {
     int page = 1,
     bool refresh = false,
-  }) => _merged(
-    library.authorPage(author, page: page, refresh: refresh),
-    _filteredSourcePage(author, field: BookSearchField.author, page: page),
+  }) => _searchPrimaryThenSources(
+    () => library.authorPage(author, page: page, refresh: refresh),
+    () =>
+        _filteredSourcePage(author, field: BookSearchField.author, page: page),
     page,
   );
 
@@ -230,34 +266,78 @@ class LibrarySourcesRepository extends NovelRepository
     return session;
   }
 
-  Future<NovelPage> _merged(
-    Future<NovelPage> libraryPage,
-    Future<NovelPage> sourcePage,
-    int page,
-  ) async {
+  Future<NovelPage> _searchPrimaryThenSources(
+    Future<NovelPage> Function() libraryPage,
+    Future<NovelPage> Function() sourcePage,
+    int page, {
+    bool Function()? current,
+    void Function(NovelPage primary)? onPrimary,
+  }) async {
+    final generation = _searchGeneration;
+    bool cancelled() =>
+        generation != _searchGeneration || current?.call() == false;
+
     NovelPage? primary;
-    NovelPage? external;
     Object? primaryError;
+    NovelPage? external;
     Object? externalError;
-    await Future.wait([
-      () async {
-        try {
-          primary = await libraryPage;
-        } on Object catch (error) {
-          primaryError = error;
-        }
-      }(),
-      () async {
-        try {
-          external = await sourcePage;
-        } on Object catch (error) {
-          externalError = error;
-        }
-      }(),
-    ]);
+    Future<void> loadPrimary() async {
+      try {
+        final result = await libraryPage();
+        if (cancelled()) return;
+        primary = result;
+      } on Object catch (error) {
+        primaryError = error;
+        return;
+      }
+      final result = primary;
+      if (result != null) onPrimary?.call(result);
+    }
+
+    Future<void> loadSources() async {
+      try {
+        final result = await sourcePage();
+        if (cancelled()) return;
+        external = result;
+      } on Object catch (error) {
+        externalError = error;
+      }
+    }
+
+    await Future.wait([loadPrimary(), loadSources()]);
+    if (cancelled()) {
+      return NovelPage(items: const [], page: page, totalPages: page);
+    }
+    return _mergePages(primary, external, primaryError, externalError, page);
+  }
+
+  static List<Novel> _officialFirst(
+    List<Novel>? official,
+    List<Novel> sources,
+  ) {
+    if (official == null || official.isEmpty) {
+      return List<Novel>.unmodifiable(sources);
+    }
+    final byId = <int, Novel>{for (final book in official) book.id: book};
+    for (final book in sources) {
+      byId.putIfAbsent(book.id, () => book);
+    }
+    return List<Novel>.unmodifiable(byId.values);
+  }
+
+  NovelPage _mergePages(
+    NovelPage? primary,
+    NovelPage? external,
+    Object? primaryError,
+    Object? externalError,
+    int page,
+  ) {
+    final primaryFailure = primaryError is OnlineComponentUnavailable
+        ? null
+        : primaryError;
     if (primary == null && external == null) {
       Error.throwWithStackTrace(
-        primaryError ?? externalError ?? StateError('搜索失败'),
+        primaryFailure ?? externalError ?? StateError('搜索失败'),
         StackTrace.current,
       );
     }
@@ -266,12 +346,12 @@ class LibrarySourcesRepository extends NovelRepository
       byId[book.id] = book;
     }
     for (final book in external?.items ?? const <Novel>[]) {
-      byId[book.id] = book;
+      byId.putIfAbsent(book.id, () => book);
     }
     final failures = <String, Object>{
       ...?external?.sourceFailures,
-      if (primaryError != null) '轻小说文库': primaryError!,
-      if (externalError != null) '书源': externalError!,
+      '轻小说文库': ?primaryFailure,
+      '书源': ?externalError,
     };
     return NovelPage(
       items: List<Novel>.unmodifiable(byId.values),
