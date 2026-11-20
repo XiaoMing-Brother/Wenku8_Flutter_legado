@@ -13,6 +13,7 @@ import org.json.JSONObject
 import org.mozilla.javascript.BaseFunction
 import org.mozilla.javascript.Context
 import org.mozilla.javascript.NativeArray
+import org.mozilla.javascript.NativeJSON
 import org.mozilla.javascript.NativeJavaObject
 import org.mozilla.javascript.NativeObject
 import org.mozilla.javascript.RhinoException
@@ -335,7 +336,15 @@ internal class BookSourceJs(private val http: BookSourceHttp) {
             function.prototype = ScriptableObject.getFunctionPrototype(scope)
             ScriptableObject.putProperty(javaObject, name, function)
         }
-        fn("ajax", 1) { args -> fetch(env, firstUrl(args.getOrNull(0))) }
+        fn("ajax", 2) { args ->
+            fetch(
+                env,
+                firstUrl(args.getOrNull(0)),
+                args.getOrNull(1),
+                cx,
+                scope,
+            )
+        }
         fn("get", 2) { args ->
             val url = stringArg(args, 0)
             val headers = headerMap(args.getOrNull(1))
@@ -540,12 +549,58 @@ internal class BookSourceJs(private val http: BookSourceHttp) {
         }
     }
 
-    private fun fetch(env: JsEnv, url: String): String =
-        http.fetch(
+    private fun fetch(
+        env: JsEnv,
+        rawUrl: String,
+        options: Any? = null,
+        cx: Context? = null,
+        scope: Scriptable? = null,
+    ): String {
+        val trimmed = rawUrl.trim()
+        val resolved = if (
+            trimmed.startsWith("http", ignoreCase = true) ||
+            trimmed.startsWith("//") ||
+            trimmed.startsWith("data:", ignoreCase = true)
+        ) {
+            trimmed
+        } else {
+            http.resolve(env.baseUrl, trimmed)
+        }
+        val optionJson = ajaxOptionJson(options, cx, scope)
+        val spec = if (optionJson.isNullOrBlank()) resolved else "$resolved,$optionJson"
+        return http.fetch(
             env.source,
-            http.requestSpec(env.source.key, url),
+            http.requestSpec(env.source.key, spec),
             allowUnsuccessful = true,
         ).text
+    }
+
+    /**
+     * Legado 的 `java.ajax(url, options)` 第二参数在多数书源里是超时时间，
+     * 也有书源传请求选项对象。数字按超时忽略，对象/JSON 字符串当请求选项。
+     */
+    private fun ajaxOptionJson(
+        value: Any?,
+        cx: Context?,
+        scope: Scriptable?,
+    ): String? {
+        val raw = if (value is NativeJavaObject) value.unwrap() else value
+        return when {
+            raw == null ||
+                raw is Number ||
+                raw is Boolean ||
+                raw is Undefined -> null
+            raw is String -> raw.trim().takeIf { it.startsWith("{") }
+            cx != null && scope != null &&
+                (raw is Scriptable || raw is NativeJavaObject) -> {
+                val text = NativeJSON.stringify(cx, scope, raw, null, null)
+                    ?.toString()
+                    ?.trim()
+                text?.takeIf { it.startsWith("{") }
+            }
+            else -> null
+        }
+    }
 
     private fun responseObject(
         cx: Context,

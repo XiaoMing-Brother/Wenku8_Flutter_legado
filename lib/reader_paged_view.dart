@@ -16,6 +16,8 @@ import 'reader_spine_turn.dart';
 import 'reader_status.dart';
 import 'reader_scroll_location.dart';
 import 'reader_chrome.dart';
+import 'reader_header_footer.dart';
+import 'reader_tip.dart';
 
 TextStyle _chapterHeadingStyle(TextStyle style) => style.copyWith(
   fontSize: 13,
@@ -290,6 +292,7 @@ class ReaderPagedView extends StatefulWidget {
     this.position,
     this.reduceMotion = false,
     this.showPageCount = true,
+    this.bottomDockReserve = 0,
     this.preservePositionStart = false,
     this.pageBuilderKey,
     this.status,
@@ -333,6 +336,9 @@ class ReaderPagedView extends StatefulWidget {
   final ReadingPosition? position;
   final bool reduceMotion;
   final bool showPageCount;
+
+  /// 底部标签栏显示时为其预留的高度，避免正文/页脚被遮挡。
+  final double bottomDockReserve;
 
   /// Explicit typography-scope changes keep the current reading line at top.
   final bool preservePositionStart;
@@ -1526,6 +1532,16 @@ class _ReaderPagedViewState extends State<ReaderPagedView>
           .controlForeground(Theme.of(context).brightness == Brightness.dark)
           .withValues(alpha: .72),
     );
+    // 自定义页眉 / 页脚：仅在用户配置了槽位时接管，否则走下面原有分支。
+    final customHeader = true;
+    final customFooter = true;
+    final tipContext = ReaderTipContext(
+      bookName: widget.bookTitle ?? '',
+      chapterTitle: title,
+      pageIndex: first,
+      pageCount: pagination.pages.length,
+      readProgress: '${(fraction * 100).round()}%',
+    );
     final statusInsets =
         widget.bookTitle != null && widget.preferences.hideSystemStatus
         ? ReaderStatusFooter.horizontalInsetsFor(
@@ -1540,14 +1556,18 @@ class _ReaderPagedViewState extends State<ReaderPagedView>
         child: Stack(
           fit: StackFit.expand,
           children: [
-            if (widget.status != null && widget.bookTitle == null)
+            if (!customHeader &&
+                widget.status != null &&
+                widget.bookTitle == null)
               Positioned(
                 left: 0,
                 right: 0,
                 top: 0,
                 child: part(widget.status!),
               ),
-            if (widget.bookTitle == null || widget.preferences.showReaderStatus)
+            if (!customHeader &&
+                (widget.bookTitle == null ||
+                    widget.preferences.showReaderStatus))
               Positioned(
                 top: widget.bookTitle == null
                     ? padding.top
@@ -1611,7 +1631,7 @@ class _ReaderPagedViewState extends State<ReaderPagedView>
                   ),
                 ),
               ),
-            if (widget.bookTitle != null)
+            if (!customFooter && widget.bookTitle != null)
               Positioned(
                 left: padding.left,
                 right: padding.right,
@@ -1648,6 +1668,59 @@ class _ReaderPagedViewState extends State<ReaderPagedView>
                   ),
                 ),
               ),
+            if (customHeader)
+              Positioned(
+                left: padding.left + widget.preferences.headerPadding.left,
+                right: padding.right + widget.preferences.headerPadding.right,
+                top:
+                    (widget.bookTitle == null
+                        ? padding.top
+                        : (widget.preferences.hideSystemStatus
+                              ? widget.preferences.statusTopOffset
+                              : MediaQuery.viewPaddingOf(context).top +
+                                    widget.preferences.statusTopOffset)) +
+                    widget.preferences.headerPadding.top,
+                child: part(
+                  information(
+                    ReaderTipStrip(
+                      key: key('reader-custom-header'),
+                      tips: ReaderPreferences.fixedHeaderTips,
+                      baseContext: tipContext,
+                      style: informationStyle,
+                      slotKeys: [
+                        key('reader-custom-header-left'),
+                        key('reader-custom-header-center'),
+                        key('reader-custom-header-right'),
+                      ],
+                    ),
+                    interactive: true,
+                  ),
+                ),
+              ),
+            if (customFooter)
+              Positioned(
+                left: padding.left + widget.preferences.footerPadding.left,
+                right: padding.right + widget.preferences.footerPadding.right,
+                bottom:
+                    MediaQuery.viewPaddingOf(context).bottom +
+                    widget.preferences.footerPadding.bottom,
+                child: part(
+                  information(
+                    ReaderTipStrip(
+                      key: key('reader-custom-footer'),
+                      tips: ReaderPreferences.fixedFooterTips,
+                      baseContext: tipContext,
+                      style: informationStyle,
+                      slotKeys: [
+                        key('reader-custom-footer-left'),
+                        key('reader-custom-footer-center'),
+                        key('reader-custom-footer-right'),
+                      ],
+                    ),
+                    interactive: true,
+                  ),
+                ),
+              ),
           ],
         ),
       ),
@@ -1676,7 +1749,9 @@ class _ReaderPagedViewState extends State<ReaderPagedView>
         child: child,
       );
     }
-    if (_effect == ReaderPageEffect.cover || _effect == ReaderPageEffect.fade) {
+    if (_effect == ReaderPageEffect.cover ||
+        _effect == ReaderPageEffect.fade ||
+        _effect == ReaderPageEffect.parallax) {
       return ReaderSheetMotion(
         animation: _turn,
         effect: _effect,
@@ -1897,7 +1972,8 @@ class _ReaderPagedViewState extends State<ReaderPagedView>
               final sheet = chapter
                   ? _chapterSheet(body, incoming: true)
                   : _effect == ReaderPageEffect.cover ||
-                        _effect == ReaderPageEffect.fade
+                        _effect == ReaderPageEffect.fade ||
+                        _effect == ReaderPageEffect.parallax
                   ? ReaderSheetMotion(
                       animation: _turn,
                       effect: _effect,

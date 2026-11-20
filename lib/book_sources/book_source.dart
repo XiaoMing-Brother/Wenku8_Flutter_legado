@@ -1,5 +1,7 @@
 import 'dart:convert';
 
+import 'review_rule.dart';
+
 /// An imported Legado book source.
 ///
 /// [raw] is authoritative. Known getters are views over it so unknown fields
@@ -47,6 +49,8 @@ class BookSource {
   String get exploreUrl => _string('exploreUrl');
   String get searchUrl => _string('searchUrl');
   bool get canExplore => exploreUrl.isNotEmpty && enabledExplore;
+  /// 旧版发现源的兼容标记：为 true 时榜单点击只跨书源搜索，不直接进详情。
+  bool get discoveryOnly => _bool('wenkuDiscoveryOnly', fallback: false);
   String get loginUrl => _string('loginUrl');
   String get loginUi => _string('loginUi');
   String get loginCheckJs => _string('loginCheckJs');
@@ -56,6 +60,13 @@ class BookSource {
   bool get canSearch {
     return searchUrl.isNotEmpty;
   }
+
+  /// 段评规则（Legado `ruleReview`；兼容 `reviewRule` 键，值可为对象或 JSON 字符串）。
+  ReviewRule get reviewRule =>
+      ReviewRule.fromMap(raw['ruleReview'] ?? raw['reviewRule']);
+
+  /// 该源是否配置了段评地址。
+  bool get hasReviewRule => reviewRule.isConfigured;
 
   String get typeLabel => switch (type) {
     0 => '文字',

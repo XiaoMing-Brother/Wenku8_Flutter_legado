@@ -27,6 +27,7 @@ import 'reading_entry.dart';
 import 'blocked_tags.dart';
 import 'book_grid_density.dart';
 import 'book_collection_mode.dart';
+import 'calligraphy_splash_policy.dart';
 import 'book_shelf_preferences.dart';
 import 'book_shelf_content_preferences.dart';
 import 'discovery_shelf_query.dart';
@@ -564,6 +565,13 @@ class LibraryState extends ChangeNotifier {
         _prefs.get('directReading') == true && _directReadingPages.isNotEmpty;
     _openRecentOnLaunch = _prefs.get('openRecentOnLaunch') == true;
     _startPage = AppStartPage.parseOrDefault(_prefs.get('startPage'));
+    _calligraphySplashEnabled = _prefs.get('calligraphySplashEnabled') != false;
+    _calligraphySplashOncePerDay =
+        _prefs.get('calligraphySplashOncePerDay') == true;
+    final splashShownDay = _prefs.get('calligraphySplashLastShownDay');
+    _calligraphySplashLastShownDay = splashShownDay is int ? splashShownDay : 0;
+    final splashText = _prefs.get('calligraphySplashText');
+    _calligraphySplashText = splashText is String ? splashText : '';
     _combinedShelf = _prefs.get('combinedShelf') == true;
     _blockedTags = BlockedTags.fromRecord(
       _prefs.get(BlockedTags.preferenceKey),
@@ -793,6 +801,10 @@ class LibraryState extends ChangeNotifier {
   bool _directReadingEnabled = false;
   bool _openRecentOnLaunch = false;
   AppStartPage _startPage = AppStartPage.discovery;
+  bool _calligraphySplashEnabled = true;
+  bool _calligraphySplashOncePerDay = false;
+  int _calligraphySplashLastShownDay = 0;
+  String _calligraphySplashText = '';
   bool _combinedShelf = false;
   ReaderPreferences _readerPreferences = const ReaderPreferences();
   final _bookReaderStyles = <int, ReaderBookStyle>{};
@@ -848,6 +860,10 @@ class LibraryState extends ChangeNotifier {
   }
 
   Set<int> get shelf => Set.unmodifiable(_shelf);
+
+  /// 已知书籍（含已缓存信息的联网书与本地书），供批量换源等场景读取。
+  /// 调用方按需过滤「有书源、非本地」。
+  List<Novel> get knownNovels => List<Novel>.unmodifiable(_known.values);
   Listenable get appearanceChanges => _appearance;
   Listenable get applicationChanges => _application;
   AppLanguage get language => AppLanguage.fromRecord(_prefs.get('appLanguage'));
@@ -872,6 +888,11 @@ class LibraryState extends ChangeNotifier {
   Future<void> setReaderChromeVisible(bool visible) => _queuePositionWrite(
     () => writeLibraryPreference(_prefs, 'readerChromeVisible', visible),
   );
+
+  /// 通知阅读器窗口行为（如控件显隐）变化，用于系统栏跟随更新。
+  void notifyReaderBehaviorChanged() {
+    if (!_disposed) _readerBehaviorChanges.notifyListeners();
+  }
   Future<void> markReaderChromeHintSeen() => _queuePositionWrite(
     () => writeLibraryPreference(_prefs, 'readerChromeHintSeen', true),
   );
@@ -973,6 +994,10 @@ class LibraryState extends ChangeNotifier {
   bool get directReading => _directReadingEnabled;
   bool get openRecentOnLaunch => _openRecentOnLaunch;
   AppStartPage get startPage => _startPage;
+  bool get calligraphySplashEnabled => _calligraphySplashEnabled;
+  bool get calligraphySplashOncePerDay => _calligraphySplashOncePerDay;
+  int get calligraphySplashLastShownDay => _calligraphySplashLastShownDay;
+  String get calligraphySplashText => _calligraphySplashText;
   Set<ReadingEntry> get directReadingPages =>
       Set.unmodifiable(_directReadingPages);
   bool directReadingOn(ReadingEntry page) =>
@@ -1433,6 +1458,63 @@ class LibraryState extends ChangeNotifier {
       if (_startPage == value) return;
       await writeLibraryPreference(_prefs, 'startPage', value.name);
       _startPage = value;
+      if (!_disposed) _settings.notifyListeners();
+    });
+  }
+
+  Future<void> setCalligraphySplashEnabled(bool value) async {
+    if (_restoreBarrier case final barrier?) {
+      return barrier.future.then((_) => setCalligraphySplashEnabled(value));
+    }
+    await _queuePositionWrite(() async {
+      if (_calligraphySplashEnabled == value) return;
+      await writeLibraryPreference(_prefs, 'calligraphySplashEnabled', value);
+      _calligraphySplashEnabled = value;
+      if (!_disposed) _settings.notifyListeners();
+    });
+  }
+
+  Future<void> setCalligraphySplashOncePerDay(bool value) async {
+    if (_restoreBarrier case final barrier?) {
+      return barrier.future.then((_) => setCalligraphySplashOncePerDay(value));
+    }
+    await _queuePositionWrite(() async {
+      if (_calligraphySplashOncePerDay == value) return;
+      await writeLibraryPreference(_prefs, 'calligraphySplashOncePerDay', value);
+      _calligraphySplashOncePerDay = value;
+      if (!_disposed) _settings.notifyListeners();
+    });
+  }
+
+  Future<void> setCalligraphySplashText(String value) async {
+    if (_restoreBarrier case final barrier?) {
+      return barrier.future.then((_) => setCalligraphySplashText(value));
+    }
+    final next = value.trim();
+    await _queuePositionWrite(() async {
+      if (_calligraphySplashText == next) return;
+      await writeLibraryPreference(_prefs, 'calligraphySplashText', next);
+      _calligraphySplashText = next;
+      if (!_disposed) _settings.notifyListeners();
+    });
+  }
+
+  /// 「每日仅显示一次」开启时，记录今天已展示，避免同一天重复弹出。
+  Future<void> markCalligraphySplashShown({DateTime? today}) async {
+    if (!_calligraphySplashOncePerDay) return;
+    final day = calligraphySplashDayNumber(today ?? DateTime.now());
+    if (_calligraphySplashLastShownDay == day) return;
+    if (_restoreBarrier case final barrier?) {
+      return barrier.future.then((_) => markCalligraphySplashShown(today: today));
+    }
+    await _queuePositionWrite(() async {
+      if (_calligraphySplashLastShownDay == day) return;
+      await writeLibraryPreference(
+        _prefs,
+        'calligraphySplashLastShownDay',
+        day,
+      );
+      _calligraphySplashLastShownDay = day;
       if (!_disposed) _settings.notifyListeners();
     });
   }
@@ -2315,14 +2397,19 @@ class LibraryState extends ChangeNotifier {
   }
 
   /// Format migrations change only coordinates, never edit timestamps, quotes,
-  /// mark IDs, categories or active-reader positions. One journaled commit.
+  /// mark IDs or categories. Active readers are skipped unless explicitly
+  /// included. One journaled commit.
   Future<void> remapBookCoordinates(
     int id,
-    Future<Map<String, dynamic>> Function(Map<String, dynamic>) resolve,
-  ) => _queuePositionWrite(() async {
+    Future<Map<String, dynamic>> Function(Map<String, dynamic>) resolve, {
+    bool includeActiveReader = false,
+  }) =>
+      _queuePositionWrite(() async {
     final position = _positions[id];
     final marks = _bookmarks[id] ?? const <ReaderBookmark>[];
-    final nextPosition = position == null || _activeReaders.containsKey(id)
+    final nextPosition =
+        position == null ||
+            !includeActiveReader && _activeReaders.containsKey(id)
         ? position
         : ReadingPosition.fromJson(await resolve(position.toJson()));
     // Visit each chapter's anchors together so a large book needs only a
@@ -2405,6 +2492,28 @@ class LibraryState extends ChangeNotifier {
     if (!_disposed) _bookmarkChanges.notifyListeners();
     _historyChanged();
   });
+
+  /// 换源完成后把阅读进度、书签和分类映射到新目录，并同步书架元数据。
+  Future<void> applySourceSwitch(
+    Novel previous,
+    Novel switched, {
+    bool includeActiveReader = false,
+  }) async {
+    try {
+      await remapBookCoordinates(
+        previous.id,
+        (value) async => remapSourceCoordinate(value, previous, switched),
+        includeActiveReader: includeActiveReader,
+      );
+    } on Object {
+      // 换源已经成功；坐标映射失败时回退到新目录的兜底位置。
+    }
+    try {
+      await rememberNovel(switched);
+    } on Object {
+      // 元数据落盘失败不影响本次换源，后续写入可重试。
+    }
+  }
 
   Future<void> applySyncedBookmarks(
     Map<int, List<ReaderBookmark>> updates,
@@ -3479,6 +3588,10 @@ class LibraryState extends ChangeNotifier {
     'directReading': directReading,
     'openRecentOnLaunch': _openRecentOnLaunch,
     'startPage': _startPage.name,
+    'calligraphySplashEnabled': _calligraphySplashEnabled,
+    'calligraphySplashOncePerDay': _calligraphySplashOncePerDay,
+    'calligraphySplashLastShownDay': _calligraphySplashLastShownDay,
+    'calligraphySplashText': _calligraphySplashText,
     'directReadingPages': [
       for (final page in ReadingEntry.values)
         if (_directReadingPages.contains(page)) page.name,
@@ -3988,6 +4101,18 @@ class LibraryState extends ChangeNotifier {
           if (records['startPage'] case final String value) {
             _startPage = AppStartPage.parseOrDefault(value);
           }
+          if (records['calligraphySplashEnabled'] case final bool value) {
+            _calligraphySplashEnabled = value;
+          }
+          if (records['calligraphySplashOncePerDay'] case final bool value) {
+            _calligraphySplashOncePerDay = value;
+          }
+          if (records['calligraphySplashLastShownDay'] case final int value) {
+            _calligraphySplashLastShownDay = value;
+          }
+          if (records['calligraphySplashText'] case final String value) {
+            _calligraphySplashText = value;
+          }
           if (records.containsKey('directReadingPages') ||
               records.containsKey('directReading')) {
             _directReadingPages = ReadingEntry.decode(
@@ -4138,4 +4263,47 @@ class LibraryState extends ChangeNotifier {
     fonts.dispose();
     super.dispose();
   }
+}
+
+int sourceChapterIndex(
+  List<NovelChapter> chapters,
+  NovelChapter previous,
+  int fallback,
+) {
+  if (chapters.isEmpty) return 0;
+  final byId = chapters.indexWhere((chapter) => chapter.id == previous.id);
+  if (byId >= 0) return byId;
+  final title = _normalizedChapterTitle(previous.title);
+  if (title.isNotEmpty) {
+    final byTitle = chapters.indexWhere(
+      (chapter) => _normalizedChapterTitle(chapter.title) == title,
+    );
+    if (byTitle >= 0) return byTitle;
+  }
+  return fallback.clamp(0, chapters.length - 1);
+}
+
+String _normalizedChapterTitle(String value) =>
+    value.replaceAll(RegExp(r'[\s\u3000]+'), '').toLowerCase();
+
+Map<String, dynamic> remapSourceCoordinate(
+  Map<String, dynamic> value,
+  Novel previous,
+  Novel target,
+) {
+  if (previous.chapters.isEmpty || target.chapters.isEmpty) return value;
+  final rawId = value['chapterId'];
+  final idIndex = rawId is int
+      ? previous.chapters.indexWhere((chapter) => chapter.id == rawId)
+      : -1;
+  final rawChapter = value['chapter'];
+  final fallback = idIndex >= 0
+      ? idIndex
+      : rawChapter is int
+      ? rawChapter
+      : 0;
+  final old =
+      previous.chapters[fallback.clamp(0, previous.chapters.length - 1)];
+  final index = sourceChapterIndex(target.chapters, old, fallback);
+  return {...value, 'chapter': index, 'chapterId': target.chapters[index].id};
 }

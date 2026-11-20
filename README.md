@@ -11,7 +11,7 @@
 
 <p align="center">
   <a href="https://github.com/XiaoMing-Brother/Wenku8_Flutter_legado/actions/workflows/flutter-ci.yml"><img src="https://github.com/XiaoMing-Brother/Wenku8_Flutter_legado/actions/workflows/flutter-ci.yml/badge.svg?branch=master&amp;event=push" alt="Source checks" /></a>
-  <img src="https://img.shields.io/badge/Version-0.5.7.261118.1707-blue?style=flat-square" alt="Version 0.5.7.261118.1707" />
+  <img src="https://img.shields.io/badge/Version-0.5.7.261120.1048-blue?style=flat-square" alt="Version 0.5.7.261120.1048" />
   <img src="https://img.shields.io/badge/Platform-Android%7CiOS%7CHarmonyOS-3DDC84?style=flat-square" alt="Android、iOS 与 HarmonyOS" />
   <a href="assets/licenses/GPL-3.0.txt"><img src="https://img.shields.io/badge/License-GPL--3.0-blue?style=flat-square&amp;logo=gnu&amp;logoColor=white" alt="GPL 3.0" /></a>
 </p>
@@ -90,7 +90,7 @@
 
 ## 下载与更新
 
-- 当前版本：`0.5.7.261118.1707`。应用内更新只检查本仓库的正式 Release，不使用 draft、prerelease 或任意外部下载地址。
+- 当前版本：`0.5.7.261120.1048`。应用内更新只检查本仓库的正式 Release，不使用 draft、prerelease 或任意外部下载地址。
 - 版本号格式为 `主版本.次版本.修订号.YYMMDD.HHmm`，例如 `0.5.7.261118.1707`。
 - Android 包名为 `legado.wenku`。从旧包名升级时不能覆盖安装，请先备份书库、阅读记录与设置，再安装新版并手动恢复数据。
 - 升级、整理存储或同步前，请先备份重要原书和阅读记录。

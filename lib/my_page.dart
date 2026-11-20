@@ -103,7 +103,13 @@ class MyPage extends StatelessWidget {
                         icon: CupertinoIcons.link,
                         onTap: () => pushNovelPage<void>(
                           context,
-                          BookSourcesPage(library: sources),
+                          BookSourcesPage(
+                            library: sources,
+                            books: state.knownNovels,
+                            repository: repository,
+                            onSourceSwitched: (previous, switched) =>
+                                state.applySourceSwitch(previous, switched),
+                          ),
                           reduceMotion: state.reduceMotion,
                         ),
                       ),

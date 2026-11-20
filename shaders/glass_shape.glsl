@@ -58,9 +58,11 @@ void main() {
         }
     }
     vec3 center = glassPoint(position);
-    float aa = max(fwidth(center.z), 1.0);
-    vec2 dx = dFdx(center.xy) * 0.25;
-    vec2 dy = dFdy(center.xy) * 0.25;
+    // Derivatives replaced with analytic constants so this shader compiles to
+    // SkSL (impellerc's SkSL target rejects fwidth/dFdx/dFdy here).
+    float aa = 1.0;
+    vec2 dx = vec2(0.25, 0.0);
+    vec2 dy = vec2(0.0, 0.25);
     if (any(greaterThanEqual(distance, uRect.zw * 0.5))) {
         fragColor = vec4(0.0);
         return;

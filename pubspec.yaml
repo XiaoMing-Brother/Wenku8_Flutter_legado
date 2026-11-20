@@ -16,7 +16,7 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 0.5.7+2026111817
+version: 0.5.7+2026112010
 
 environment:
   sdk: ^3.11.3
@@ -84,6 +84,7 @@ flutter:
   uses-material-design: true
   assets:
     - assets/branding/app-icon.png
+    - assets/book_sources/
     - assets/report/
     - assets/reading_previews/archive-117.webp
     - assets/reading_previews/shelf-117.webp
@@ -106,6 +107,7 @@ flutter:
     - assets/fonts/OFL-Yozai.txt
     - assets/fonts/OFL-LXGWWenKaiTC.txt
     - assets/fonts/OFL-OpenHuninn.txt
+    - assets/fonts/OFL-MaShanZheng.txt
     - assets/licenses/GPL-3.0.txt
     - assets/licenses/edge-tts.txt
     - assets/licenses/libmobi.txt
@@ -136,6 +138,12 @@ flutter:
       fonts:
         - asset: assets/fonts/ReadingSerifDisplay-Bold.ttf
           weight: 700
+    - family: SplashCalligraphy
+      fonts:
+        - asset: assets/fonts/SplashCalligraphy.ttf
+    - family: SplashSeal
+      fonts:
+        - asset: assets/fonts/SplashSeal.ttf
   shaders:
     - shaders/continuous_blur.frag
     - shaders/analytic_glass.frag

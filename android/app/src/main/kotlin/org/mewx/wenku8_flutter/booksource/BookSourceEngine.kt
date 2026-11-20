@@ -6,6 +6,15 @@ import org.jsoup.nodes.Element
 import org.json.JSONArray
 import org.json.JSONObject
 
+private const val MaxContentPages = 100
+
+private data class ContentPage(
+    val body: String,
+    val url: String,
+    val nextUrls: List<String>,
+    val subContent: String = "",
+)
+
 internal class BookSourceEngine(
     private val variables: BookSourceVariables? = null,
 ) {
@@ -347,11 +356,49 @@ internal class BookSourceEngine(
         val items = rows.mapNotNull { row ->
             searchItem(source, analyzer, row, context, rule)
         }
-        val supportsPage = Regex("\\{\\{\\s*page\\s*\\}\\}").containsMatchIn(template)
+        // 模板里的 page 可能写在表达式里（如 {{(page-1)*20}}），同样视为可翻页。
+        val supportsPage =
+            Regex("\\{\\{[^}]*\\bpage\\b[^}]*\\}\\}").containsMatchIn(template)
+        // 接口型来源（如起点 JSON 榜单）会显式返回 isLast / hasNext，
+        // 用它判断末页比“条数 >= 10”可靠，避免最后一页之后再多请求一次空页。
+        val lastPage = jsonIsLastPage(loaded.text)
+        val hasMore = supportsPage && items.isNotEmpty() && when (lastPage) {
+            true -> false
+            false -> true
+            null -> items.size >= 10
+        }
         mapOf(
             "items" to items,
-            "hasMore" to (supportsPage && items.size >= 10),
+            "hasMore" to hasMore,
         )
+    }
+
+    /**
+     * 读取 JSON 响应里的末页标记。
+     * 返回 true 表示已是最后一页，false 表示还有下一页，null 表示没有可用的标记。
+     */
+    private fun jsonIsLastPage(text: String): Boolean? {
+        val trimmed = text.trim().trimStart('\uFEFF')
+        if (!trimmed.startsWith("{")) return null
+        val root = runCatching { JSONObject(trimmed) }.getOrNull() ?: return null
+        val containers = buildList {
+            add(root)
+            (root.opt("data") as? JSONObject)?.let { add(it) }
+        }
+        for (container in containers) {
+            if (container.has("isLast")) return jsonTruthy(container.opt("isLast"))
+            for (key in listOf("hasMore", "hasNext")) {
+                if (container.has(key)) return !jsonTruthy(container.opt(key))
+            }
+        }
+        return null
+    }
+
+    private fun jsonTruthy(value: Any?): Boolean = when (value) {
+        is Boolean -> value
+        is Number -> value.toInt() != 0
+        is String -> value == "1" || value.equals("true", ignoreCase = true)
+        else -> false
     }
 
     fun exploreAction(
@@ -423,6 +470,14 @@ internal class BookSourceEngine(
             response.url,
             analyzer.getString(info.tocUrl, context).ifBlank { bookUrl },
         )
+        val totalChapterNum = analyzer
+            .getString(info.totalChapterNum, context)
+            .trim()
+            .toIntOrNull()
+        val wordCount = analyzer
+            .getString(info.wordCount, context)
+            .trim()
+            .toIntOrNull()
         return mapOf(
             "name" to name,
             "author" to analyzer.getString(info.author, context),
@@ -435,7 +490,9 @@ internal class BookSourceEngine(
             "lastUpdate" to analyzer.getString(info.updateTime, context),
             "updateTime" to analyzer.getString(info.updateTime, context),
             "tocUrl" to tocUrl,
-            "totalChapterNum" to 0,
+            "status" to analyzer.getString(info.status, context),
+            "totalChapterNum" to totalChapterNum,
+            "wordCount" to wordCount,
         )
     }
 
@@ -494,6 +551,7 @@ internal class BookSourceEngine(
         bookUrl: String,
         chapterUrl: String,
         nextChapterUrl: String?,
+        chapterTitle: String?,
     ): String {
         val source = requireSource(sourceKey)
         requireTextSource(source)
@@ -501,19 +559,26 @@ internal class BookSourceEngine(
         val book = BookData(bookUrl = bookUrl)
         val parts = mutableListOf<String>()
         val visited = mutableSetOf<String>()
-        var currentUrl = chapterUrl
-        var pageCount = 0
-        while (currentUrl.isNotBlank() && visited.add(currentUrl) && pageCount < 20) {
-            pageCount++
+        val nextRule = source.content.nextContentUrl
+        val subRule = source.content.subContent
+        var pageTitle: String? = null
+
+        fun pageKey(value: String): String = value.substringBefore('#').trim()
+
+        fun loadPage(
+            url: String,
+            nextUrl: String,
+            readSubContent: Boolean = false,
+        ): ContentPage {
             val chapter = ChapterData(
-                url = currentUrl,
-                nextUrl = if (pageCount == 1) nextChapterUrl.orEmpty() else "",
+                url = url,
+                nextUrl = nextUrl,
             )
             val response = applyLoginCheck(
                 source,
                 fetchResponse(
                     source,
-                    http.requestSpec(source.key, currentUrl),
+                    http.requestSpec(source.key, url),
                     book = book,
                     chapter = chapter,
                 ),
@@ -528,25 +593,187 @@ internal class BookSourceEngine(
                 book = book,
                 chapter = chapter,
             )
-            val body = analyzer.getString(source.content.content, context)
-            if (body.isNotBlank()) parts.add(body)
-            val sub = source.content.subContent
-            if (!sub.isNullOrBlank()) {
-                val extra = analyzer.getString(sub, context)
-                if (extra.isNotBlank()) parts.add(extra)
-            }
-            val nextRule = source.content.nextContentUrl
-            currentUrl = if (nextRule.isNullOrBlank()) {
-                ""
+            val pieces = mutableListOf<String>()
+            val body = analyzer.getContent(source.content.content, context)
+            if (body.isNotBlank()) pieces.add(body)
+            val subContent = if (readSubContent && !subRule.isNullOrBlank()) {
+                val extra = analyzer.getContent(subRule, context)
+                when {
+                    extra.isBlank() -> ""
+                    // Legado：subContent 命中一个地址时再抓一次该地址的正文。
+                    extra.trim().startsWith("http", ignoreCase = true) -> runCatching {
+                        http.fetch(
+                            source,
+                            http.requestSpec(source.key, extra.trim()),
+                            allowUnsuccessful = true,
+                        ).text
+                    }.getOrDefault("")
+                    else -> extra
+                }
             } else {
-                http.resolve(
-                    response.url,
-                    analyzer.getString(nextRule, context),
-                )
+                ""
+            }
+            // 正文内标题规则比目录标题更贴近页面，优先用它剥离重复标题。
+            // 只需在第一页解析一次，后续分页复用，避免重复执行 JS 规则。
+            val titleRule = source.content.title
+            if (readSubContent && pageTitle == null && !titleRule.isNullOrBlank()) {
+                pageTitle = analyzer.getString(titleRule, context)
+            }
+            val titleForStrip = pageTitle?.takeIf { it.isNotBlank() }
+                ?: chapterTitle.orEmpty()
+            val content = analyzer.stripLeadingChapterTitle(
+                pieces.joinToString("\n\n"),
+                titleForStrip,
+            )
+            val nextUrls = if (nextRule.isNullOrBlank()) {
+                emptyList()
+            } else {
+                analyzer.getStrings(nextRule, context)
+                    .map { http.resolve(response.url, it) }
+                    .filter { it.isNotBlank() }
+                    .distinct()
+            }
+            return ContentPage(content, response.url, nextUrls, subContent)
+        }
+
+        val first = loadPage(
+            chapterUrl,
+            nextChapterUrl.orEmpty(),
+            readSubContent = true,
+        )
+        visited.add(pageKey(chapterUrl))
+        visited.add(pageKey(first.url))
+        if (first.body.isNotBlank()) parts.add(first.body)
+        val nextChapter = if (nextChapterUrl.isNullOrBlank()) {
+            ""
+        } else {
+            http.resolve(first.url, nextChapterUrl)
+        }
+
+        val pending = first.nextUrls
+        if (pending.size > 1) {
+            // Legado：一次返回多个下一页地址时属于并列分页，全部抓取，不再递归。
+            for (url in pending) {
+                if (nextChapter.isNotBlank() && pageKey(url) == pageKey(nextChapter)) {
+                    continue
+                }
+                if (!visited.add(pageKey(url))) continue
+                // 某一页失败不应丢掉已抓到的内容，跳过该页继续。
+                val page = runCatching { loadPage(url, "") }.getOrNull() ?: continue
+                if (page.body.isNotBlank()) parts.add(page.body)
+            }
+        } else if (pending.size == 1) {
+            var currentUrl = pending.first()
+            var pageCount = 1
+            while (currentUrl.isNotBlank() && pageCount < MaxContentPages) {
+                // Legado：下一页地址命中下一章时熔断，避免把后一章内容接进来。
+                if (nextChapter.isNotBlank() && pageKey(currentUrl) == pageKey(nextChapter)) {
+                    break
+                }
+                if (!visited.add(pageKey(currentUrl))) break
+                // 末页偶发网络错误时保留已抓到的部分，而不是整章失败。
+                val page = runCatching { loadPage(currentUrl, "") }.getOrNull() ?: break
+                if (page.body.isNotBlank()) parts.add(page.body)
+                pageCount++
+                currentUrl = page.nextUrls.firstOrNull().orEmpty()
             }
         }
+        if (first.subContent.isNotBlank()) {
+            if (parts.isNotEmpty()) parts.add(first.subContent)
+        }
         if (parts.isEmpty()) throw IllegalStateException("正文规则没有返回内容")
-        return parts.joinToString("\n\n")
+        // 阅读器按空行切分段落，页与页之间必须保留段落边界。
+        var result = parts.joinToString("\n\n")
+        // Legado 的全文替换规则：按行去空白后把整章交给 replaceRegex 处理。
+        val replaceRegex = source.content.replaceRegex
+        if (!replaceRegex.isNullOrBlank()) {
+            val normalized = result.split('\n').joinToString("\n") { it.trim() }
+            val replaced = runCatching {
+                analyzer.getString(
+                    replaceRegex,
+                    RuleContext(
+                        content = normalized,
+                        baseUrl = chapterUrl,
+                        book = book,
+                        chapter = ChapterData(url = chapterUrl),
+                    ),
+                )
+            }.getOrNull()
+            if (!replaced.isNullOrBlank()) result = replaced
+        }
+        return result
+    }
+
+    /**
+     * 段评抓取：按 rule 的 reviewUrl 请求，contentRule 作为段评列表选择器，
+     * 逐条取 avatarRule / postTimeRule。rule 由 Dart 传入（bookSource.ruleReview 各字段），
+     * 无需改 BookSource 模型。返回 Dart 侧 ParagraphReviewService 期望的字段。
+     */
+    fun review(
+        sourceKey: String,
+        bookUrl: String,
+        chapterUrl: String,
+        ruleValue: Map<String, Any?>?,
+    ): List<Map<String, Any?>> {
+        val source = requireSource(sourceKey)
+        requireTextSource(source)
+        fun rule(key: String): String =
+            ruleValue?.get(key)?.toString()?.trim().orEmpty()
+        val reviewUrlRule = rule("reviewUrl")
+        val contentRule = rule("contentRule")
+        if (reviewUrlRule.isBlank() || contentRule.isBlank()) return emptyList()
+        val avatarRule = rule("avatarRule")
+        val postTimeRule = rule("postTimeRule")
+        val quoteRule = rule("reviewQuoteUrl")
+        val paraIndexRule = rule("paraIndexRule")
+
+        val analyzer = analyzer(source)
+        val book = BookData(bookUrl = bookUrl)
+        val chapter = ChapterData(url = chapterUrl)
+        val urlContext = RuleContext(chapterUrl, chapterUrl, book = book, chapter = chapter)
+        val reviewUrl = http.resolve(
+            chapterUrl,
+            analyzer.getString(reviewUrlRule, urlContext),
+        )
+        if (reviewUrl.isBlank()) return emptyList()
+
+        val response = applyLoginCheck(
+            source,
+            fetchResponse(
+                source,
+                http.requestSpec(source.key, reviewUrl),
+                book = book,
+                chapter = chapter,
+            ),
+            key = "",
+            page = 1,
+            book = book,
+            chapter = chapter,
+        )
+        val context = RuleContext(response.text, response.url, book = book, chapter = chapter)
+        val rows = analyzer.getObjects(contentRule, context)
+        return rows.mapNotNull { row ->
+            val rowContext = context.copy(content = row)
+            val content = analyzer.stringValue(row).trim()
+            if (content.isEmpty()) return@mapNotNull null
+            mapOf<String, Any?>(
+                "content" to content,
+                "avatarUrl" to http.resolve(
+                    response.url,
+                    analyzer.getString(avatarRule, rowContext),
+                ),
+                "postTime" to analyzer.getString(postTimeRule, rowContext),
+                "quoteUrl" to if (quoteRule.isBlank()) {
+                    ""
+                } else {
+                    http.resolve(response.url, analyzer.getString(quoteRule, rowContext))
+                },
+                "reviewUrl" to reviewUrl,
+                "paraIndex" to analyzer.getString(paraIndexRule, rowContext)
+                    .trim()
+                    .toIntOrNull(),
+            )
+        }
     }
 
     private fun searchItem(

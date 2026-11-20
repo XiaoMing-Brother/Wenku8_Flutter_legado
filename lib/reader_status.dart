@@ -51,6 +51,27 @@ class ReaderStatusFooter extends StatefulWidget {
   // Incoming/outgoing sheets share one native subscription and the same data.
   static final _updates = events.receiveBroadcastStream();
   static Map? _lastStatus;
+
+  /// 供页眉/页脚信息条复用的时间/电量事件流与最近一次快照。
+  static Stream<dynamic> get updates => _updates;
+  static Map? get lastStatus => _lastStatus;
+
+  /// 从原生状态事件解析出时间 / 电量 / 充电（电量越界或缺失时为 null）。
+  static ({DateTime time, int? battery, bool charging}) decodeStatus(
+    Map value,
+  ) {
+    final milliseconds = value['time'];
+    final battery = value['battery'];
+    return (
+      time: milliseconds is int
+          ? DateTime.fromMillisecondsSinceEpoch(milliseconds)
+          : DateTime.now(),
+      battery: battery is int && battery >= 0 && battery <= 100
+          ? battery
+          : null,
+      charging: value['charging'] == true,
+    );
+  }
   static EdgeInsets horizontalInsetsFor(
     BuildContext context, {
     double extra = 0,

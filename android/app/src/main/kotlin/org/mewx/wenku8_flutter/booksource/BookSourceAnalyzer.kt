@@ -13,6 +13,8 @@ import org.jsoup.Jsoup
 import org.jsoup.helper.W3CDom
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
+import org.mozilla.javascript.NativeArray
+import org.mozilla.javascript.Scriptable
 import org.w3c.dom.Node
 import org.w3c.dom.NodeList
 
@@ -70,6 +72,155 @@ internal class BookSourceAnalyzer(
         return flatten(evaluate(rule, context)).map(::stringValue)
     }
 
+    /**
+     * 正文规则可能返回单个容器、若干段落节点或文本节点。像
+     * `//div[@id=content]/p`、`//div[@id=content]/text()` 这类规则会产生多条
+     * 结果，只取第一条会让章节只剩开头一段。这里拼接全部非空结果：元素保留
+     * 外层 HTML（段落由 <p>/<div> 等标签自身表达，避免丢标签后段落粘连），
+     * 纯文本节点按段落用空行分隔。Dart 侧再统一还原段落、<br> 和 <img>。
+     */
+    fun getContent(rule: String?, context: RuleContext): String {
+        if (rule.isNullOrBlank()) return ""
+        val parts = flatten(evaluate(rule, context)).mapNotNull { value ->
+            when (value) {
+                null -> null
+                is Element -> ContentPart(
+                    value.outerHtml().ifBlank { value.text() }.trim(),
+                    plain = false,
+                    block = isBlockElement(value.tagName()),
+                )
+                is Document -> ContentPart(
+                    value.body()?.html()?.trim().orEmpty(),
+                    plain = false,
+                    block = true,
+                )
+                is String -> ContentPart(value.trim(), plain = true, block = false)
+                else -> ContentPart(
+                    stringValue(value).trim(),
+                    plain = true,
+                    block = false,
+                )
+            }?.takeIf { it.text.isNotEmpty() }
+        }
+        if (parts.isEmpty()) return ""
+        val out = StringBuilder(parts.first().text)
+        for (index in 1 until parts.size) {
+            val part = parts[index]
+            val previous = parts[index - 1]
+            // 文本节点各成一段；块级元素自身的标签已经提供段落边界。
+            out.append(
+                when {
+                    part.plain || previous.plain -> "\n\n"
+                    part.block || previous.block -> ""
+                    else -> "\n"
+                },
+            )
+            out.append(part.text)
+        }
+        return out.toString()
+    }
+
+    private data class ContentPart(
+        val text: String,
+        val plain: Boolean,
+        val block: Boolean,
+    )
+
+    /**
+     * 有些书源的正文规则会把章节标题一起匹配进来。阅读器已经用目录标题单独
+     * 渲染章节头，这里把正文开头重复的标题块剥掉，避免标题在正文里再出现一次。
+     * 只处理与目录标题能对上的开头块，匹配不上时原样返回。
+     */
+    fun stripLeadingChapterTitle(content: String, title: String): String {
+        val wanted = titleKey(title)
+        if (wanted.isEmpty() || content.isBlank()) return content
+        val fragment = Jsoup.parseBodyFragment(content)
+        val body = fragment.body()
+        val top = body.children().filter { it.text().isNotBlank() }
+        if (top.isEmpty()) return stripPlainTextTitle(content, wanted)
+        // 正文容器常把标题包在内部（<div id="content"><h1>第12章 …</h1>…），
+        // 顶层只有一个容器时改为检查容器内的块。
+        val blocks = if (top.size == 1) {
+            top[0].children().filter { it.text().isNotBlank() }.ifEmpty { top }
+        } else {
+            top
+        }
+
+        // 部分页面把书名、站点名放在标题之前，只看第一块会漏掉重复标题。
+        var removed: List<Element> = emptyList()
+        for (index in 0 until minOf(blocks.size, 3)) {
+            val block = blocks[index]
+            val text = titleKey(block.text())
+            if (isChapterNumber(block.text())) {
+                val next = blocks.getOrNull(index + 1)
+                if (next != null &&
+                    titleKey(block.text() + next.text()) == wanted
+                ) {
+                    removed = listOf(block, next)
+                    break
+                }
+            }
+            if (text == wanted ||
+                (isHeading(block) && matchesHeading(text, wanted))
+            ) {
+                removed = listOf(block)
+                break
+            }
+        }
+        if (removed.isEmpty()) return content
+        for (element in removed) element.remove()
+        // 正文只有标题时保持原样，避免整章被判为空。
+        if (body.text().isBlank()) return content
+        return body.html().trim()
+    }
+
+    private fun stripPlainTextTitle(content: String, wanted: String): String {
+        val lines = content.split('\n')
+        val index = lines.indexOfFirst { it.isNotBlank() }
+        if (index < 0) return content
+        val first = titleKey(lines[index])
+        if (first == wanted) {
+            return lines.drop(index + 1)
+                .joinToString("\n")
+                .trim()
+                .ifEmpty { content }
+        }
+        if (isChapterNumber(lines[index])) {
+            val next = (index + 1 until lines.size).firstOrNull {
+                lines[it].isNotBlank()
+            }
+            if (next != null &&
+                titleKey(lines[index] + lines[next]) == wanted
+            ) {
+                return lines.drop(next + 1)
+                    .joinToString("\n")
+                    .trim()
+                    .ifEmpty { content }
+            }
+        }
+        return content
+    }
+
+    /** 标题标签是结构化的章节头，允许目录标题多带书名、求票等后缀。 */
+    private fun matchesHeading(candidate: String, wanted: String): Boolean {
+        if (candidate.isEmpty() || wanted.isEmpty()) return false
+        if (candidate == wanted) return true
+        if (wanted.startsWith(candidate)) return candidate.length >= 2
+        return candidate.startsWith(wanted) && candidate.length - wanted.length <= 8
+    }
+
+    private fun isHeading(element: Element): Boolean =
+        element.tagName().lowercase(Locale.ROOT) in HeadingTags
+
+    private fun isBlockElement(tagName: String): Boolean =
+        tagName.lowercase(Locale.ROOT) in BlockTags
+
+    private fun isChapterNumber(value: String): Boolean =
+        ChapterNumberRegex.matches(value.trim())
+
+    private fun titleKey(value: String): String =
+        value.replace(TitleWhitespace, "").lowercase(Locale.ROOT)
+
     fun getObjects(rule: String?, context: RuleContext): List<Any?> {
         if (rule.isNullOrBlank()) return emptyList()
         return flatten(evaluate(rule, context))
@@ -104,32 +255,81 @@ internal class BookSourceAnalyzer(
             )
         }
         if (!isScript) {
-            val fallback = splitTopLevel(expanded, "||")
-            if (fallback.size > 1) {
-                for (part in fallback) {
-                    val result = evaluatePart(part, context)
-                    if (result.any { stringValue(it).isNotBlank() }) return result
+            // 链式 JS（`规则@js:...`）里的 || / && 属于脚本本身，不能当规则回退符拆分。
+            if (splitChainedJs(expanded) == null) {
+                val fallback = splitTopLevel(expanded, "||")
+                if (fallback.size > 1) {
+                    for (part in fallback) {
+                        val result = evaluatePart(part, context)
+                        if (result.any { stringValue(it).isNotBlank() }) return result
+                    }
+                    return emptyList()
                 }
-                return emptyList()
-            }
-            val sequence = splitTopLevel(expanded, "&&")
-            if (sequence.size > 1) {
-                return sequence.flatMap { evaluatePart(it, context) }
+                val sequence = splitTopLevel(expanded, "&&")
+                if (sequence.size > 1) {
+                    return sequence.flatMap { evaluatePart(it, context) }
+                }
             }
         }
         return evaluatePart(expanded, context)
     }
 
-    private fun flatten(values: List<Any?>): List<Any?> = values.flatMap {
-        if (it is List<*>) it else listOf(it)
+    /**
+     * JS 规则经常返回数组（正文分段、多下一页地址）。Rhino 的数组不是
+     * kotlin List，如果不展开会被整体当成一个字符串，导致只拿到第一页
+     * 或只拿到 "[object Object]"。
+     */
+    private fun flatten(values: List<Any?>): List<Any?> = values.flatMap { value ->
+        when (value) {
+            is List<*> -> value
+            // 用 for 循环而非嵌套 lambda：lambda 参数在再嵌一层 lambda 时
+            // 会丢失 NativeArray 的智能转换，导致 value.get(index, value)
+            // 第二参退化成 Any? 而无法匹配 get(Int, Scriptable)。
+            is NativeArray -> {
+                val items = ArrayList<Any?>()
+                for (index in 0 until value.length.toInt()) {
+                    val item = value.get(index, value)
+                    if (item != Scriptable.NOT_FOUND) items.add(item)
+                }
+                items
+            }
+            is Array<*> -> value.toList()
+            is Iterable<*> -> value.toList()
+            else -> listOf(value)
+        }
     }
 
     private fun evaluatePart(rule: String, context: RuleContext): List<Any?> {
         val trimmed = rule.trim()
         if (trimmed.isEmpty()) return emptyList()
+        // Legado 允许在任意规则后追加 @js: / <js> 对结果二次处理，
+        // 例如 `.chapter-text@html@js:...` 用来还原被拆字保护的正文。
+        splitChainedJs(trimmed)?.let { (base, script) ->
+            val baseValues = if (base.isEmpty()) emptyList() else evaluatePart(base, context)
+            val previous = if (base.isEmpty()) {
+                context.content
+            } else {
+                when (baseValues.size) {
+                    0 -> null
+                    1 -> baseValues[0]
+                    else -> baseValues
+                }
+            }
+            // 脚本失败时保留原始提取结果，至少让本章能显示。
+            val evaluated = runCatching {
+                js.eval(script, env(context.copy(content = previous)))
+            }.getOrNull()
+            if (evaluated != null) return listOf(evaluated)
+            return baseValues
+        }
         val replacement = splitTopLevel(trimmed, "##")
         if (replacement.size >= 2) {
-            val values = evaluatePart(replacement[0], context).map(::stringValue)
+            // 正文 replaceRegex 常写成以 ## 开头的纯替换规则，此时输入是当前正文。
+            val values = if (replacement[0].isBlank()) {
+                listOf(stringValue(context.content))
+            } else {
+                evaluatePart(replacement[0], context).map(::stringValue)
+            }
             val pattern = replacement[1]
             if (pattern.isEmpty()) return values
             val expression = runCatching { Regex(pattern) }.getOrNull() ?: return values
@@ -149,11 +349,11 @@ internal class BookSourceAnalyzer(
             trimmed.startsWith("@json:", ignoreCase = true) ->
                 json(trimmed.substring(6), context)
             trimmed.startsWith("@xpath:", ignoreCase = true) ->
-                xpath(trimmed.substring(7), context)
+                xpathChain(trimmed.substring(7), context)
             trimmed.startsWith("@regex:", ignoreCase = true) ->
                 regex(trimmed.substring(7), context)
             trimmed.startsWith("//") ->
-                xpath(trimmed, context)
+                xpathChain(trimmed, context)
             trimmed.startsWith("$.") || trimmed.startsWith("$[") ->
                 json(trimmed, context)
             context.content is Map<*, *> ->
@@ -161,6 +361,130 @@ internal class BookSourceAnalyzer(
             else ->
                 css(trimmed, context)
         }
+    }
+
+    /**
+     * 拆分规则末尾的 JS 处理段。`@js:` 之后的全部内容都是脚本；
+     * `<js>...</js>` 作为后缀时同样处理。脚本在规则最前面时由调用方直接执行。
+     */
+    private fun splitChainedJs(rule: String): Pair<String, String>? {
+        // 整条规则就是脚本时交给常规 @js:/<js> 分支，避免把脚本内的 "@js:" 当分隔符。
+        if (rule.startsWith("@js:", ignoreCase = true) ||
+            rule.startsWith("<js>", ignoreCase = true)
+        ) {
+            return null
+        }
+        JsTagRegex.find(rule)?.let { match ->
+            if (match.range.first > 0) {
+                return rule.substring(0, match.range.first).trim() to match.groupValues[1]
+            }
+        }
+        val at = rule.indexOf("@js:", startIndex = 1, ignoreCase = true)
+        if (at > 0) {
+            return rule.substring(0, at).trim() to rule.substring(at + 4)
+        }
+        return null
+    }
+
+    /** XPath 规则后接 @text / @html / @href 等时，按 Legado 逐段套用。 */
+    private fun xpathChain(rule: String, context: RuleContext): List<Any?> {
+        val segments = splitXpathChain(rule.trim())
+        if (segments.size <= 1) return xpath(rule, context)
+        return applyXpathChain(xpath(segments.first(), context), segments)
+    }
+
+    /**
+     * 只解析 XPath 末尾真正的链式段。`//a/@href` 里的 `@` 是属性轴，
+     * XPath 谓词 `[@id=...]` 里的 `@` 也不能当分隔符。
+     */
+    private fun splitXpathChain(rule: String): List<String> {
+        val segments = mutableListOf<String>()
+        var rest = rule
+        while (true) {
+            val at = lastChainSeparator(rest)
+            if (at <= 0) break
+            val segment = rest.substring(at + 1).trim()
+            if (!isXpathChainSegment(segment)) break
+            segments.add(0, segment)
+            rest = rest.substring(0, at).trim()
+        }
+        segments.add(0, rest)
+        return segments
+    }
+
+    /** 返回不在引号/方括号/圆括号里的最后一个 `@` 位置；属性轴 `@` 跳过。 */
+    private fun lastChainSeparator(value: String): Int {
+        var quote: Char? = null
+        var escaped = false
+        var square = 0
+        var round = 0
+        var result = -1
+        for (index in value.indices) {
+            val char = value[index]
+            if (escaped) {
+                escaped = false
+                continue
+            }
+            if (char == '\\') {
+                escaped = true
+                continue
+            }
+            if (quote != null) {
+                if (char == quote) quote = null
+                continue
+            }
+            when (char) {
+                '"', '\'' -> quote = char
+                '[' -> square++
+                ']' -> if (square > 0) square--
+                '(' -> round++
+                ')' -> if (round > 0) round--
+                '@' -> if (square == 0 && round == 0) {
+                    val previous = value.getOrNull(index - 1)
+                    if (previous != '/' && previous != '@') result = index
+                }
+            }
+        }
+        return result
+    }
+
+    private fun isXpathChainSegment(segment: String): Boolean {
+        if (segment.isEmpty()) return false
+        val (selector, range) = splitIndex(segment)
+        if (range != null && selector.isEmpty()) return true
+        val lower = selector.lowercase(Locale.ROOT)
+        if (lower in setOf("text", "owntext", "textnodes", "html", "outerhtml", "all")) {
+            return true
+        }
+        if (lower.startsWith("abs:")) return lower.length > 4
+        return ATTRIBUTE_NAME.matches(selector)
+    }
+
+    private fun applyXpathChain(values: List<Any?>, parts: List<String>): List<Any?> {
+        var current = values
+        for (index in 1 until parts.size) {
+            val segment = parts[index].trim()
+            if (segment.isEmpty()) continue
+            val (selector, range) = splitIndex(segment)
+            if (range != null) current = applyIndex(current, range)
+            current = when (selector.lowercase(Locale.ROOT)) {
+                "text" -> current.map(::stringValue)
+                "owntext" -> current.mapNotNull { (it as? Element)?.ownText() }
+                "textnodes" -> current.flatMap { item ->
+                    (item as? Element)?.textNodes()?.map { it.text() } ?: emptyList()
+                }
+                "html" -> current.mapNotNull { (it as? Element)?.html() }
+                "outerhtml", "all" -> current.mapNotNull {
+                    (it as? Element)?.outerHtml()
+                }
+                else -> if (isAttribute(selector) || ATTRIBUTE_NAME.matches(selector)) {
+                    current.mapNotNull { attributeValue(it, selector) }
+                } else {
+                    emptyList()
+                }
+            }
+        }
+        return current
     }
 
     private fun env(context: RuleContext): JsEnv = JsEnv(
@@ -393,6 +717,22 @@ internal class BookSourceAnalyzer(
     companion object {
         private val TemplateRegex = Regex("""\{\{(.*?)\}\}""", RegexOption.DOT_MATCHES_ALL)
         private val IndexRegex = Regex("""^(.*?)!(-?\d+(?::-?\d+)?)$""")
+        private val ATTRIBUTE_NAME = Regex("""^[A-Za-z_][A-Za-z0-9_.:-]*$""")
+        private val TitleWhitespace = Regex("""[\s\u00A0\u3000\uFEFF]+""")
+        private val ChapterNumberRegex = Regex(
+            """^(?:第\s*[〇零一二三四五六七八九十百千万两0-9０-９]+\s*[章节節卷部篇回]|(?:chapter|volume|part|book)\s+[0-9ivxlcdm]+)$""",
+            RegexOption.IGNORE_CASE,
+        )
+        private val JsTagRegex = Regex(
+            """<js>([\s\S]*?)</js>\s*$""",
+            RegexOption.IGNORE_CASE,
+        )
+        private val HeadingTags = setOf("h1", "h2", "h3", "h4", "h5", "h6")
+        private val BlockTags = setOf(
+            "p", "div", "section", "article", "li", "ul", "ol", "dl", "dt", "dd",
+            "table", "tr", "td", "th", "blockquote", "pre", "figure", "figcaption",
+            "h1", "h2", "h3", "h4", "h5", "h6",
+        )
 
         private fun isRuleExpression(value: String): Boolean =
             value.startsWith("@") ||

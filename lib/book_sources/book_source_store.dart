@@ -125,6 +125,57 @@ class BookSourceStore extends ChangeNotifier {
     );
   }
 
+  /// 写入随包分发的官网榜单来源。
+  ///
+  /// 标记文件记录版本和已写入的地址：用户删掉的来源不会回来，用户自己
+  /// 维护的同址来源不会被覆盖，但版本递增时由我们写入的来源会更新规则。
+  Future<void> seedBuiltinSources(String text, {required int version}) async {
+    final marker = File('${directory.path}/builtin-sources.json');
+    var seededVersion = 0;
+    final seededKeys = <String>{};
+    if (await marker.exists()) {
+      try {
+        final decoded = jsonDecode(await marker.readAsString());
+        if (decoded is Map) {
+          seededVersion = (decoded['version'] as num?)?.toInt() ?? 0;
+          for (final key in decoded['keys'] as List? ?? const []) {
+            if (key is String) seededKeys.add(key);
+          }
+        }
+      } on Object {
+        // 标记损坏时按首次写入处理
+      }
+    }
+    if (seededVersion >= version) return;
+    await load();
+    final batch = decodeBookSources(text);
+    var changed = false;
+    for (final source in batch.sources) {
+      final existing = _sources[source.key];
+      if (existing != null && !seededKeys.contains(source.key)) continue;
+      if (existing == null && _sources.length >= maxSources) continue;
+      _sources[source.key] = source;
+      seededKeys.add(source.key);
+      changed = true;
+    }
+    // 官方榜单已改为发现页直接请求，不再随包写入书源；清理旧版本留下的
+    // 内置来源，避免它们继续出现在书源管理里。
+    final incomingKeys = batch.sources.map((source) => source.key).toSet();
+    for (final key in seededKeys.toList()) {
+      if (incomingKeys.contains(key)) continue;
+      seededKeys.remove(key);
+      if (_sources.remove(key) != null) changed = true;
+    }
+    if (changed) {
+      await _save();
+      notifyListeners();
+    }
+    await _atomicWrite(
+      marker,
+      jsonEncode({'version': version, 'keys': seededKeys.toList()}),
+    );
+  }
+
   Future<void> updateSource(BookSource source) async {
     await load();
     final current = _sources[source.key];

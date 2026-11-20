@@ -11,6 +11,7 @@ import 'app_interactions.dart';
 import 'app_window_insets.dart';
 import 'app_licenses.dart';
 import 'app_repository.dart';
+import 'calligraphy_splash.dart';
 import 'catalog.dart';
 import 'legacy_wenku_repository.dart';
 import 'library_state.dart';
@@ -779,10 +780,11 @@ class _NovelAppState extends State<NovelApp> with WidgetsBindingObserver {
                         ),
                       );
                       final repo = repository;
+                      final Widget content;
                       if (LocalPlatform.fileActions &&
                           repo is OfflineNovelRepository &&
                           repo.local != null) {
-                        return BookOpenMonitor(
+                        content = BookOpenMonitor(
                           books: repo.local!,
                           library: state,
                           onOpen: _openLocalBook,
@@ -790,9 +792,11 @@ class _NovelAppState extends State<NovelApp> with WidgetsBindingObserver {
                           onOpenRequested: _bookOpenRequested,
                           child: home,
                         );
+                      } else {
+                        _initialBookInboxSettled(false);
+                        content = home;
                       }
-                      _initialBookInboxSettled(false);
-                      return home;
+                      return CalligraphySplashGate(state: state, child: content);
                     },
                   ),
                   settings: settings,

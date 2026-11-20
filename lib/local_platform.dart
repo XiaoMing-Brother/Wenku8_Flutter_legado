@@ -98,6 +98,10 @@ abstract final class LocalPlatform {
   static Object? _readerOwner;
   static ValueChanged<int>? _onPage;
   static bool? _iosStatusHidden;
+  static bool _chromeVisible = false;
+
+  /// 由阅读页在控件显隐时同步写入，供原生决定是否隐藏系统导航栏。
+  static void setChromeVisible(bool visible) => _chromeVisible = visible;
   static void reader(
     Object owner, {
     required bool active,
@@ -134,6 +138,7 @@ abstract final class LocalPlatform {
     }
     readerControls
         .invokeMethod<void>('apply', {
+          'readerActive': active,
           'volumePaging':
               volumePaging &&
               active &&
@@ -141,6 +146,20 @@ abstract final class LocalPlatform {
               state.readerPreferences.volumePaging,
           'brightness': active ? state.readerPreferences.brightness : null,
           'hideStatusBar': active && state.readerPreferences.hideSystemStatus,
+          'hideNavigation': active && !_chromeVisible,
+        })
+        .catchError((Object _) {});
+  }
+
+  /// 立即恢复系统状态栏 / 导航栏（退出阅读的瞬间调用，避免返回后延迟）。
+  static void restoreReaderBars() {
+    if (!readerAppearance) return;
+    readerControls
+        .invokeMethod<void>('apply', {
+          'volumePaging': false,
+          'brightness': null,
+          'hideStatusBar': false,
+          'hideNavigation': false,
         })
         .catchError((Object _) {});
   }

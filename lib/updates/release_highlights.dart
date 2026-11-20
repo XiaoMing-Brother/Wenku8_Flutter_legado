@@ -138,26 +138,29 @@ class _ReleaseDetailsState extends State<_ReleaseDetails> {
 
   Widget _navigation(BuildContext context) => LayoutBuilder(
     builder: (context, constraints) {
-      final previous = GlassTextButton(
-        key: const ValueKey('release-details-previous'),
-        onPressed: _page == 0 || _moving ? null : () => _move(_page - 1),
-        child: const AppText('上一页'),
-      );
+      final last = _sections.length - 1;
       final next = GlassPillButton(
         key: const ValueKey('release-details-next'),
-        label: _page == _sections.length - 1 ? '完成' : '下一页',
-        icon: _page == _sections.length - 1
+        label: _page == last ? '完成' : '下一页',
+        icon: _page == last
             ? CupertinoIcons.checkmark
             : CupertinoIcons.arrow_right,
         onPressed: _moving
             ? null
             : () {
-                if (_page == _sections.length - 1) {
+                if (_page == last) {
                   Navigator.pop(context, true);
                 } else {
                   _move(_page + 1);
                 }
               },
+      );
+      // 更新说明只剩一页时不再显示翻页控件，只保留「完成」。
+      if (last == 0) return next;
+      final previous = GlassTextButton(
+        key: const ValueKey('release-details-previous'),
+        onPressed: _page == 0 || _moving ? null : () => _move(_page - 1),
+        child: const AppText('上一页'),
       );
       if (constraints.maxWidth <
           MediaQuery.textScalerOf(context).scale(14) * 8 + 120) {
@@ -187,8 +190,9 @@ class _ReleaseDetailsState extends State<_ReleaseDetails> {
           key: const ValueKey('release-details-progress'),
           title: '本版更新',
           code: 'RELEASE / NOTES',
-          subtitle:
-              '版本 ${widget.version} · 构建 ${widget.build} · 第 ${_page + 1}/${_sections.length} 页',
+          subtitle: _sections.length > 1
+              ? '版本 ${widget.version} · 构建 ${widget.build} · 第 ${_page + 1}/${_sections.length} 页'
+              : '版本 ${widget.version} · 构建 ${widget.build}',
         ),
         const SizedBox(height: 16),
         Expanded(
@@ -232,8 +236,6 @@ class _ReleaseDetailsState extends State<_ReleaseDetails> {
                         child: ReleaseNotes(
                           item == currentReleaseSourcePolicy
                               ? '> **$item**'
-                              : index == 0
-                              ? item
                               : '- $item',
                           style: TextStyle(
                             fontSize: item == currentReleaseSourcePolicy

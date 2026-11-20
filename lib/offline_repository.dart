@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 
 import 'catalog.dart';
 import 'book_search.dart';
+import 'book_identity.dart';
 import 'book_sources/book_source_images.dart';
 import 'book_sources/book_source_library.dart';
 import 'book_sources/library_sources_repository.dart';
@@ -555,14 +556,29 @@ class OfflineNovelRepository extends FrameChangeNotifier
     // A concurrent cache miss must not re-fetch a just-completed response.
     final request = _retainRequest(novelId, chapter.id, epoch);
     try {
-      final saved = await cache.readChapter(novelId, chapter.id);
+      // 书源正文提取规则升级后，联网阅读旧的截断缓存需要重新抓取；
+      // 离线时仍允许继续读旧缓存。
+      final minFormat = !offline && isBookSourceBook(novelId)
+          ? OfflineCacheStore.bodyFormat
+          : 1;
+      final saved = await cache.readChapter(
+        novelId,
+        chapter.id,
+        minFormat: minFormat,
+      );
       if (saved != null) return saved;
-      if (saved != null && offline) {
-        throw const FormatException('本章旧缓存被插图标记截断，请联网刷新本章；原缓存仍保留');
+      try {
+        final text = await _fetch(novelId, chapter, request);
+        await _saveBody(novelId, chapter.id, text, epoch);
+        return text;
+      } catch (_) {
+        // 重新抓取失败时退回旧缓存，避免一次网络波动让本章完全打不开。
+        if (minFormat > 1) {
+          final legacy = await cache.readChapter(novelId, chapter.id);
+          if (legacy != null) return legacy;
+        }
+        rethrow;
       }
-      final text = await _fetch(novelId, chapter, request);
-      await _saveBody(novelId, chapter.id, text, epoch);
-      return text;
     } finally {
       _releaseRequest(request);
     }
@@ -649,7 +665,15 @@ class OfflineNovelRepository extends FrameChangeNotifier
         job.cachingIllustrations = false;
         final request = _retainRequest(meta.id, chapter.id, job.epoch);
         try {
-          final saved = await cache.readChapter(meta.id, chapter.id);
+          // 缓存任务同样只认当前正文格式：书源旧版截断正文要重新抓取，
+          // 否则“已缓存”会一直保留不完整内容。
+          final saved = await cache.readChapter(
+            meta.id,
+            chapter.id,
+            minFormat: isBookSourceBook(meta.id)
+                ? OfflineCacheStore.bodyFormat
+                : 1,
+          );
           if (!_current(job)) return;
           var text = saved;
           if (text == null || readerHasMissingIllustrations(text)) {

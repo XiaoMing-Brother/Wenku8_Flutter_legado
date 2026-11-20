@@ -49,6 +49,14 @@ class ReaderControlsPlugin : FlutterPlugin, ActivityAware {
             else controller.show(WindowInsetsCompat.Type.statusBars())
         }
     }
+    private fun hideNavigationBar(hidden: Boolean) {
+        activity?.window?.let { window ->
+            val controller = WindowCompat.getInsetsController(window, window.decorView)
+            controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            if (hidden) controller.hide(WindowInsetsCompat.Type.navigationBars())
+            else controller.show(WindowInsetsCompat.Type.navigationBars())
+        }
+    }
     override fun onAttachedToEngine(binding: FlutterPlugin.FlutterPluginBinding) {
         applicationContext = binding.applicationContext
         statusEvents = EventChannel(binding.binaryMessenger, "org.mewx.wenku8/reader_status").also { events ->
@@ -104,6 +112,7 @@ class ReaderControlsPlugin : FlutterPlugin, ActivityAware {
                 }
                 activity?.window?.let { window -> val attrs = window.attributes; attrs.screenBrightness = brightness; window.attributes = attrs }
                 hideStatusBar(call.argument<Boolean>("hideStatusBar") == true)
+                hideNavigationBar(call.argument<Boolean>("hideNavigation") ?: true)
                 result.success(null)
             }
         }
@@ -120,6 +129,7 @@ class ReaderControlsPlugin : FlutterPlugin, ActivityAware {
     fun suspend() {
         volumePaging = false
         hideStatusBar(false)
+        hideNavigationBar(false)
         activity?.window?.let { window -> val attrs = window.attributes; attrs.screenBrightness = -1f; window.attributes = attrs }
     }
     override fun onAttachedToActivity(binding: ActivityPluginBinding) { activity = binding.activity }

@@ -12,6 +12,7 @@ import '../book_documents.dart';
 import '../feature_pages.dart';
 import 'replace_rule.dart';
 import 'replace_rule_store.dart';
+import 'builtin_replace_rules.dart';
 
 class ReplaceRulesPage extends StatefulWidget {
   const ReplaceRulesPage({
@@ -158,6 +159,10 @@ class _ReplaceRulesPageState extends State<ReplaceRulesPage> {
     } catch (error) {
       if (mounted) _feedback(_message(error), error: true);
     }
+  }
+
+  Future<void> _importBuiltin() async {
+    await _importText(encodeReplaceRules(builtinReplaceRules()));
   }
 
   Future<void> _export() async {
@@ -331,15 +336,21 @@ class _ReplaceRulesPageState extends State<ReplaceRulesPage> {
             onPressed: () => Navigator.pop(menu, 'file'),
           ),
           GlassMenuItem(
+            label: '导入内置净化规则',
+            icon: CupertinoIcons.star,
+            order: 3,
+            onPressed: () => Navigator.pop(menu, 'builtin'),
+          ),
+          GlassMenuItem(
             label: '导出全部规则',
             icon: CupertinoIcons.square_arrow_up,
-            order: 3,
+            order: 4,
             onPressed: () => Navigator.pop(menu, 'export'),
           ),
           GlassMenuItem(
             label: '测试规则',
             icon: CupertinoIcons.play_rectangle,
-            order: 4,
+            order: 5,
             onPressed: () => Navigator.pop(menu, 'test'),
           ),
         ],
@@ -353,6 +364,8 @@ class _ReplaceRulesPageState extends State<ReplaceRulesPage> {
         await _importFromClipboard();
       case 'file':
         await _importFromFile();
+      case 'builtin':
+        await _importBuiltin();
       case 'export':
         await _export();
       case 'test':

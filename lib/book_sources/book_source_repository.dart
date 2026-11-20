@@ -3,9 +3,11 @@ import 'dart:convert';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show rootBundle;
 
 import '../book_identity.dart';
 import '../catalog.dart';
+import '../official_books.dart';
 import 'book_source.dart';
 import 'book_source_downloader.dart';
 import 'book_source_images.dart';
@@ -20,6 +22,10 @@ import 'book_source_transport.dart';
 /// This layer only converts data and identity; it never interprets rule syntax.
 class BookSourceRepository extends NovelRepository
     implements BookSourceLibrary {
+  /// 内置榜单来源的规则版本；修改 [assets/book_sources/builtin_sources.json]
+  /// 后需要递增，已写入旧版本的用户才会重新导入。
+  static const builtinSourcesVersion = 4;
+
   BookSourceRepository({
     required this.store,
     required this.identities,
@@ -37,6 +43,7 @@ class BookSourceRepository extends NovelRepository
   final int concurrency;
   final Map<int, Novel> _books = {};
   final Map<int, List<NovelChapter>> _chapters = {};
+  Future<Map<int, String>>? _fanqieFontMap;
   bool _prepared = false;
   bool _engineAvailable = false;
   Object? _prepareError;
@@ -110,6 +117,7 @@ class BookSourceRepository extends NovelRepository
     try {
       await store.load();
       await identities.load();
+      await _seedBuiltinSources();
       _engineAvailable = await transport.available();
       _prepareError = null;
       if (_engineAvailable) {
@@ -128,6 +136,21 @@ class BookSourceRepository extends NovelRepository
       _prepareError = error;
     } finally {
       _prepared = true;
+    }
+  }
+
+  /// 内置榜单缺失或损坏时静默跳过，不影响用户已导入的书源。
+  Future<void> _seedBuiltinSources() async {
+    try {
+      final text = await rootBundle.loadString(
+        'assets/book_sources/builtin_sources.json',
+      );
+      await store.seedBuiltinSources(
+        text,
+        version: builtinSourcesVersion,
+      );
+    } on Object {
+      // 只影响内置榜单是否出现。
     }
   }
 
@@ -778,6 +801,37 @@ class BookSourceRepository extends NovelRepository
     await prepare();
     _requireEngine();
     final ref = _refForNovel(novel);
+    if (OfficialBookService.isOfficialKey(ref.sourceKey)) {
+      await identities.remember(novel.id, ref);
+      final data = await OfficialBookService.detail(ref);
+      final nextRef = await identities.updateMeta(
+        ref,
+        tocUrl: data.tocUrl,
+        title: data.title,
+        author: novel.author.trim().isNotEmpty
+            ? novel.author
+            : sourceAuthorName(data.author),
+        coverUrl: data.coverUrl,
+      );
+      final book = Novel(
+        id: novel.id,
+        title: sourceSearchTitle(data.title),
+        author: novel.author.trim().isNotEmpty
+            ? novel.author
+            : sourceAuthorName(data.author),
+        genre: data.kind,
+        summary: data.intro,
+        colors: novel.colors,
+        isComplete: data.isComplete,
+        coverUrl: data.coverUrl.isEmpty ? null : data.coverUrl,
+        lastUpdate: data.updateTime,
+        chapterCount: data.chapterCount,
+        wordCount: data.wordCount,
+        source: nextRef,
+      );
+      _books[book.id] = book;
+      return book;
+    }
     _sourceFor(ref);
     await identities.remember(novel.id, ref);
     final loaded = await transport
@@ -787,9 +841,12 @@ class BookSourceRepository extends NovelRepository
     final title = sourceSearchTitle(
       _prefer(_string(loaded?['name']), novel.title),
     );
-    final author = sourceAuthorName(
-      _prefer(_string(loaded?['author']), novel.author),
-    );
+    // 书架内已有作者名视为本书身份的一部分，刷新详情不随书源改名。
+    final author = novel.author.trim().isNotEmpty
+        ? novel.author
+        : sourceAuthorName(
+            _prefer(_string(loaded?['author']), novel.author),
+          );
     final coverUrl = _prefer(
       _string(loaded?['coverUrl']),
       novel.coverUrl ?? '',
@@ -817,6 +874,7 @@ class BookSourceRepository extends NovelRepository
       coverUrl: coverUrl.isEmpty ? null : coverUrl,
       lastUpdate: lastUpdate.isEmpty ? null : lastUpdate,
       chapterCount: _int(loaded?['totalChapterNum']) ?? novel.chapterCount,
+      wordCount: _int(loaded?['wordCount']) ?? novel.wordCount,
       source: nextRef,
     );
     _books[book.id] = book;
@@ -853,6 +911,11 @@ class BookSourceRepository extends NovelRepository
       _string(loaded?['coverUrl']),
       candidate.coverUrl ?? '',
     );
+    // 换源后封面跟随新书源，作者名保持本书原值，避免书架作者被来源改写。
+    final effectiveAuthor = current.author.trim().isNotEmpty
+        ? current.author
+        : author;
+    final effectiveCover = coverUrl;
     final lastUpdate = _prefer(
       _string(loaded?['updateTime']),
       _prefer(_string(loaded?['lastUpdate']), candidate.lastUpdate ?? ''),
@@ -860,8 +923,8 @@ class BookSourceRepository extends NovelRepository
     final nextRef = ref.copyWith(
       tocUrl: tocUrl.isEmpty ? ref.tocUrl : tocUrl,
       title: title.isEmpty ? ref.title : title,
-      author: author.isEmpty ? ref.author : author,
-      coverUrl: coverUrl.isEmpty ? ref.coverUrl : coverUrl,
+      author: effectiveAuthor.isEmpty ? ref.author : effectiveAuthor,
+      coverUrl: effectiveCover.isEmpty ? ref.coverUrl : effectiveCover,
     );
     // Load both halves before committing the identity so a broken candidate
     // leaves the original source and directory untouched.
@@ -872,15 +935,16 @@ class BookSourceRepository extends NovelRepository
     final book = Novel(
       id: current.id,
       title: title,
-      author: author,
+      author: effectiveAuthor,
       genre: _prefer(_string(loaded?['kind']), candidate.genre),
       summary: _prefer(_string(loaded?['intro']), candidate.summary),
       colors: current.colors,
       chapters: chapters,
       isComplete: _isComplete(loaded?['status']) || candidate.isComplete,
-      coverUrl: coverUrl.isEmpty ? null : coverUrl,
+      coverUrl: effectiveCover.isEmpty ? null : effectiveCover,
       lastUpdate: lastUpdate.isEmpty ? null : lastUpdate,
       chapterCount: _int(loaded?['totalChapterNum']) ?? chapters.length,
+      wordCount: _int(loaded?['wordCount']) ?? candidate.wordCount,
       source: nextRef,
     );
     await identities.replace(current.id, nextRef);
@@ -894,6 +958,31 @@ class BookSourceRepository extends NovelRepository
     await prepare();
     _requireEngine();
     final ref = _refForId(id);
+    if (OfficialBookService.isOfficialKey(ref.sourceKey)) {
+      final official = await OfficialBookService.chapters(ref);
+      final usedIds = <int>{};
+      final result = <NovelChapter>[];
+      for (var index = 0; index < official.length; index++) {
+        final chapter = official[index];
+        result.add(
+          NovelChapter(
+            chapter.title,
+            '',
+            id: _stableChapterId('${ref.bookUrl}#$index', usedIds),
+            sourceUrl: chapter.url,
+            sourceNextUrl: index + 1 < official.length
+                ? official[index + 1].url
+                : null,
+            isLocked: chapter.isLocked,
+          ),
+        );
+      }
+      final chapters = List<NovelChapter>.unmodifiable(result);
+      _chapters[id] = chapters;
+      final known = _books[id];
+      if (known != null) _books[id] = known.withChapters(chapters);
+      return chapters;
+    }
     final result = await _loadChapters(id, ref);
     _chapters[id] = result;
     final known = _books[id];
@@ -970,23 +1059,103 @@ class BookSourceRepository extends NovelRepository
     if (chapterUrl == null || chapterUrl.isEmpty) {
       throw const FormatException('书源章节缺少正文地址');
     }
+    if (OfficialBookService.isOfficialKey(ref.sourceKey)) {
+      final raw = await OfficialBookService.content(ref, chapterUrl);
+      return _readerBody(raw, chapterUrl, ref.sourceKey);
+    }
     final text = await transport
         .content(
           sourceKey: ref.sourceKey,
           bookUrl: ref.bookUrl,
           chapterUrl: chapterUrl,
           nextChapterUrl: nextChapterUrl,
+          chapterTitle: chapter.title,
         )
-        .timeout(requestTimeout);
-    final body = legadoContentToReader(
-      text ?? '',
+        // 正文可能串行翻多页，按单页超时会把后半章直接掐断。
+        .timeout(requestTimeout * 4);
+    return _readerBody(text ?? '', chapterUrl, ref.sourceKey);
+  }
+
+  Future<String> _readerBody(
+    String raw,
+    String chapterUrl,
+    String sourceKey,
+  ) async {
+    if (raw.contains('[[QIDIAN_VIP]]')) {
+      throw const FormatException('起点本章为 VIP 章节，已提供免费章节试读，整本请换源阅读');
+    }
+    if (raw.contains('[[FANQIE_LOCKED]]')) {
+      throw const FormatException('番茄本章为锁定章节，已提供免费章节试读，整本请换源阅读');
+    }
+    if (raw.contains('[[QIMAO_VIP]]')) {
+      throw const FormatException('七猫本章为 VIP 章节，已提供免费章节试读，整本请换源阅读');
+    }
+    if (raw.contains('[[SHUQI_LOCKED]]')) {
+      throw const FormatException('书旗本章为付费章节，已提供免费章节试读，整本请换源阅读');
+    }
+    var body = legadoContentToReader(
+      raw,
       baseUrl: chapterUrl,
-      sourceKey: ref.sourceKey,
+      sourceKey: sourceKey,
     );
     if (body.trim().isEmpty) {
       throw const FormatException('书源正文为空');
     }
+    if (_isFanqieSource(sourceKey)) {
+      body = await _decodeFanqieText(body);
+    }
     return body;
+  }
+
+  static bool _isFanqieSource(String sourceKey) =>
+      sourceKey.toLowerCase().contains('fanqie');
+
+  Future<Map<int, String>> _loadFanqieFontMap() =>
+      _fanqieFontMap ??= _readFanqieFontMap();
+
+  Future<Map<int, String>> _readFanqieFontMap() async {
+    try {
+      final text = await rootBundle.loadString(
+        'assets/book_sources/fanqie_font_map.json',
+      );
+      final decoded = jsonDecode(text);
+      final raw = decoded is Map ? decoded['map'] : decoded;
+      if (raw is! Map) return const {};
+      final result = <int, String>{};
+      raw.forEach((key, value) {
+        if (key is! String || value is! String || value.isEmpty) return;
+        final codePoint = key.startsWith('0x')
+            ? int.tryParse(key.substring(2), radix: 16)
+            : int.tryParse(key);
+        if (codePoint != null) result[codePoint] = value;
+      });
+      return result;
+    } on Object {
+      return const {};
+    }
+  }
+
+  /// 番茄免费章节用随机字体把常用字映射到私用区码点，这里按随包字体表还原。
+  Future<String> _decodeFanqieText(String text) async {
+    final map = await _loadFanqieFontMap();
+    if (map.isEmpty) return text;
+    final buffer = StringBuffer();
+    for (final rune in text.runes) {
+      buffer.write(map[rune] ?? String.fromCharCode(rune));
+    }
+    var decoded = buffer.toString();
+    const fixes = {
+      '硕土': '硕士',
+      '人土': '人士',
+      '博土': '博士',
+      '将土': '将士',
+      '烈土': '烈士',
+      '战土': '战士',
+    };
+    for (final entry in fixes.entries) {
+      decoded = decoded.replaceAll(entry.key, entry.value);
+    }
+    return decoded;
   }
 
   Future<Novel?> _novelFromSearch(
@@ -1170,6 +1339,15 @@ String legadoContentToReader(
       .replaceAll(RegExp(r' *\n *'), '\n')
       .replaceAll(RegExp(r'\n{3,}'), '\n\n')
       .trim();
+  // @text / JS 规则常返回按单换行分段的纯文本，阅读器按空行分段，
+  // 整章没有空行时补成段落，避免所有内容挤在一段里。
+  if (!text.contains('\n\n') && text.contains('\n')) {
+    text = text
+        .split('\n')
+        .map((line) => line.trim())
+        .where((line) => line.isNotEmpty)
+        .join('\n\n');
+  }
   for (var index = 0; index < images.length; index++) {
     text = text.replaceAll(
       '\u0000IMG$index\u0000',

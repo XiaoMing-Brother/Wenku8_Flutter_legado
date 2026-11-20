@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'archive_design.dart';
 import 'personal_images.dart' show validBackgroundId;
+import 'reader_tip.dart';
 
 const minimumReaderFontSize = 10.0;
 const maximumReaderFontSize = 27.0;
@@ -62,7 +63,8 @@ enum ReaderPageEffect {
   slide('平移'),
   cover('覆盖'),
   paper('纸页翻动'),
-  fade('渐隐');
+  fade('渐隐'),
+  parallax('视差（实验）');
 
   const ReaderPageEffect(this.label);
   final String label;
@@ -73,13 +75,17 @@ enum ReaderPageEffect {
     cover => const Duration(milliseconds: 340),
     paper => const Duration(milliseconds: 440),
     fade => const Duration(milliseconds: 300),
+    parallax => const Duration(milliseconds: 340),
   };
 }
 
 enum ReaderPageSpeed {
+  // 越靠前越慢。已有 relaxed/normal/quick 的名称与倍率保持不变，保证旧记录可解析。
+  slowest('极缓', 2),
   relaxed('舒缓', 1.35),
   normal('标准', 1),
-  quick('利落', .7);
+  quick('利落', .7),
+  fastest('极速', .5);
 
   const ReaderPageSpeed(this.label, this.durationScale);
   final String label;
@@ -98,6 +104,17 @@ enum ReaderTextWeight {
   const ReaderTextWeight(this.label, this.weight);
   final String label;
   final FontWeight weight;
+}
+
+/// 正文内图片的点按行为。默认沿用「点按查看大图」；选「禁用点按」后正文图片
+/// 不再拦截点按，让点按落到翻页 / 控件切换的可点区域上。
+enum ReaderImageTap {
+  open('查看大图'),
+  switchChrome('显示/隐藏控件'),
+  none('禁用点按');
+
+  const ReaderImageTap(this.label);
+  final String label;
 }
 
 /// Reader-only settings: changing paper never changes the rest of the app.
@@ -131,12 +148,18 @@ class ReaderPreferences {
     this.nightTextBrightness = .82,
     this.letterSpacing = .1,
     this.textWeight = ReaderTextWeight.regular,
+    this.imageTap = ReaderImageTap.open,
     this.statusSideInset = 0,
     this.statusFontSize = 12,
     this.statusTopOffset = 0,
     this.backgroundImage,
     this.backgroundOpacity = .18,
     this.backgroundFit = BoxFit.cover,
+    this.headerTips = const [ReaderTip.none, ReaderTip.none, ReaderTip.none],
+    this.footerTips = const [ReaderTip.none, ReaderTip.none, ReaderTip.none],
+    this.headerPadding = EdgeInsets.zero,
+    this.footerPadding = EdgeInsets.zero,
+    this.dockActions = defaultDockActions,
   });
   final ReaderPaper paper;
   final double margin, paragraphGap, autoScrollSpeed;
@@ -162,11 +185,54 @@ class ReaderPreferences {
   final double nightTextBrightness;
   final double letterSpacing;
   final ReaderTextWeight textWeight;
+  final ReaderImageTap imageTap;
   final double statusSideInset;
   final double statusFontSize, statusTopOffset;
   final String? backgroundImage;
   final double backgroundOpacity;
   final BoxFit backgroundFit;
+
+  /// 页眉三槽（左 / 中 / 右）显示的信息位，默认全不显示，沿用现有布局。
+  final List<ReaderTip> headerTips;
+
+  /// 页脚三槽（左 / 中 / 右）显示的信息位，默认全不显示，沿用现有布局。
+  final List<ReaderTip> footerTips;
+
+  /// 页眉 / 页脚信息条各自的上下左右内边距。
+  final EdgeInsets headerPadding;
+  final EdgeInsets footerPadding;
+
+  /// 底部阅读栏显示的动作 id 列表（可自定义、可增删，见阅读器「更多」）。
+  final List<String> dockActions;
+
+  /// 底部栏默认动作：目录 / 书签 / 听书 / 换源 / 设置。
+  static const List<String> defaultDockActions = [
+    'catalogue',
+    'bookmarks',
+    'listening',
+    'source',
+    'settings',
+  ];
+
+  /// 固定的页眉槽位：左侧显示章节名（用户不再配置）。
+  static const List<ReaderTip> fixedHeaderTips = [
+    ReaderTip(value: ReaderTipValue.chapterTitle),
+    ReaderTip.none,
+    ReaderTip.none,
+  ];
+
+  /// 固定的页脚槽位：左页码 / 中书名 / 右时间+电量（用户不再配置）。
+  static const List<ReaderTip> fixedFooterTips = [
+    ReaderTip(value: ReaderTipValue.page),
+    ReaderTip(value: ReaderTipValue.bookName),
+    ReaderTip(value: ReaderTipValue.timeBattery),
+  ];
+
+  /// 是否配置了任意自定义页眉 / 页脚；未配置时渲染层保持原有状态行。
+  bool get hasCustomHeaderFooter =>
+      headerTips.any((t) => t.value != ReaderTipValue.none) ||
+      footerTips.any((t) => t.value != ReaderTipValue.none);
+
   String get layoutKey {
     final geometry =
         leftMargin == 26 &&
@@ -244,12 +310,28 @@ class ReaderPreferences {
     'nightTextBrightness': nightTextBrightness,
     'letterSpacing': letterSpacing,
     'textWeight': textWeight.name,
+    'imageTap': imageTap.name,
     'statusSideInset': statusSideInset,
     'statusFontSize': statusFontSize,
     'statusTopOffset': statusTopOffset,
     if (backgroundImage != null) 'backgroundImage': backgroundImage,
     'backgroundOpacity': backgroundOpacity,
     'backgroundFit': backgroundFit.name,
+    'headerTips': [for (final tip in headerTips) tip.toJson()],
+    'footerTips': [for (final tip in footerTips) tip.toJson()],
+    'headerPadding': [
+      headerPadding.left,
+      headerPadding.top,
+      headerPadding.right,
+      headerPadding.bottom,
+    ],
+    'footerPadding': [
+      footerPadding.left,
+      footerPadding.top,
+      footerPadding.right,
+      footerPadding.bottom,
+    ],
+    'dockActions': dockActions,
   };
   factory ReaderPreferences.fromJson(Map<String, dynamic> json) {
     double number(String key, double min, double max, double fallback) {
@@ -313,6 +395,7 @@ class ReaderPreferences {
       textWeight: ReaderTextWeight.values.byName(
         json['textWeight'] ?? 'regular',
       ),
+      imageTap: ReaderImageTap.values.byName(json['imageTap'] ?? 'open'),
       statusSideInset: number('statusSideInset', 0, 96, 0),
       statusFontSize: number('statusFontSize', 9, 18, 12),
       statusTopOffset: number('statusTopOffset', -8, 24, 0),
@@ -331,11 +414,49 @@ class ReaderPreferences {
       hideSystemStatus: json['hideSystemStatus'] == true,
       showStatusInfo: json['showStatusInfo'] != false,
       chapterEntrance: json['chapterEntrance'] == true,
-      pageEffect: ReaderPageEffect.values.byName(
-        json['pageEffect'] ?? 'staggered',
+      pageEffect: ReaderPageEffect.values.firstWhere(
+        (effect) => effect.name == (json['pageEffect'] ?? 'staggered'),
+        orElse: () => ReaderPageEffect.staggered,
       ),
       pageSpeed: ReaderPageSpeed.values.byName(json['pageSpeed'] ?? 'normal'),
+      headerTips: _readerTipsFromJson(json['headerTips']),
+      footerTips: _readerTipsFromJson(json['footerTips']),
+      headerPadding: _edgeInsetsFromJson(json['headerPadding']),
+      footerPadding: _edgeInsetsFromJson(json['footerPadding']),
+      dockActions: _dockActionsFromJson(json['dockActions']),
     );
+  }
+
+  static EdgeInsets _edgeInsetsFromJson(Object? raw) {
+    if (raw is List && raw.length >= 4) {
+      double v(int i) => (raw[i] is num) ? (raw[i] as num).toDouble() : 0;
+      return EdgeInsets.fromLTRB(v(0), v(1), v(2), v(3));
+    }
+    return EdgeInsets.zero;
+  }
+
+  static List<String> _dockActionsFromJson(Object? raw) {
+    if (raw is List) {
+      final ids = <String>[for (final item in raw) if (item is String) item];
+      if (ids.isNotEmpty) return List<String>.unmodifiable(ids);
+    }
+    return defaultDockActions;
+  }
+
+  static List<ReaderTip> _readerTipsFromJson(Object? raw) {
+    if (raw is! List) {
+      return const [ReaderTip.none, ReaderTip.none, ReaderTip.none];
+    }
+    final tips = <ReaderTip>[
+      for (final item in raw)
+        item is Map<String, dynamic>
+            ? ReaderTip.fromJson(item)
+            : ReaderTip.none,
+    ];
+    while (tips.length < 3) {
+      tips.add(ReaderTip.none);
+    }
+    return List<ReaderTip>.unmodifiable(tips.take(3));
   }
   static ReaderPreferences fromRecord(Object? record) {
     try {
@@ -375,6 +496,7 @@ class ReaderPreferences {
     double? nightTextBrightness,
     double? letterSpacing,
     ReaderTextWeight? textWeight,
+    ReaderImageTap? imageTap,
     double? statusSideInset,
     double? statusFontSize,
     double? statusTopOffset,
@@ -382,6 +504,11 @@ class ReaderPreferences {
     bool clearBackground = false,
     double? backgroundOpacity,
     BoxFit? backgroundFit,
+    List<ReaderTip>? headerTips,
+    List<ReaderTip>? footerTips,
+    List<String>? dockActions,
+    EdgeInsets? headerPadding,
+    EdgeInsets? footerPadding,
   }) => ReaderPreferences(
     paper: paper ?? this.paper,
     margin: margin ?? this.margin,
@@ -412,6 +539,7 @@ class ReaderPreferences {
     nightTextBrightness: nightTextBrightness ?? this.nightTextBrightness,
     letterSpacing: letterSpacing ?? this.letterSpacing,
     textWeight: textWeight ?? this.textWeight,
+    imageTap: imageTap ?? this.imageTap,
     statusSideInset: statusSideInset ?? this.statusSideInset,
     statusFontSize: statusFontSize ?? this.statusFontSize,
     statusTopOffset: statusTopOffset ?? this.statusTopOffset,
@@ -420,6 +548,11 @@ class ReaderPreferences {
         : backgroundImage ?? this.backgroundImage,
     backgroundOpacity: backgroundOpacity ?? this.backgroundOpacity,
     backgroundFit: backgroundFit ?? this.backgroundFit,
+    headerTips: headerTips ?? this.headerTips,
+    footerTips: footerTips ?? this.footerTips,
+    dockActions: dockActions ?? this.dockActions,
+    headerPadding: headerPadding ?? this.headerPadding,
+    footerPadding: footerPadding ?? this.footerPadding,
   );
 
   /// A book can keep its typography while interaction and device settings
@@ -453,11 +586,17 @@ class ReaderPreferences {
     edgeBrightness: edgeBrightness,
     pageEffect: pageEffect,
     pageSpeed: pageSpeed,
+    imageTap: imageTap,
     hideSystemStatus: hideSystemStatus,
     showStatusInfo: showStatusInfo,
     chapterEntrance: chapterEntrance,
     statusSideInset: statusSideInset,
     statusFontSize: statusFontSize,
     statusTopOffset: statusTopOffset,
+    headerTips: headerTips,
+    footerTips: footerTips,
+    headerPadding: headerPadding,
+    footerPadding: footerPadding,
+    dockActions: dockActions,
   );
 }

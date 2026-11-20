@@ -46,6 +46,8 @@ class ReaderSheetMotionRender extends RenderProxyBox {
       : 1;
   double get _sign => config.direction < 0 ? -1 : 1;
   double get _envelope => math.sin(progress * math.pi);
+  bool get _isParallax => config.effect == ReaderPageEffect.parallax;
+  static const _parallaxFraction = .28;
   double get _edge => size.width * (_sign > 0 ? 1 - progress : progress);
   double get _bend => config.effect == ReaderPageEffect.paper
       ? _sign * math.min(24.0, size.width * .045) * _envelope
@@ -53,13 +55,19 @@ class ReaderSheetMotionRender extends RenderProxyBox {
   double get _fold => config.effect == ReaderPageEffect.paper
       ? _sign * math.min(28.0, size.width * .065) * _envelope
       : 0;
-  Offset get displacement =>
-      config.active && config.effect == ReaderPageEffect.cover && config.front
-      ? Offset(
-          _sign * size.width * (config.incoming ? 1 - progress : -progress),
-          0,
-        )
-      : Offset.zero;
+  Offset get displacement {
+    if (!config.active) return Offset.zero;
+    final move = Offset(
+      _sign * size.width * (config.incoming ? 1 - progress : -progress),
+      0,
+    );
+    if (config.effect == ReaderPageEffect.cover && config.front) return move;
+    if (_isParallax) {
+      // 上层（front）全速移动，下层（非 front）按 28% 同向移动，形成视差。
+      return config.front ? move : move * _parallaxFraction;
+    }
+    return Offset.zero;
+  }
   Matrix4 get _transform => Matrix4.translationValues(displacement.dx, 0, 0);
 
   Path _side(bool left, double shift) {
@@ -81,6 +89,8 @@ class ReaderSheetMotionRender extends RenderProxyBox {
               .shift(displacement)
               .intersect(Offset.zero & size),
         ))
+      : _isParallax
+      ? (Path()..addRect(Offset.zero & size))
       : _side(
           config.incoming ? _sign < 0 : _sign > 0,
           config.incoming ? _fold : 0,
@@ -88,7 +98,8 @@ class ReaderSheetMotionRender extends RenderProxyBox {
   void _tick() {
     markNeedsPaint();
     if (config.effect == ReaderPageEffect.cover ||
-        config.effect == ReaderPageEffect.fade) {
+        config.effect == ReaderPageEffect.fade ||
+        _isParallax) {
       markNeedsSemanticsUpdate();
     }
   }
@@ -132,7 +143,8 @@ class ReaderSheetMotionRender extends RenderProxyBox {
       super.paint(context, offset);
       return;
     }
-    if (config.effect == ReaderPageEffect.cover) {
+    if (config.effect == ReaderPageEffect.cover ||
+        config.effect == ReaderPageEffect.parallax) {
       _paintCover(context, offset);
       return;
     }

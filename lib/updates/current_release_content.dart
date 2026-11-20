@@ -14,13 +14,21 @@ const releaseRightsNotice =
 const releaseReadingNotice = '**在线内容以轻小说文库开放状态为准，不提供因版权限制而停止开放的在线书籍阅读。**';
 const releaseMaintenanceNotice =
     '后续版本通过当前仓库的 GitHub Release 发布，可在「关于文库阅读」中检查更新。';
-const _updateSource = '更新检查切换到当前项目仓库，安装本版后可恢复应用内自动更新。';
-const _packageName = 'Android 包名调整为 legado.wenku，应用与旧版相互独立。';
-const _packages = 'Android 优先选择 arm64-v8a 安装包，其他 ABI 视发布情况提供。';
-const _versionFormat = '版本号继续使用“主版本.次版本.修订号.日期.时间”格式。';
-const _changes = [_updateSource, _packageName, _packages, _versionFormat];
+const _discovery = '发现页接入起点、番茄官网榜单，可直接查看书籍详情、目录和免费章节试读。';
+const _reader = '阅读器新增可配置页眉页脚与信息位、可排序的「更多」入口、段评和生效净化总览。';
+const _sourceSwitch = '换源支持候选直接切换与批量换源，切换后迁移阅读进度、书签和分类。';
+const _bookSourceRules =
+    '书源规则增强 JavaScript 数组展开、XPath 属性轴、正文多结果与多页拼接和目录重复标题清理；正文规则升级后会自动忽略旧缓存重新抓取。';
+const _splash = '启动书法页支持开关、每日仅显示一次和自定义文字；补充内置替换规则。';
+const _changes = [
+  _discovery,
+  _reader,
+  _sourceSwitch,
+  _bookSourceRules,
+  _splash,
+];
 const _androidInstall =
-    '**Android**：本版使用新包名，不能覆盖安装旧版。请先在旧版导出数据，再安装本版并手动恢复；后续版本可直接覆盖升级。';
+    '**Android**：本版为 arm64-v8a 正式构建，包名仍为 legado.wenku，可直接覆盖同包名的旧版；从旧包名迁移时请先备份并手动恢复数据。';
 const _iosInstall = '**iOS**：本次发布未提供 IPA。';
 const _harmonyInstall = '**HarmonyOS**：本次发布未提供 HAP。';
 const _backup = '升级、整理存储或同步前，请先备份重要书籍和阅读记录。';
@@ -42,10 +50,11 @@ $releaseReadingNotice
 
 ### 本次更新
 
-- $_updateSource
-- $_packageName
-- $_versionFormat
-- $_packages
+- $_discovery
+- $_reader
+- $_sourceSwitch
+- $_bookSourceRules
+- $_splash
 
 ### 后续维护
 
@@ -68,13 +77,6 @@ const currentReleaseSummary = [
   releaseMaintenanceNotice,
 ];
 const currentReleaseSections = [
-  ReleaseSection('重要说明 · 请务必阅读', [
-    releaseFreeNotice,
-    releaseProjectNotice,
-    releaseRightsNotice,
-    releaseReadingNotice,
-    currentReleaseSourcePolicy,
-  ]),
   ReleaseSection('本次更新与后续维护', [
     ..._changes,
     releaseMaintenanceNotice,

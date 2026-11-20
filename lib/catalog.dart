@@ -18,6 +18,7 @@ class Novel {
     this.coverUrl,
     this.lastUpdate,
     this.chapterCount = 0,
+    this.wordCount,
     this.navigation,
     this.source,
   });
@@ -33,6 +34,7 @@ class Novel {
   final String? coverUrl;
   final String? lastUpdate;
   final int chapterCount;
+  final int? wordCount;
   final BookNavigation? navigation;
   final BookSourceRef? source;
 
@@ -157,6 +159,7 @@ class Novel {
     coverUrl: coverUrl,
     lastUpdate: lastUpdate,
     chapterCount: chapterCount,
+    wordCount: wordCount,
     navigation: navigation,
     source: source,
   );
@@ -173,6 +176,7 @@ class Novel {
     coverUrl: coverUrl,
     lastUpdate: lastUpdate,
     chapterCount: items.length,
+    wordCount: wordCount,
     navigation: navigation,
     source: source,
   );
@@ -188,6 +192,7 @@ class Novel {
     'coverUrl': coverUrl,
     'lastUpdate': lastUpdate,
     'chapterCount': chapters.isNotEmpty ? chapters.length : chapterCount,
+    if (wordCount != null) 'wordCount': wordCount,
     if (navigation != null) 'navigation': navigation!.toJson(),
     if (source != null) 'source': source!.toJson(),
   };
@@ -215,6 +220,9 @@ class Novel {
       chapterCount: value['chapterCount'] is int
           ? (value['chapterCount'] as int).clamp(0, 100000)
           : 0,
+      wordCount: value['wordCount'] is int
+          ? (value['wordCount'] as int).clamp(0, 100000000)
+          : null,
       navigation: value['navigation'] == null
           ? null
           : BookNavigation.fromJson(value['navigation']),
@@ -246,6 +254,7 @@ class NovelChapter {
     this.volumeTitle = '',
     this.sourceUrl,
     this.sourceNextUrl,
+    this.isLocked = false,
   });
 
   final String title;
@@ -253,6 +262,7 @@ class NovelChapter {
   final int id;
   final int volumeId;
   final String volumeTitle;
+  final bool isLocked;
   final String? sourceUrl;
   final String? sourceNextUrl;
 }

@@ -98,6 +98,13 @@ fabric.properties
 
 # Local QA captures, personal device logs and internal development notes
 .DS_Store
+AGENTS.md
+/_ref_legado_md3/
+/_ref_mr/
+/runs/
+/android/.kotlin/
+/docs/READER_LEGADO_MD3_PLAN.md
+/docs/review_native_draft.md
 /.local-notes/
 /flutter_screenshots/
 /sites/

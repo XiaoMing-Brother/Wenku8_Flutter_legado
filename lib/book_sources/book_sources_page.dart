@@ -18,12 +18,30 @@ import 'book_source.dart';
 import 'book_source_downloader.dart';
 import 'book_source_library.dart';
 import 'book_source_store.dart';
+import 'batch_change_source_page.dart';
+import '../catalog.dart';
+import '../local_books.dart' show isLocalBook;
 
 /// Source registry using the app's existing archive panels and glass controls.
 class BookSourcesPage extends StatefulWidget {
-  const BookSourcesPage({super.key, required this.library});
+  const BookSourcesPage({
+    super.key,
+    required this.library,
+    this.books,
+    this.repository,
+    this.onSourceSwitched,
+  });
 
   final BookSourceLibrary library;
+
+  /// 可选：书架已知书籍，用于「批量换源」入口；为 null 时不显示该入口。
+  final List<Novel>? books;
+
+  /// 可选：书籍仓库，批量换源时执行切换。
+  final NovelRepository? repository;
+
+  /// 可选：批量换源完成后同步书架进度、书签与元数据。
+  final Future<void> Function(Novel previous, Novel switched)? onSourceSwitched;
 
   @override
   State<BookSourcesPage> createState() => _BookSourcesPageState();
@@ -422,6 +440,13 @@ class _BookSourcesPageState extends State<BookSourcesPage> {
             order: 4,
             onPressed: () => Navigator.pop(menu, 'refresh'),
           ),
+          if (widget.books?.isNotEmpty == true && widget.repository != null)
+            GlassMenuItem(
+              label: '批量换源书籍',
+              icon: CupertinoIcons.arrow_swap,
+              order: 5,
+              onPressed: () => Navigator.pop(menu, 'batch'),
+            ),
         ],
       ),
     );
@@ -437,7 +462,31 @@ class _BookSourcesPageState extends State<BookSourcesPage> {
         await _export();
       case 'refresh':
         await _prepare();
+      case 'batch':
+        await _openBatch();
     }
+  }
+
+  Future<void> _openBatch() async {
+    final repository = widget.repository;
+    if (repository == null) return;
+    final books = (widget.books ?? const <Novel>[])
+        .where((book) => book.source != null && !isLocalBook(book.id))
+        .toList();
+    if (books.isEmpty) {
+      _feedback('没有可换源的联网书籍');
+      return;
+    }
+    await pushNovelPage<void>(
+      context,
+      BatchChangeSourcePage(
+        books: books,
+        library: _library,
+        repository: repository,
+        onSwitched: widget.onSourceSwitched,
+      ),
+      reduceMotion: MediaQuery.disableAnimationsOf(context),
+    );
   }
 
   Future<void> _openFilterMenu(BuildContext anchor) async {
@@ -1024,6 +1073,7 @@ class _BookSourcesPageState extends State<BookSourcesPage> {
     final details = <String>[
       if (source.groups.isNotEmpty) source.groups.join(' / '),
       source.typeLabel,
+      if (source.hasReviewRule) '支持段评',
       if (host.isNotEmpty) host,
       if (source.lastUpdateTime > 0) '更新 ${_dateLabel(source.lastUpdateTime)}',
       if (!source.supported) '暂不支持',

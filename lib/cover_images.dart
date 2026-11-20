@@ -5,6 +5,7 @@ import 'catalog.dart';
 import 'book_sources/book_source_images.dart';
 import 'legacy_cover.dart';
 import 'local_book_media.dart';
+import 'official_books.dart';
 import 'reader_illustrations.dart';
 
 Future<Uint8List> novelCoverBytes(Novel book) {
@@ -15,6 +16,9 @@ Future<Uint8List> novelCoverBytes(Novel book) {
   if (url.startsWith('wenku-local:')) return LocalBookMedia.loadCover(url);
   final source = book.source;
   if (source != null) {
+    if (OfficialBookService.isOfficialKey(source.sourceKey)) {
+      return OfficialBookService.coverBytes(url);
+    }
     return BookSourceImages.coverBytes(source.sourceKey, url);
   }
   return LegacyCover.bytes(book.id, url: url);
@@ -26,6 +30,9 @@ Uint8List? peekNovelCover(Novel book) {
   if (url.startsWith('wenku-local:')) return LocalBookMedia.peek(url);
   final source = book.source;
   if (source != null) {
+    if (OfficialBookService.isOfficialKey(source.sourceKey)) {
+      return OfficialBookService.peekCover(url);
+    }
     return BookSourceImages.peekCover(source.sourceKey, url);
   }
   return LegacyCover.peek(book.id);

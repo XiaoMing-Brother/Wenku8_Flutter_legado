@@ -164,13 +164,42 @@ class BookSourceTransport {
     required String bookUrl,
     required String chapterUrl,
     String? nextChapterUrl,
+    String? chapterTitle,
   }) => _invoke<String>('content', {
     'sourceKey': sourceKey,
     'bookUrl': bookUrl,
     'chapterUrl': chapterUrl,
     if (nextChapterUrl != null && nextChapterUrl.isNotEmpty)
       'nextChapterUrl': nextChapterUrl,
+    if (chapterTitle != null && chapterTitle.isNotEmpty)
+      'chapterTitle': chapterTitle,
   });
+
+  /// 抓取本章段评。native 引擎实现 `review` 方法后返回解析好的段评列表；
+  /// 未实现（旧构建 / 非 Android）时优雅返回空，不影响阅读。
+  Future<List<Map<String, Object?>>> review({
+    required String sourceKey,
+    required String bookUrl,
+    required String chapterUrl,
+    Map<String, Object?> rule = const {},
+  }) async {
+    try {
+      final value = await channel.invokeMethod<List<Object?>>('review', {
+        'sourceKey': sourceKey,
+        'bookUrl': bookUrl,
+        'chapterUrl': chapterUrl,
+        'rule': rule,
+      });
+      return [
+        for (final item in value ?? const <Object?>[])
+          if (item is Map) _stringMap(item),
+      ];
+    } on MissingPluginException {
+      return const [];
+    } on PlatformException {
+      return const [];
+    }
+  }
 
   Future<Uint8List> image({
     required String sourceKey,

@@ -131,6 +131,8 @@ class BookSourcePlugin :
                         chapterUrl = stringArg(arguments, "chapterUrl"),
                         nextChapterUrl = stringArg(arguments, "nextChapterUrl")
                             .ifBlank { null },
+                        chapterTitle = stringArg(arguments, "chapterTitle")
+                            .ifBlank { null },
                     )
                 }
                 "fetchImage" -> runAsync(worker, result) {
@@ -161,6 +163,16 @@ class BookSourcePlugin :
                 "webLogin" -> startWebLogin(engine, arguments, result)
                 "checkLogin" -> runAsync(worker, result) {
                     engine.checkLogin(stringArg(arguments, "sourceKey"))
+                }
+                "review" -> runAsync(worker, result) {
+                    engine.review(
+                        sourceKey = stringArg(arguments, "sourceKey"),
+                        bookUrl = stringArg(arguments, "bookUrl"),
+                        chapterUrl = stringArg(arguments, "chapterUrl"),
+                        ruleValue = (arguments["rule"] as? Map<*, *>)
+                            ?.entries
+                            ?.associate { it.key.toString() to it.value },
+                    )
                 }
                 else -> result.notImplemented()
             }

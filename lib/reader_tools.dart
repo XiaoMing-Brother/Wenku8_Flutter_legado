@@ -14,7 +14,9 @@ import 'reader_annotation_editor.dart';
 import 'reader_bookmark_excerpt.dart';
 import 'local_platform.dart';
 import 'reader_preferences.dart';
+import 'reader_tip.dart';
 import 'font_settings_page.dart';
+import 'reader_header_footer_page.dart';
 import 'glass_choices.dart';
 import 'setting_menu.dart';
 import 'book_documents.dart';
@@ -22,6 +24,7 @@ import 'local_books.dart' show isLocalBook;
 import 'reader_languages.dart';
 import 'bookmark_categories.dart';
 import 'replace_rules/replace_rule_store.dart';
+import 'replace_rules/effective_replaces_sheet.dart';
 import 'feature_pages.dart' show confirmNovelAction;
 
 sealed class ReaderToolAction {
@@ -465,10 +468,10 @@ class _ReaderToolsState extends State<ReaderTools>
   Future<List<String>>? _backgrounds;
   final _backgroundFiles = <String, Future<File?>>{};
   String? _category;
+  bool _turnAdvancedExpanded = false;
   bool _adding = false;
   String? _storageError;
   Key? _activeAdjustment;
-  String _marginEdge = '左右';
 
   void _toggleBackgrounds() {
     setState(() {
@@ -712,24 +715,6 @@ class _ReaderToolsState extends State<ReaderTools>
       ),
     ),
   ];
-  double _marginValue(ReaderPreferences p) => switch (_marginEdge) {
-    '左' => p.leftMargin,
-    '右' => p.rightMargin,
-    '上' => p.marginTop,
-    '下' => p.marginBottom,
-    _ => p.bindingMargin,
-  };
-  ReaderPreferences _withMargin(double v) {
-    final p = _readerPreferences;
-    return switch (_marginEdge) {
-      '左' => p.copyWith(marginLeft: v),
-      '右' => p.copyWith(marginRight: v),
-      '上' => p.copyWith(marginTop: v),
-      '下' => p.copyWith(marginBottom: v),
-      _ => p.copyWith(margin: v),
-    };
-  }
-
   void _preferences(ReaderPreferences value, {bool persist = true}) {
     if (widget.onPreferencesChanged != null) {
       widget.onPreferencesChanged!(value, persist);
@@ -746,6 +731,19 @@ class _ReaderToolsState extends State<ReaderTools>
             }),
       );
     }
+  }
+
+  Future<void> _openPaddingDialog() async {
+    await showJellySheet<void>(
+      context: context,
+      reduceMotion: widget.state.reduceMotion,
+      heightFactor: .62,
+      maxWidth: 560,
+      builder: (_) => _PaddingDialog(
+        initial: _readerPreferences,
+        onChanged: (value, persist) => _preferences(value, persist: persist),
+      ),
+    );
   }
 
   Future<void> _changeStyleScope(bool book) async {
@@ -1040,6 +1038,7 @@ class _ReaderToolsState extends State<ReaderTools>
     ('paragraph', '段落', CupertinoIcons.text_alignleft),
     ('page', '屏幕', CupertinoIcons.rectangle),
     ('theme', '主题', CupertinoIcons.paintbrush),
+    ('replace', '净化', CupertinoIcons.slider_horizontal_3),
     ('turn', '翻页', CupertinoIcons.arrow_left_right),
     ('listening', '听书', CupertinoIcons.headphones),
     ('bookmarks', '书签', CupertinoIcons.bookmark),
@@ -1095,6 +1094,7 @@ class _ReaderToolsState extends State<ReaderTools>
       'paragraph': '${_lineHeight.toStringAsFixed(2)} 倍行距',
       'page': '页边距 · 状态栏 · 阅读信息',
       'theme': p.paper.label,
+      'replace': '替换净化 · 阅读页显示',
       'turn': p.mode.label,
       'screen': p.hideSystemStatus ? '隐藏状态栏' : '显示状态栏',
       'listening': widget.listeningBuilder == null ? '当前不可用' : '语音 · 播放设置',
@@ -1243,11 +1243,41 @@ class _ReaderToolsState extends State<ReaderTools>
     );
   }
 
+  Widget _turnAdvancedToggle(BuildContext context) => GlassTextButton(
+    key: const ValueKey('reader-turn-advanced-toggle'),
+    onPressed: () =>
+        setState(() => _turnAdvancedExpanded = !_turnAdvancedExpanded),
+    child: Row(
+      children: [
+        const ArchiveIcon(CupertinoIcons.ellipsis_circle, size: 20),
+        const SizedBox(width: 12),
+        Expanded(
+          child: AppText(
+            _turnAdvancedExpanded
+                ? '收起更多设置'
+                : '更多设置 · 章节入场 / 点按翻页 / 音量键 / 自动翻页',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+          ),
+        ),
+        ArchiveIcon(
+          _turnAdvancedExpanded
+              ? CupertinoIcons.chevron_up
+              : CupertinoIcons.chevron_down,
+          size: 14,
+        ),
+      ],
+    ),
+  );
+
   Widget _layout(
     BuildContext context, {
     required bool compact,
     required String category,
   }) => _settingsItems([
+    if (category == 'page')
+      const ArchiveSection(title: '布局', code: 'SCREEN / LAYOUT'),
     if (category == 'page')
       _adjustment(
         GlassChoiceGroup<String>(
@@ -1262,6 +1292,81 @@ class _ReaderToolsState extends State<ReaderTools>
           labelSize: 14,
           optionSize: 12,
           onChanged: (value) => _changeStyleScope(value == 'book'),
+        ),
+      ),
+    if (category == 'page')
+      const ArchiveSection(title: '页眉页脚', code: 'SCREEN / HEADER'),
+    if (category == 'page')
+      _adjustment(
+        GlassTextButton(
+          key: const ValueKey('reader-header-footer-entry'),
+          onPressed: () => showJellySheet<void>(
+            context: context,
+            reduceMotion: widget.state.reduceMotion,
+            heightFactor: .9,
+            maxWidth: 720,
+            builder: (_) => ReaderHeaderFooterConfig(
+              preferences: _readerPreferences,
+              onChanged: _preferences,
+            ),
+          ),
+          child: Row(
+            children: [
+              const ArchiveIcon(CupertinoIcons.square_split_2x1, size: 20),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const AppText(
+                      '页眉页脚与边距',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    AppText(
+                      '页眉 · 正文 · 页脚 三区边距（可手动输入）',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 12,
+                        height: 1.4,
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              AppText(
+                '配置',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+              ),
+              const SizedBox(width: 2),
+              const ArchiveIcon(CupertinoIcons.chevron_forward, size: 14),
+            ],
+          ),
+        ),
+      ),
+    if (category == 'page')
+      const ArchiveSection(title: '图片', code: 'SCREEN / IMAGE'),
+    if (category == 'page')
+      _adjustment(
+        ReaderChoicePicker<ReaderImageTap>(
+          name: 'reader-image-tap',
+          label: '点按图片',
+          value: _readerPreferences.imageTap,
+          options: {
+            for (final tap in ReaderImageTap.values) tap: tap.label,
+          },
+          onChanged: (tap) =>
+              _preferences(_readerPreferences.copyWith(imageTap: tap)),
         ),
       ),
     if (category == 'turn' || category == 'theme')
@@ -1356,7 +1461,7 @@ class _ReaderToolsState extends State<ReaderTools>
           ],
         ),
       ),
-    if (category == 'theme')
+    if (category == 'replace')
       _adjustment(
         Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1386,6 +1491,14 @@ class _ReaderToolsState extends State<ReaderTools>
                 ),
               ),
           ],
+        ),
+      ),
+    if (category == 'replace' && _replaceRulesEnabled)
+      _adjustment(
+        EffectiveReplacesInline(
+          bookTitle: widget.novel.title,
+          origin: widget.novel.source?.sourceKey ?? '',
+          active: _replaceRulesEnabled,
         ),
       ),
     if (category == 'font' && widget.languages.length > 1)
@@ -1459,6 +1572,7 @@ class _ReaderToolsState extends State<ReaderTools>
         ReaderValueSlider(
           sliderKey: const ValueKey('reader-font-slider'),
           label: '字体大小',
+          stepper: true,
           value: _fontSize,
           min: minimumReaderFontSize,
           max: maximumReaderFontSize,
@@ -1476,6 +1590,7 @@ class _ReaderToolsState extends State<ReaderTools>
         ReaderValueSlider(
           sliderKey: const ValueKey('reader-line-height-slider'),
           label: _readerPreferences.mode == ReaderMode.vertical ? '列距' : '行距',
+          stepper: true,
           value: _lineHeight,
           min: 1.3,
           max: 2.2,
@@ -1487,45 +1602,6 @@ class _ReaderToolsState extends State<ReaderTools>
         ),
         const ValueKey('reader-line-height-slider'),
       ),
-    if (category == 'page')
-      _adjustment(
-        Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            const SizedBox(height: 6),
-            AppControls.segments<String>(
-              context,
-              groupValue: _marginEdge,
-              children: {
-                for (final edge in ['左右', '左', '右', '上', '下'])
-                  edge: AppText(
-                    edge,
-                    key: ValueKey('reader-margin-edge-$edge'),
-                    style: const TextStyle(fontSize: 12),
-                  ),
-              },
-              onValueChanged: (edge) {
-                if (edge != null) setState(() => _marginEdge = edge);
-              },
-            ),
-            ReaderValueSlider(
-              key: ValueKey('reader-margin-control-$_marginEdge'),
-              sliderKey: const ValueKey('reader-margin-slider'),
-              label: '页边距 · $_marginEdge',
-              value: _marginValue(_readerPreferences),
-              min: 0,
-              max: 80,
-              divisions: 40,
-              format: (v) => '${v.round()} px',
-              onPreview: (v) => _preferences(_withMargin(v), persist: false),
-              onInteractionChanged: (v) =>
-                  _preview(const ValueKey('reader-margin-slider'), v),
-              onCommitted: (v) => _preferences(_withMargin(v)),
-            ),
-          ],
-        ),
-        const ValueKey('reader-margin-slider'),
-      ),
     if (category == 'paragraph')
       _adjustment(
         Column(
@@ -1534,6 +1610,7 @@ class _ReaderToolsState extends State<ReaderTools>
             ReaderValueSlider(
               sliderKey: const ValueKey('reader-paragraph-gap-slider'),
               label: '段落间距',
+              stepper: true,
               value: _readerPreferences.paragraphGap,
               min: 0,
               max: 32,
@@ -1604,6 +1681,7 @@ class _ReaderToolsState extends State<ReaderTools>
             ReaderValueSlider(
               sliderKey: const ValueKey('reader-letter-spacing'),
               label: '字间距',
+              stepper: true,
               value: _readerPreferences.letterSpacing,
               min: -.5,
               max: 3,
@@ -1643,9 +1721,16 @@ class _ReaderToolsState extends State<ReaderTools>
           ],
         ),
       ),
-    if (category == 'turn') ..._behaviorItems(context, 'turn'),
+    if (category == 'turn') _adjustment(_turnAdvancedToggle(context)),
+    if (category == 'turn' && _turnAdvancedExpanded)
+      ..._behaviorItems(context, 'turn'),
+    if (category == 'page')
+      const ArchiveSection(title: '阅读信息', code: 'SCREEN / STATUS'),
     if (category == 'page') ..._behaviorItems(context, 'screen'),
-    if (category != 'turn')
+    if (category == 'font' ||
+        category == 'paragraph' ||
+        category == 'page' ||
+        category == 'theme')
       _adjustment(
         Align(
           alignment: Alignment.centerRight,
@@ -2314,6 +2399,7 @@ class ReaderValueSlider extends StatefulWidget {
     this.onInteractionChanged,
     this.hapticSteps,
     this.inline = false,
+    this.stepper = false,
     this.leading,
     this.reconcileValue = false,
     this.showLabels = true,
@@ -2330,6 +2416,7 @@ class ReaderValueSlider extends StatefulWidget {
   final ValueChanged<bool>? onInteractionChanged;
   final int? hapticSteps;
   final bool inline;
+  final bool stepper;
   final Widget? leading;
   final bool reconcileValue;
   final bool showLabels;
@@ -2466,6 +2553,7 @@ class _ReaderValueSliderState extends State<ReaderValueSlider> {
   @override
   Widget build(BuildContext context) {
     if (!widget.showLabels) return _slider(context);
+    if (widget.stepper) return _stepperLayout(context);
     final value = AppText(
       widget.format(_draft),
       maxLines: 1,
@@ -2552,6 +2640,126 @@ class _ReaderValueSliderState extends State<ReaderValueSlider> {
           _slider(context),
         ],
       ),
+    );
+  }
+
+  /// 与页眉页脚内边距一致的滑杆行：标签、减号、滑杆、加号、数值。
+  Widget _stepperLayout(BuildContext context) {
+    final enabled = widget.onCommitted != null;
+    final muted = Theme.of(context).colorScheme.onSurfaceVariant;
+    Widget stepButton(IconData icon, double direction) => SizedBox(
+      width: 30,
+      height: 30,
+      child: IconButton(
+        padding: EdgeInsets.zero,
+        visualDensity: VisualDensity.compact,
+        iconSize: 18,
+        color: muted,
+        onPressed: enabled ? () => _adjust(direction) : null,
+        icon: Icon(icon),
+      ),
+    );
+    return Row(
+      children: [
+        SizedBox(
+          width: 60,
+          child: AppText(
+            widget.label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontSize: 13),
+          ),
+        ),
+        stepButton(CupertinoIcons.minus, -1),
+        Expanded(child: _slider(context)),
+        stepButton(CupertinoIcons.plus, 1),
+        SizedBox(
+          width: 52,
+          child: AppText(
+            widget.format(_draft),
+            maxLines: 1,
+            textAlign: TextAlign.end,
+            style: TextStyle(fontSize: 12, color: muted),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// 「页边距」调整弹窗：上 / 下 / 左 / 右分别可调（参考 legado_md3 的 padding 配置）。
+class _PaddingDialog extends StatefulWidget {
+  const _PaddingDialog({required this.initial, required this.onChanged});
+
+  final ReaderPreferences initial;
+  final void Function(ReaderPreferences value, bool persist) onChanged;
+
+  @override
+  State<_PaddingDialog> createState() => _PaddingDialogState();
+}
+
+class _PaddingDialogState extends State<_PaddingDialog> {
+  late ReaderPreferences _prefs = widget.initial;
+
+  void _set(ReaderPreferences next, {required bool persist}) {
+    setState(() => _prefs = next);
+    widget.onChanged(next, persist);
+  }
+
+  Widget _slider({
+    required Key sliderKey,
+    required String label,
+    required double value,
+    required ValueChanged<double> preview,
+    required ValueChanged<double> commit,
+  }) => ReaderValueSlider(
+    sliderKey: sliderKey,
+    label: label,
+    value: value,
+    min: 0,
+    max: 80,
+    divisions: 40,
+    format: (v) => '${v.round()} px',
+    onPreview: preview,
+    onCommitted: commit,
+  );
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
+      children: [
+        const ArchiveSection(title: '页边距', code: 'SCREEN / PADDING'),
+        const SizedBox(height: 8),
+        _slider(
+          sliderKey: const ValueKey('reader-padding-top'),
+          label: '上边距',
+          value: _prefs.marginTop,
+          preview: (v) => _set(_prefs.copyWith(marginTop: v), persist: false),
+          commit: (v) => _set(_prefs.copyWith(marginTop: v), persist: true),
+        ),
+        _slider(
+          sliderKey: const ValueKey('reader-padding-bottom'),
+          label: '下边距',
+          value: _prefs.marginBottom,
+          preview: (v) => _set(_prefs.copyWith(marginBottom: v), persist: false),
+          commit: (v) => _set(_prefs.copyWith(marginBottom: v), persist: true),
+        ),
+        _slider(
+          sliderKey: const ValueKey('reader-padding-left'),
+          label: '左边距',
+          value: _prefs.leftMargin,
+          preview: (v) => _set(_prefs.copyWith(marginLeft: v), persist: false),
+          commit: (v) => _set(_prefs.copyWith(marginLeft: v), persist: true),
+        ),
+        _slider(
+          sliderKey: const ValueKey('reader-padding-right'),
+          label: '右边距',
+          value: _prefs.rightMargin,
+          preview: (v) => _set(_prefs.copyWith(marginRight: v), persist: false),
+          commit: (v) => _set(_prefs.copyWith(marginRight: v), persist: true),
+        ),
+      ],
     );
   }
 }

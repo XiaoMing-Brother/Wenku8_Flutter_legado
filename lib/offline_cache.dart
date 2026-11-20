@@ -9,7 +9,9 @@ import 'package:path_provider/path_provider.dart';
 import 'catalog.dart';
 import 'ui_notifiers.dart';
 
-List<int> _encodeBody(String text) => utf8.encode(text);
+const _bodyFormatMarker = '\u0000WK-BODY-3\n';
+final _bodyFormatPrefix = RegExp('^\u0000WK-BODY-(\\d+)\n');
+List<int> _encodeBody(String text) => utf8.encode('$_bodyFormatMarker$text');
 List<int> _encodeMetadata(Map<String, Object?> data) =>
     utf8.encode(jsonEncode(data));
 Object? _decodeMetadata(String text) => jsonDecode(text);
@@ -70,6 +72,9 @@ class OfflineBook {
 class OfflineCacheStore extends ChangeNotifier {
   OfflineCacheStore(this.directory);
   final Directory directory;
+
+  /// 正文提取规则变更时递增：旧正文仍可离线阅读，联网阅读会重新抓取。
+  static const bodyFormat = 3;
   static const maxBodyBytes = 8 * 1024 * 1024;
   static const maxIllustrationBytes = 8 * 1024 * 1024;
   final Map<int, OfflineBook> _books = {};
@@ -298,14 +303,23 @@ class OfflineCacheStore extends ChangeNotifier {
     }
   }
 
-  Future<String?> readChapter(int id, int cid) async {
+  Future<String?> readChapter(int id, int cid, {int minFormat = 1}) async {
     if (id <= 0 || cid <= 0) return null;
     final file = _body(id, cid);
     try {
       if (!await file.exists()) return null;
       final size = await file.length();
       if (size == 0 || size > maxBodyBytes) return null;
-      final text = await file.readAsString();
+      var text = await file.readAsString();
+      // 旧版本用 WK-BODY-2 等标记，升级后仍要能识别并剥离标记，
+      // 只是低于当前格式的正文在联网时会要求重新抓取。
+      var format = 1;
+      final marker = _bodyFormatPrefix.firstMatch(text);
+      if (marker != null) {
+        format = int.tryParse(marker.group(1)!) ?? 1;
+        text = text.substring(marker.end);
+      }
+      if (format < minFormat) return null;
       return text.trim().isEmpty ? null : text;
     } on FileSystemException {
       return null;

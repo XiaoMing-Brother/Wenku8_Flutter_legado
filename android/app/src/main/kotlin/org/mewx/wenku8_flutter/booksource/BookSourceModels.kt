@@ -27,6 +27,9 @@ internal data class BookInfoRule(
     val updateTime: String?,
     val coverUrl: String?,
     val tocUrl: String?,
+    val status: String?,
+    val totalChapterNum: String?,
+    val wordCount: String?,
 )
 
 internal data class TocRule(
@@ -42,6 +45,8 @@ internal data class ContentRule(
     val content: String?,
     val subContent: String?,
     val nextContentUrl: String?,
+    val title: String?,
+    val replaceRegex: String?,
 )
 
 internal class BookSource(private val raw: JSONObject) {
@@ -134,6 +139,9 @@ internal class BookSource(private val raw: JSONObject) {
             updateTime = raw.stringOrNull("updateTime"),
             coverUrl = raw.stringOrNull("coverUrl"),
             tocUrl = raw.stringOrNull("tocUrl"),
+            status = raw.stringOrNull("status"),
+            totalChapterNum = raw.stringOrNull("totalChapterNum"),
+            wordCount = raw.stringOrNull("wordCount"),
         )
 
         private fun parseTocRule(raw: JSONObject?): TocRule = TocRule(
@@ -149,6 +157,9 @@ internal class BookSource(private val raw: JSONObject) {
             content = raw.stringOrNull("content"),
             subContent = raw.stringOrNull("subContent"),
             nextContentUrl = raw.stringOrNull("nextContentUrl"),
+            // 正文内的章节标题规则，优先用它剥离正文里重复的标题块。
+            title = raw.stringOrNull("title"),
+            replaceRegex = raw.stringOrNull("replaceRegex"),
         )
     }
 }
