@@ -4,6 +4,8 @@ import 'dart:io';
 import 'dart:math' as math;
 
 import '../reader_paragraph_review.dart';
+import '../services/fanqie_core_service.dart';
+import '../services/fanqie_core_source.dart';
 import 'inline_review.dart';
 
 /// 番茄官方段评服务。
@@ -53,6 +55,19 @@ class FanqieReviewService {
     final fqBookId = _bookIdFromUrl(bookUrl);
     final fqChapterId = _chapterIdFromUrl(chapterUrl);
     if (fqBookId.isEmpty || fqChapterId.isEmpty) return null;
+
+    // 核心优先（内嵌 Rust 官方 App 协议）；不可用/无数据时降级到下面的 web 逻辑。
+    final coreData = await _tryCoreReview(
+      bookId: bookId,
+      chapterId: chapterId,
+      chapterUrl: chapterUrl,
+      fqBookId: fqBookId,
+      fqChapterId: fqChapterId,
+      paragraphs: paragraphs,
+      focusPara: focusPara,
+      loadComments: loadComments,
+    );
+    if (coreData != null) return coreData;
 
     final existing = ChapterReviewCache.shared.lookup(bookId, chapterId);
     final client = _clientFactory()..connectionTimeout = _timeout;
@@ -122,6 +137,126 @@ class FanqieReviewService {
     } finally {
       client.close(force: true);
     }
+  }
+
+  /// 核心段评：成功则返回完整 [ChapterReviewData]；核心关闭/无数据/异常返回 null。
+  Future<ChapterReviewData?> _tryCoreReview({
+    required int bookId,
+    required int chapterId,
+    required String chapterUrl,
+    required String fqBookId,
+    required String fqChapterId,
+    required List<String> paragraphs,
+    int? focusPara,
+    bool loadComments = true,
+  }) async {
+    if (!FanqieCoreService.enabled) return null;
+    try {
+      final src = FanqieCoreSource.shared();
+
+      // 1) 每段 idea 计数（附带 item_version）。
+      final ideasPayload = await src.chapterIdeas(fqChapterId);
+      final ideas = _map(ideasPayload['data']);
+      if (ideas == null) return null;
+      final buckets = ideas['data'];
+      final version = _string(ideas['item_version']);
+      var counts = <int, int>{};
+      if (buckets is Map) {
+        for (final entry in buckets.entries) {
+          final idx = int.tryParse('${entry.key}');
+          final bucket = _map(entry.value);
+          final count = _int(bucket?['count']);
+          if (idx != null && idx >= 0 && count != null && count >= 0) {
+            counts[idx] = count;
+          }
+        }
+      }
+      counts = _countsInRange(counts, paragraphs.length);
+
+      // 2) 命中段落的首屏评论正文。
+      final items = <ParagraphReview>[];
+      if (loadComments) {
+        final targets = _commentTargets(
+          counts,
+          focusPara: focusPara,
+          paragraphCount: paragraphs.length,
+        );
+        for (final para in targets) {
+          try {
+            final page = await src.paragraphComments(
+              fqBookId,
+              fqChapterId,
+              itemVersion: version,
+              paraIndex: para,
+              count: 20,
+            );
+            items.addAll(_coreComments(page, para));
+          } on Object {
+            // 单段失败不影响整章，继续其它段。
+          }
+        }
+      }
+
+      // 核心没给出任何计数与正文：交给 web 兜底（可能 web 段评通道更全）。
+      if (counts.isEmpty && items.isEmpty) return null;
+
+      final data = ChapterReviewData(
+        chapterId: chapterId,
+        reviewUrl: chapterUrl,
+        items: List.unmodifiable(items),
+        paragraphCounts: Map.unmodifiable(counts),
+        fetchedAt: DateTime.now().millisecondsSinceEpoch,
+      );
+      ChapterReviewCache.shared.put(bookId, data);
+      return data;
+    } on Object {
+      return null;
+    }
+  }
+
+  /// 把核心 `comment/list` 返回体（`data.data_list[].comment`）映射为段评条目。
+  List<ParagraphReview> _coreComments(Map<String, dynamic> page, int paraIndex) {
+    final data = _map(page['data']);
+    if (data == null) return const [];
+    final list = data['data_list'];
+    if (list is! List) return const [];
+    final out = <ParagraphReview>[];
+    for (final entry in list) {
+      if (entry is! Map) continue;
+      final comment = _map(entry['comment']);
+      if (comment == null) continue;
+      // 有些返回体带 comment_pos，用于跨段锚定；只保留落在本段的。
+      final pos = _map(comment['comment_pos']);
+      if (pos != null) {
+        final start = _int(pos['start_para_index']);
+        final end = _int(pos['end_para_index']);
+        if ((start != null && start != paraIndex) ||
+            (end != null && end != paraIndex)) {
+          continue;
+        }
+      }
+      final common = _map(comment['common']);
+      if (common == null) continue;
+      final contentMap = _map(common['content']);
+      final text = _string(contentMap?['text']);
+      if (text.isEmpty) continue;
+      final user = _map(common['user_info']);
+      final base = _map(user?['base_info']);
+      var avatar = _string(base?['user_avatar']);
+      if (avatar.startsWith('http://')) {
+        avatar = 'https://${avatar.substring(7)}';
+      }
+      out.add(
+        ParagraphReview(
+          avatarUrl: avatar,
+          authorName: _string(base?['user_name']),
+          content: text,
+          postTime: _formatTime(_int(common['create_timestamp'])),
+          paraIndex: paraIndex,
+        ),
+      );
+    }
+    return out;
   }
 
   Map<int, int> _countsInRange(Map<int, int> counts, int paragraphCount) {

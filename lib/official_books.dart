@@ -11,6 +11,7 @@ import 'book_sources/book_source_reference.dart';
 import 'book_sources/qidian_search_webview.dart';
 import 'catalog.dart';
 import 'cover_disk_cache.dart';
+import 'services/fanqie_core_source.dart';
 
 enum OfficialSite { qidian, fanqie, qimao, shuqi }
 
@@ -35,6 +36,8 @@ class OfficialRanking {
     this.gender,
     this.rankMold,
     this.categoryId,
+    this.cellId,
+    this.algo,
   });
 
   final String id;
@@ -44,6 +47,13 @@ class OfficialRanking {
   final String? gender;
   final String? rankMold;
   final String? categoryId;
+
+  /// 动态目录（番茄官方 App 榜单）专用：榜单 cell id 与 rank_algo。
+  /// 为 null 表示这是写死/网页榜单，走旧路径。
+  final String? cellId;
+  final int? algo;
+
+  bool get isDynamicCore => cellId != null && algo != null;
 
   OfficialRanking copyWith({
     String? categoryId,
@@ -56,7 +66,17 @@ class OfficialRanking {
     gender: gender,
     rankMold: rankMold,
     categoryId: clearCategoryId ? null : (categoryId ?? this.categoryId),
+    cellId: cellId,
+    algo: algo,
   );
+}
+
+/// 番茄官方榜单目录（动态）：`boards` 为榜单列表，`categories` 为子分类。
+class FanqieCoreRankSet {
+  const FanqieCoreRankSet({required this.boards, required this.categories});
+
+  final List<OfficialRanking> boards;
+  final List<OfficialCategory> categories;
 }
 
 class OfficialCategory {
@@ -673,18 +693,289 @@ class OfficialBookService {
     return parseSearchPage(OfficialSite.qidian, text, page);
   }
 
-  /// 番茄关键词搜索。
-  ///
-  /// 官网使用的 `/api/author/search/search_book/v1` 需要字节跳动的
-  /// `a_bogus` + `msToken` 签名（且与 query、UA、Cookie、时间戳严格绑定），
-  /// 裸请求只会得到 HTTP 200 + 0 字节正文。这里改用无需签名的旧版
-  /// `/api/author/search/search_book/v0`，先用它拿到书籍 ID 列表，再逐本调用
-  /// 同样无需签名的 `/api/book/info` 取回**明文**书名、作者、分类和简介。
-  ///
-  /// 之所以不能直接展示 v0 列表里的 `book_name`/`author`/`book_abstract`：
-  /// 这些文字用私用区字体做了置换混淆（例如「十日终焉」会变成「文打终焉」），
-  /// 只有渲染对应 woff 字体时才还原，正则/纯文本取到的是乱码。
+  // 番茄关键词搜索（web 降级路径，核心不可用时使用）。
+  //
+  // 官网使用的 `/api/author/search/search_book/v1` 需要字节跳动的
+  // `a_bogus` + `msToken` 签名（且与 query、UA、Cookie、时间戳严格绑定），
+  // 裸请求只会得到 HTTP 200 + 0 字节正文。这里改用无需签名的旧版
+  // `/api/author/search/search_book/v0`，先用它拿到书籍 ID 列表，再逐本调用
+  // 同样无需签名的 `/api/book/info` 取回**明文**书名、作者、分类和简介。
+  //
+  // 之所以不能直接展示 v0 列表里的 `book_name`/`author`/`book_abstract`：
+  // 这些文字用私用区字体做了置换混淆（例如「十日终焉」会变成「文打终焉」），
+  // 只有渲染对应 woff 字体时才还原，正则/纯文本取到的是乱码。
+  // ---- 内嵌 Rust 核心（官方 App 协议，route A）适配 ------------------------
+  //
+  // 所有 core 路径都是「尽力而为」：核心没构建/初始化失败/解析为空一律返回
+  // null 或抛，由调用方降级到现有 web 抓取。因此未编译 Rust 核心时行为与改动前
+  // 完全一致，不会破坏可读性。文档见 docs/fanqie-embedded-core.md。
+
+  /// 核心搜索：命中则返回；不可用/解析为空返回 null（降级 web）。
+  static Future<OfficialRankingPage?> _fanqieCoreSearch(
+    String query,
+    int page,
+  ) async {
+    try {
+      final payload = await FanqieCoreSource.shared().search(query, page: page);
+      final data = _map(payload['data']);
+      if (data == null) return null;
+      final books = _booksFromCoreRecords(data);
+      if (books.isEmpty) return null;
+      final total = _int(data['total_count']) ?? _int(data['total']) ?? 0;
+      final hasMore = total > 0 ? page * 10 < total : books.length >= 10;
+      return OfficialRankingPage(books: books, hasMore: hasMore, page: page);
+    } on Object {
+      return null;
+    }
+  }
+
+  /// 核心正文：返回纯文本 / `[[FANQIE_LOCKED]]`；核心不可用返回 null（降级 web）。
+  static Future<String?> _fanqieCoreContent(String chapterUrl) async {
+    final itemId =
+        RegExp(r'/reader/(\d+)').firstMatch(chapterUrl)?.group(1) ?? '';
+    if (itemId.isEmpty) return null;
+    try {
+      final text = await FanqieCoreSource.shared().chapterText(itemId);
+      return text.trim().isEmpty ? '[[FANQIE_LOCKED]]' : text;
+    } on FanqieContentUnavailable {
+      return '[[FANQIE_LOCKED]]';
+    } on Object {
+      // 核心未构建/初始化失败/瞬时错误：交给 web 抓取。
+      return null;
+    }
+  }
+
+  /// 容忍式地从核心返回体里抽取书目记录。不依赖固定 schema：递归找「同时具备
+  /// 数字 book id 与标题」的 Map，按 id 去重；找不到返回空（调用方降级 web）。
+  static List<OfficialBook> _booksFromCoreRecords(Map<String, dynamic> data) {
+    final seen = <String>{};
+    final books = <OfficialBook>[];
+
+    String pick(Map<dynamic, dynamic> m, List<String> keys) {
+      for (final k in keys) {
+        final v = m[k];
+        if (v is String && v.trim().isNotEmpty) return v.trim();
+        if (v is num) return '$v';
+      }
+      return '';
+    }
+
+    void walk(Object? node, int depth) {
+      if (depth > 8 || node == null) return;
+      if (node is List) {
+        for (final e in node) {
+          walk(e, depth + 1);
+        }
+      } else if (node is Map) {
+        final bid = pick(node, const [
+          'book_id', 'bookId', 'book_id_str', 'bookid', 'id',
+        ]);
+        final title = pick(node, const [
+          'book_name', 'bookName', 'title', 'name', 'raw_book_name',
+        ]);
+        if (RegExp(r'^\d{4,}$').hasMatch(bid) &&
+            title.isNotEmpty &&
+            seen.add(bid)) {
+          var cover = _string(pick(node, const [
+            'thumb_url', 'thumbUrl', 'thumbUri', 'cover', 'cover_url',
+          ]));
+          if (cover.startsWith('http://')) {
+            cover = 'https://${cover.substring(7)}';
+          }
+          books.add(
+            OfficialBook(
+              site: OfficialSite.fanqie,
+              bookId: bid,
+              title: _plainText(title),
+              author: _plainText(
+                pick(node, const ['author', 'authorName', 'author_name']),
+              ),
+              kind: _plainText(
+                pick(node, const ['category', 'categoryName', 'kind']),
+              ),
+              summary: _plainText(
+                pick(node, const [
+                  'book_abstract', 'abstract', 'description', 'summary',
+                ]),
+              ),
+              coverUrl: cover,
+              bookUrl: 'https://fanqienovel.com/page/$bid',
+              wordCount: pick(node, const [
+                'word_count', 'wordNumber', 'wordCount',
+              ]),
+            ),
+          );
+        }
+        for (final v in node.values) {
+          walk(v, depth + 1);
+        }
+      }
+    }
+
+    walk(data, 0);
+    return books;
+  }
+
+  /// 核心榜单：拉首页目录 → 匹配榜名 → 拉条目 → 映射 OfficialBook。
+  /// 目录取不到/匹配不到/无条目返回 null（降级 web）。
+  static Future<OfficialRankingPage?> _fanqieCoreRank(
+    OfficialRanking ranking,
+    int page,
+  ) async {
+    try {
+      final src = FanqieCoreSource.shared();
+      final catalog = await src.rankCatalog();
+      if (catalog.isEmpty) return null;
+      final tab = _matchRankTab(catalog, ranking.title);
+      if (tab == null) return null;
+      final items = await src.rankEntries(
+        catalog.cellId,
+        algo: tab.algo,
+        offset: (page - 1) * 20,
+      );
+      if (items.isEmpty) return null;
+      final books = <OfficialBook>[];
+      for (final e in items) {
+        if (e.id.isEmpty || e.title.isEmpty) continue;
+        var cover = e.cover;
+        if (cover.startsWith('http://')) {
+          cover = 'https://${cover.substring(7)}';
+        }
+        books.add(
+          OfficialBook(
+            site: OfficialSite.fanqie,
+            bookId: e.id,
+            title: _plainText(e.title),
+            author: _plainText(e.author),
+            kind: _plainText(e.category),
+            summary: _plainText(e.abstract),
+            coverUrl: cover,
+            bookUrl: 'https://fanqienovel.com/page/${e.id}',
+            wordCount: e.wordNumber == null ? null : '${e.wordNumber}',
+          ),
+        );
+      }
+      if (books.isEmpty) return null;
+      return OfficialRankingPage(
+        books: books,
+        hasMore: books.length >= 20,
+        page: page,
+      );
+    } on Object {
+      return null;
+    }
+  }
+
+  /// 按榜名 token 在目录里找对应 tab（阅读/新书/完本/推荐）。
+  /// 首页 `rank_with_category_data` 这张卡是男频榜（推荐/完本/巅峰/口碑），与 app 内置的
+  /// 「阅读/新书」榜命名并非一一对应。仅对**能确定对应**的榜走核心，其余回落 web，避免
+  /// 展示错误的榜：完本→完本榜；阅读≈推荐榜；新书/巅峰/口碑 及女频 → web。
+  static FanqieRankTab? _matchRankTab(
+    FanqieRankCatalog catalog,
+    String title,
+  ) {
+    if (title.contains('女频')) return null;
+    if (title.contains('完本') || title.contains('完结')) {
+      for (final tab in catalog.tabs) {
+        if (tab.name.contains('完本') || tab.name.contains('完结')) return tab;
+      }
+      return null;
+    }
+    final target = title.contains('阅读') ? '推荐' : '';
+    if (target.isEmpty) return null;
+    for (final tab in catalog.tabs) {
+      if (tab.name.contains(target)) return tab;
+    }
+    return null;
+  }
+
+  static Future<FanqieCoreRankSet?>? _fanqieRankSetFuture;
+
+  /// 动态读取番茄官方榜单目录（首页 `rank_with_category_data` 的
+  /// `rank_algo_list` + `sub_info_list`）。返回 null 表示核心不可用，调用方应回落
+  /// 到写死的 `officialRankings`。结果进程内缓存；`refresh` 可强制重取。
+  static Future<FanqieCoreRankSet?> fanqieRankCatalog({bool refresh = false}) {
+    if (!refresh && _fanqieRankSetFuture != null) return _fanqieRankSetFuture!;
+    return _fanqieRankSetFuture = _fetchFanqieRankSet();
+  }
+
+  static Future<FanqieCoreRankSet?> _fetchFanqieRankSet() async {
+    try {
+      final catalog = await FanqieCoreSource.shared().rankCatalog();
+      if (catalog.isEmpty || catalog.tabs.isEmpty) return null;
+      final boards = <OfficialRanking>[
+        for (final tab in catalog.tabs)
+          OfficialRanking(
+            id: 'fanqie-core-${tab.algo}',
+            title: tab.name,
+            site: OfficialSite.fanqie,
+            kind: 'core',
+            cellId: catalog.cellId,
+            algo: tab.algo,
+          ),
+      ];
+      final categories = <OfficialCategory>[
+        for (final c in catalog.categories)
+          OfficialCategory(id: '${c.id}', name: c.name),
+      ];
+      return FanqieCoreRankSet(boards: boards, categories: categories);
+    } on Object {
+      return null;
+    }
+  }
+
+  /// 动态榜单条目：直接按 cell id + rank_algo（+ 可选子分类 subInfo）取 `cell/change`。
+  static Future<OfficialRankingPage?> _fanqieCoreRankByCell(
+    String cellId,
+    int algo,
+    int page,
+    String? subInfo,
+  ) async {
+    try {
+      final sub = int.tryParse(subInfo ?? '') ?? 2;
+      final items = await FanqieCoreSource.shared().rankEntries(
+        cellId,
+        algo: algo,
+        subInfoId: sub,
+        offset: (page - 1) * 20,
+      );
+      if (items.isEmpty) return null;
+      final books = <OfficialBook>[];
+      for (final e in items) {
+        if (e.id.isEmpty || e.title.isEmpty) continue;
+        var cover = e.cover;
+        if (cover.startsWith('http://')) {
+          cover = 'https://${cover.substring(7)}';
+        }
+        books.add(
+          OfficialBook(
+            site: OfficialSite.fanqie,
+            bookId: e.id,
+            title: _plainText(e.title),
+            author: _plainText(e.author),
+            kind: _plainText(e.category),
+            summary: _plainText(e.abstract),
+            coverUrl: cover,
+            bookUrl: 'https://fanqienovel.com/page/${e.id}',
+            wordCount: e.wordNumber == null ? null : '${e.wordNumber}',
+          ),
+        );
+      }
+      if (books.isEmpty) return null;
+      return OfficialRankingPage(
+        books: books,
+        hasMore: books.length >= 20,
+        page: page,
+      );
+    } on Object {
+      return null;
+    }
+  }
+
   static Future<OfficialRankingPage> _fanqieSearch(String query, int page) async {
+    // 优先走内嵌 Rust 核心（官方 App 协议）；核心不可用/解析为空则降级 web。
+    final core = await _fanqieCoreSearch(query, page);
+    if (core != null) return core;
     final uri = Uri.https(
       'fanqienovel.com',
       '/api/author/search/search_book/v0',
@@ -917,6 +1208,67 @@ class OfficialBookService {
   /// 番茄分类书库：与榜单接口不同，使用独立的 author/library/book_list。
   ///
   /// [gender] 为 -1 全部、1 男生、0 女生；[categoryId] 为 -1 时表示全部书籍。
+  ///
+  /// 该 web 接口返回的书名/作者是**私用区字体混淆**的；静态字体映射覆盖不到时
+  /// （上游字体会轮换）会显示成 `□`。因此对仍残留 PUA 的条目逐本回退到
+  /// `/api/book/info`（明文 JSON）补全，保证可读——与搜索的明文兜底同一套。
+  static Future<OfficialBook?> _fanqieLibraryBook(
+    Map<String, dynamic> item,
+    String categoryName,
+    Map<int, String> fontMap,
+  ) async {
+    final bid = _string(item['book_id']);
+    if (bid.isEmpty) return null;
+    var title = _decodeFanqieText(_string(item['book_name']), fontMap);
+    var author = _decodeFanqieText(_string(item['author']), fontMap);
+    var intro = _decodeFanqieText(_plainText(_string(item['abstract'])), fontMap);
+    var cover = _httpsUrl(_string(item['thumb_url']));
+    var wordCount = _decodeFanqieText(_string(item['word_count']), fontMap);
+
+    if (title.isEmpty ||
+        _hasFanqiePua(title) ||
+        _hasFanqiePua(author) ||
+        _hasFanqiePua(intro)) {
+      try {
+        final info = await _getJson(
+          Uri.https('fanqienovel.com', '/api/book/info', {'bookId': bid}),
+          headers: _fanqieHeaders,
+        );
+        final data = _map(info['data']);
+        if ((_int(info['code']) ?? -1) == 0 &&
+            data != null &&
+            _string(data['bookName']).isNotEmpty) {
+          title = _string(data['bookName']);
+          author = _string(data['authorName']);
+          final abstract = _string(data['abstract']);
+          intro = _plainText(
+            abstract.isNotEmpty ? abstract : _string(data['description']),
+          );
+          final infoCover = _httpsUrl(_string(data['thumbUrl']));
+          if (infoCover.isNotEmpty) cover = infoCover;
+          final words = _int(data['wordNumber']);
+          if (words != null && words > 0) wordCount = '$words';
+        }
+      } on Object {
+        // 单本明文接口失败就保留字体解码结果（可能仍有 □），不拖垮整页。
+      }
+    }
+
+    if (title.isEmpty) return null;
+    return OfficialBook(
+      site: OfficialSite.fanqie,
+      bookId: bid,
+      title: title,
+      author: author,
+      kind: categoryName,
+      summary: intro,
+      coverUrl: cover,
+      bookUrl: 'https://fanqienovel.com/page/$bid',
+      wordCount: wordCount.isNotEmpty ? wordCount : null,
+      votes: _decodeFanqieText(_string(item['read_count']), fontMap),
+    );
+  }
+
   static Future<OfficialRankingPage> fanqieLibrary({
     required String gender,
     required String categoryId,
@@ -941,31 +1293,10 @@ class OfficialBookService {
     final data = _map(json['data']);
     final records = _list(data?['book_list']);
     final fontMap = await _fanqieLibraryFontMap();
-    final books = <OfficialBook>[];
-    for (final value in records) {
-      final item = _map(value);
-      if (item == null) continue;
-      final bid = _string(item['book_id']);
-      if (bid.isEmpty) continue;
-      var cover = _string(item['thumb_url']);
-      if (cover.startsWith('http://')) {
-        cover = 'https://${cover.substring(7)}';
-      }
-      books.add(
-        OfficialBook(
-          site: OfficialSite.fanqie,
-          bookId: bid,
-          title: _decodeFanqieText(_string(item['book_name']), fontMap),
-          author: _decodeFanqieText(_string(item['author']), fontMap),
-          kind: categoryName,
-          summary: _decodeFanqieText(_string(item['abstract']), fontMap),
-          coverUrl: cover,
-          bookUrl: 'https://fanqienovel.com/page/$bid',
-          wordCount: _decodeFanqieText(_string(item['word_count']), fontMap),
-          votes: _decodeFanqieText(_string(item['read_count']), fontMap),
-        ),
-      );
-    }
+    final items = [for (final value in records) ?_map(value)];
+    final books = (await Future.wait(
+      items.map((item) => _fanqieLibraryBook(item, categoryName, fontMap)),
+    )).whereType<OfficialBook>().toList(growable: false);
     final total = _int(data?['total_count']) ?? 0;
     return OfficialRankingPage(
       books: books,
@@ -1062,6 +1393,19 @@ class OfficialBookService {
     OfficialRanking ranking,
     int page,
   ) async {
+    // 动态官方榜：直接按 cell id + rank_algo 取条目（不再依赖写死榜名）。
+    if (ranking.isDynamicCore) {
+      final dynamicPage = await _fanqieCoreRankByCell(
+        ranking.cellId!,
+        ranking.algo!,
+        page,
+        ranking.categoryId,
+      );
+      if (dynamicPage != null) return dynamicPage;
+    }
+    // 核心优先（首页 catalogue → cell/change）；不可用/匹配不到则降级 web。
+    final core = await _fanqieCoreRank(ranking, page);
+    if (core != null) return core;
     final complete = ranking.kind == 'complete';
     final uri = Uri.https('fanqienovel.com', '/api/rank/category/list', {
       'app_id': '2503',
@@ -1953,6 +2297,9 @@ class OfficialBookService {
   }
 
   static Future<String> _fanqieContent(String chapterUrl) async {
+    // 优先走内嵌 Rust 核心（DH/AES 解密，纯文本更干净）；核心不可用降级 web。
+    final core = await _fanqieCoreContent(chapterUrl);
+    if (core != null) return core;
     final html = await _getText(Uri.parse(chapterUrl), headers: _fanqieHeaders);
     if (RegExp(
       r'购买|登录后阅读|本章为付费|isChapterLock[\s\S]{0,40}true',

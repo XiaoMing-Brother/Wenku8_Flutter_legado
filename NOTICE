@@ -59,3 +59,11 @@ subset locally and does not include Legado application source. OkHttp 4.12.0
 texts are in assets/licenses/okhttp.txt, json-path.txt and rhino.txt.
 
 0.5.0 source distribution: upstream library test suites and sample fixtures are omitted; runtime library sources and original licenses are retained.
+
+Embedded Fanqie Rust core: ch6vip/novel-sound, GPL-3.0,
+Copyright (c) 2026 ch6vip and contributors.
+Upstream: https://github.com/ch6vip/novel-sound
+Vendored as the Rust crate fqapi_core under rust/ and bridged with
+flutter_rust_bridge 2.13.0; integration code is in lib/services/fanqie_core_*.dart.
+The v5 playback signing module (rust/src/sign/v5.rs) derives from N3urda/hongguoTV
+(GPL-3.0), commit 18c37c2afd0567520135abcae312352542f09083, and keeps its attribution.

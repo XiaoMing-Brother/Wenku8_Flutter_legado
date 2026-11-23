@@ -1,0 +1,4 @@
+# Rust native libs produced by scripts/build_rust_backend.ps1
+# 由构建机交叉编译后落到各 ABI 目录，不进版本库。
+*
+!.gitignore

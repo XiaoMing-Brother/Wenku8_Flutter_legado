@@ -60,9 +60,19 @@ class DiscoveryRankingsPageState extends State<DiscoveryRankingsPage> {
   bool _loaded = false;
   int _generation = 0;
   final _firstPages = <String, ({DateTime saved, OfficialRankingPage result})>{};
+  // 番茄官方榜单目录（动态，来自 core）；为空时回落写死的 officialRankings。
+  List<OfficialRanking> _fanqieBoards = const [];
+  List<OfficialCategory> _fanqieCoreCategories = const [];
+  bool _fanqieCoreLoading = false;
 
-  List<OfficialRanking> get _rankings =>
-      officialRankings.where((item) => item.site == _site).toList();
+  List<OfficialRanking> get _rankings {
+    if (_site == OfficialSite.fanqie &&
+        !_fanqieLibrary &&
+        _fanqieBoards.isNotEmpty) {
+      return _fanqieBoards;
+    }
+    return officialRankings.where((item) => item.site == _site).toList();
+  }
 
   OfficialRanking get _ranking {
     for (final item in _rankings) {
@@ -110,7 +120,11 @@ class DiscoveryRankingsPageState extends State<DiscoveryRankingsPage> {
   List<OfficialCategory> get _categories => switch (_site) {
     OfficialSite.qidian => qidianCategories,
     OfficialSite.fanqie =>
-      _ranking.gender == '1' ? fanqieMaleCategories : fanqieFemaleCategories,
+      (_ranking.kind == 'core' && _fanqieCoreCategories.isNotEmpty)
+          ? _fanqieCoreCategories
+          : (_ranking.gender == '1'
+                ? fanqieMaleCategories
+                : fanqieFemaleCategories),
     OfficialSite.qimao =>
       _ranking.kind == 'new'
           ? const []
@@ -245,6 +259,9 @@ class DiscoveryRankingsPageState extends State<DiscoveryRankingsPage> {
       _hasMore = false;
       _loaded = false;
     });
+    if (site == OfficialSite.fanqie) {
+      await _ensureFanqieCore();
+    }
     await _load(reset: true);
   }
 
@@ -257,7 +274,9 @@ class DiscoveryRankingsPageState extends State<DiscoveryRankingsPage> {
       if (ranking.site == OfficialSite.qidian) {
         _qidianCategoryId = '';
       } else if (ranking.site == OfficialSite.fanqie) {
-        _fanqieCategoryId = ranking.gender == '1' ? '1141' : '1139';
+        if (ranking.kind != 'core') {
+          _fanqieCategoryId = ranking.gender == '1' ? '1141' : '1139';
+        }
       } else if (genderChanged) {
         _qimaoCategoryId = '';
       }
@@ -295,6 +314,7 @@ class DiscoveryRankingsPageState extends State<DiscoveryRankingsPage> {
       _hasMore = false;
       _loaded = false;
     });
+    if (!library) await _ensureFanqieCore();
     await _load(reset: true);
   }
 
@@ -334,6 +354,31 @@ class DiscoveryRankingsPageState extends State<DiscoveryRankingsPage> {
   }
 
   Future<void> _refresh() => _load(reset: true, refresh: true);
+
+  /// 拉取番茄官方榜单目录（动态）。核心不可用时静默保持写死兜底。
+  Future<void> _ensureFanqieCore() async {
+    if (_fanqieBoards.isNotEmpty) return;
+    if (_fanqieCoreLoading) return;
+    _fanqieCoreLoading = true;
+    try {
+      final set = await OfficialBookService.fanqieRankCatalog();
+      if (!mounted) return;
+      if (set != null && set.boards.isNotEmpty) {
+        setState(() {
+          _fanqieBoards = set.boards;
+          _fanqieCoreCategories = set.categories;
+          if (!set.boards.any((r) => r.id == _rankingId)) {
+            _rankingId = set.boards.first.id;
+            _fanqieCategoryId = '';
+          }
+        });
+      }
+    } on Object {
+      // 核心不可用 → 保持写死的 officialRankings 兜底。
+    } finally {
+      _fanqieCoreLoading = false;
+    }
+  }
 
   Future<void> _openBook(Novel book) async {
     if (_site.supportsDirectReading) {

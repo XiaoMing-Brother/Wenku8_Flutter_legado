@@ -60,6 +60,9 @@ dependencies:
   blockchain_utils: 6.0.0
   dart_jieba: 1.0.1
   flutter_inappwebview: ^6.1.5
+  # 番茄内嵌 Rust 核心（novel-sound / fqapi_core）的 Dart 绑定。
+  # 与 rust/Cargo.toml 的 flutter_rust_bridge = "=2.13.0" 必须严格同版。
+  flutter_rust_bridge: 2.13.0
 
 dev_dependencies:
 
@@ -86,6 +89,8 @@ flutter:
   assets:
     - assets/branding/app-icon.png
     - assets/book_sources/
+    - assets/config/
+    - assets/filters/
     - assets/reader_themes.json
     - assets/report/
     - assets/reading_previews/archive-117.webp
