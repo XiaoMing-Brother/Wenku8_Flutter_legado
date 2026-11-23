@@ -25,7 +25,12 @@ import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.TextView
 import android.widget.Toast
-import java.util.LinkedHashMap
+import androidx.webkit.CookieManagerCompat
+import androidx.webkit.WebViewFeature
+import okhttp3.HttpUrl
+import okhttp3.HttpUrl.Companion.toHttpUrl
+import org.mewx.wenku8_flutter.booksource.readWebCookieLines
+import org.mewx.wenku8_flutter.booksource.webCookieTargets
 
 /**
  * 独立的网页登录页。登录完成后只回传 Cookie，账号密码不离开网页本身。
@@ -35,8 +40,8 @@ class WebLoginActivity : Activity() {
     private var webView: WebView? = null
     private var progress: ProgressBar? = null
     private var titleView: TextView? = null
-    private val visited = linkedSetOf<String>()
-    private val cookies = LinkedHashMap<String, String>()
+    private lateinit var cookieTargets: List<HttpUrl>
+    private var cookiesReady = false
     private var finished = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -49,7 +54,9 @@ class WebLoginActivity : Activity() {
         val title = intent.getStringExtra(EXTRA_TITLE).orEmpty().trim()
             .ifEmpty { "网页登录" }
         val headers = readHeaders()
-        val initialCookie = intent.getStringExtra(EXTRA_COOKIE).orEmpty()
+        val targets = checkNotNull(intent.getStringArrayListExtra(EXTRA_COOKIE_TARGETS))
+        cookieTargets = targets.first().toHttpUrl().webCookieTargets(targets)
+        val initialCookies = intent.getStringArrayListExtra(EXTRA_COOKIES).orEmpty()
         val userAgent = intent.getStringExtra(EXTRA_USER_AGENT).orEmpty().trim()
         val dark = (resources.configuration.uiMode and
             Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
@@ -181,9 +188,9 @@ class WebLoginActivity : Activity() {
         setContentView(root)
 
         configureWebView(web, userAgent)
-        prepareCookies(url, initialCookie) {
-            if (!isFinishing && !isDestroyed) {
-                visited.add(url)
+        prepareCookies(initialCookies) {
+            if (!finished && !isFinishing && !isDestroyed) {
+                cookiesReady = true
                 web.loadUrl(url, headers)
             }
         }
@@ -223,18 +230,7 @@ class WebLoginActivity : Activity() {
                 request: WebResourceRequest,
             ): Boolean = handleUrl(request.url)
 
-            override fun onPageStarted(
-                view: WebView,
-                url: String?,
-                favicon: android.graphics.Bitmap?,
-            ) {
-                if (!url.isNullOrBlank()) visited.add(url)
-                captureCookies(url)
-            }
-
             override fun onPageFinished(view: WebView, url: String?) {
-                if (!url.isNullOrBlank()) visited.add(url)
-                captureCookies(url)
                 progress?.visibility = View.GONE
                 view.evaluateJavascript("document.title") { value ->
                     val pageTitle = value
@@ -305,57 +301,45 @@ class WebLoginActivity : Activity() {
     }
 
     private fun prepareCookies(
-        url: String,
-        initialCookie: String,
+        initialCookies: List<String>,
         action: () -> Unit,
     ) {
         val manager = CookieManager.getInstance()
         manager.setAcceptCookie(true)
         manager.removeAllCookies {
-            if (initialCookie.isNotBlank()) manager.setCookie(url, initialCookie)
-            manager.flush()
-            action()
-        }
-    }
-
-    private fun captureCookies(url: String?) {
-        val target = url?.trim().orEmpty()
-        if (target.isEmpty()) return
-        val raw = CookieManager.getInstance().getCookie(target) ?: return
-        mergeCookies(raw)
-    }
-
-    private fun mergeCookies(raw: String) {
-        for (part in raw.split(';')) {
-            val pair = part.trim()
-            val separator = pair.indexOf('=')
-            if (separator <= 0) continue
-            val name = pair.substring(0, separator).trim()
-            val value = pair.substring(separator + 1).trim()
-            if (name.isEmpty() ||
-                name.equals("path", ignoreCase = true) ||
-                name.equals("domain", ignoreCase = true) ||
-                name.equals("expires", ignoreCase = true) ||
-                name.equals("max-age", ignoreCase = true) ||
-                name.equals("secure", ignoreCase = true) ||
-                name.equals("httponly", ignoreCase = true) ||
-                name.equals("samesite", ignoreCase = true)
-            ) {
-                continue
+            if (finished || isDestroyed) return@removeAllCookies
+            var remaining = initialCookies.size
+            if (remaining == 0) action()
+            for (cookie in initialCookies) manager.setCookie(cookieTargets.first().toString(), cookie) {
+                if (--remaining == 0) action()
             }
-            cookies[name] = value
         }
     }
 
     private fun finishWithCookies() {
-        if (finished) return
+        if (finished || !cookiesReady) return
+        val manager = CookieManager.getInstance()
+        val root = cookieTargets.first()
+        val scoped = WebViewFeature.isFeatureSupported(WebViewFeature.GET_COOKIE_INFO)
+        val completed = if (scoped) root.webCookieTargets(listOf(webView?.url)).last() else root
+        val cookies = try {
+            if (scoped) {
+                readWebCookieLines((cookieTargets + completed).distinct()) { target ->
+                    CookieManagerCompat.getCookieInfo(manager, target.toString())
+                }
+            } else {
+                manager.getCookie(root.toString()).orEmpty().split(';').map { it.trim() }
+                    .filter { it.indexOf('=') > 0 }.map { "$it; Path=/; HttpOnly" + if (root.isHttps) "; Secure" else "" }
+            }
+        } catch (_: RuntimeException) {
+            Toast.makeText(this, "无法读取网页登录状态，请重试", Toast.LENGTH_SHORT).show()
+            return
+        }
         finished = true
-        captureCookies(webView?.url)
-        CookieManager.getInstance().flush()
-        val cookie = cookies.entries.joinToString("; ") { "${it.key}=${it.value}" }
         setResult(
             RESULT_OK,
-            Intent().putExtra(EXTRA_COOKIES_RESULT, cookie),
+            Intent().putStringArrayListExtra(EXTRA_COOKIES_RESULT, ArrayList(cookies))
+                .putExtra(EXTRA_SCOPED, scoped).putExtra(EXTRA_COMPLETED_URL, completed.toString()),
         )
         clearCookiesAndFinish()
     }
@@ -368,9 +352,8 @@ class WebLoginActivity : Activity() {
     }
 
     private fun clearCookiesAndFinish() {
-        CookieManager.getInstance().removeAllCookies(null)
-        CookieManager.getInstance().flush()
-        finish()
+        webView?.stopLoading()
+        CookieManager.getInstance().removeAllCookies { finish() }
     }
 
     private fun goBackOrCancel() {
@@ -394,8 +377,7 @@ class WebLoginActivity : Activity() {
             destroy()
         }
         webView = null
-        CookieManager.getInstance().removeAllCookies(null)
-        CookieManager.getInstance().flush()
+        if (!finished) CookieManager.getInstance().removeAllCookies(null)
         super.onDestroy()
     }
 
@@ -421,7 +403,10 @@ class WebLoginActivity : Activity() {
         const val EXTRA_URL = "webLoginUrl"
         const val EXTRA_TITLE = "webLoginTitle"
         const val EXTRA_HEADERS = "webLoginHeaders"
-        const val EXTRA_COOKIE = "webLoginCookie"
+        const val EXTRA_COOKIE_TARGETS = "webLoginCookieTargets"
+        const val EXTRA_SCOPED = "webLoginScopedCookies"
+        const val EXTRA_COMPLETED_URL = "webLoginCompletedUrl"
+        const val EXTRA_COOKIES = "webLoginCookieList"
         const val EXTRA_USER_AGENT = "webLoginUserAgent"
         const val EXTRA_COOKIES_RESULT = "webLoginCookies"
     }

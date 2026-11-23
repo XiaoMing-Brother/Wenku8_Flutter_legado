@@ -68,8 +68,9 @@ class ReaderIllustrationCache {
   int _bytes = 0;
   int _epoch = 0;
   int get encodedBytes => _bytes;
-  int _revision(String url) =>
-      url.startsWith('wenku-local:') ? LocalBookMedia.revisionOf(url) : 0;
+  int _revision(String url) => url.startsWith('wenku-local:')
+      ? LocalBookMedia.revisionOf(url)
+      : BookSourceImages.markerRevision(url);
   bool _current(String url, _IllustrationSource source) =>
       source.active &&
       source.epoch == _epoch &&
@@ -241,6 +242,10 @@ class ReaderIllustrationCache {
     late final Future<Uint8List> future;
     future = _receive(url, input)
         .then((bytes) {
+          if (url.startsWith('${BookSourceImages.markerScheme}:') &&
+              source.revision != _revision(url)) {
+            throw StateError('书源图片会话已变更');
+          }
           received = bytes;
           return bytes;
         })

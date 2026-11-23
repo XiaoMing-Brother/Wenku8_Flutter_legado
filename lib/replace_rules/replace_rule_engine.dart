@@ -1,4 +1,5 @@
 import 'replace_rule.dart';
+import '../book_sources/inline_review.dart';
 
 /// Applies ordered replacement rules to chapter titles and body text.
 ///
@@ -17,17 +18,52 @@ class ReplaceRuleEngine {
     required String bookTitle,
     required String origin,
   }) {
-    final scope = rule.scope.trim().toLowerCase();
-    final exclude = rule.excludeScope.trim().toLowerCase();
-    final title = bookTitle.trim().toLowerCase();
-    final source = origin.trim().toLowerCase();
-    if (exclude.isNotEmpty &&
-        (exclude.contains(title) ||
-            source.isNotEmpty && exclude.contains(source))) {
-      return false;
+    if (rule.scope.isEmpty && rule.excludeScope.isEmpty) return true;
+    bool matches(String scope) =>
+        scope.isNotEmpty &&
+        (_scopeContains(scope, bookTitle) || _scopeContains(scope, origin));
+    return !matches(rule.excludeScope) &&
+        (rule.scope.isEmpty || matches(rule.scope));
+  }
+
+  static final _asciiUpper = RegExp('[A-Z]');
+  static String _foldAscii(String value) => value.replaceAllMapped(
+    _asciiUpper,
+    (match) => match[0]!.toLowerCase(),
+  );
+
+  static bool _scopeContains(String scope, String identity) {
+    if (identity.isEmpty) return false;
+    final text = _foldAscii(scope);
+    final needle = _foldAscii(identity);
+    if (!needle.contains('%') && !needle.contains('_')) {
+      return text.contains(needle);
     }
-    if (scope.isEmpty) return true;
-    return scope.contains(title) || source.isNotEmpty && scope.contains(source);
+    final pattern = '%$needle%'.runes.toList();
+    final input = text.runes.toList();
+    var position = 0;
+    var token = 0;
+    var star = -1;
+    var retry = 0;
+    while (position < input.length) {
+      if (token < pattern.length && pattern[token] == 0x25) {
+        star = token++;
+        retry = position;
+      } else if (token < pattern.length &&
+          (pattern[token] == 0x5f || pattern[token] == input[position])) {
+        position++;
+        token++;
+      } else if (star >= 0) {
+        token = star + 1;
+        position = ++retry;
+      } else {
+        return false;
+      }
+    }
+    while (token < pattern.length && pattern[token] == 0x25) {
+      token++;
+    }
+    return token == pattern.length;
   }
 
   static String applyContent(
@@ -36,18 +72,27 @@ class ReplaceRuleEngine {
     required String bookTitle,
     required String origin,
   }) {
-    var value = text;
-    for (final rule in rules) {
-      if (!rule.enabled ||
-          !rule.scopeContent ||
-          !inScope(rule, bookTitle: bookTitle, origin: origin)) {
-        continue;
+    final active = rules.where((rule) => rule.enabled && rule.scopeContent &&
+        inScope(rule, bookTitle: bookTitle, origin: origin)).toList();
+    if (active.isEmpty) return text;
+    String replace(String value) {
+      for (final rule in active) {
+        value = _apply(value, rule);
       }
-      value = _apply(value, rule);
-      if (value.isEmpty) break;
+      return value;
     }
-    return value;
+    if (!text.contains('<!--image-->legado-image:') && !text.contains(InlineReview.prefix)) return replace(text);
+    return text.splitMapJoin(
+      _sourceImageParagraph,
+      onMatch: (match) => match[0]!,
+      onNonMatch: (part) => part.isEmpty ? '' : replace(part),
+    );
   }
+
+  static final _sourceImageParagraph = RegExp(
+    r'^<!--image-->legado-image:[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+<!--image-->$' '|${InlineReview.marker.pattern}',
+    multiLine: true,
+  );
 
   static String applyTitle(
     String title,

@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/widgets.dart';
 import 'book_sources/book_source_images.dart';
+import 'book_sources/inline_review.dart';
 import 'local_book_media.dart';
 import 'local_image_layout.dart';
 import 'app_language.dart';
@@ -19,6 +20,7 @@ class ReaderContent {
     this.placementIds = const {},
     this.formats = const {},
     this.notes = const {},
+    this.reviews = const {},
     this.revision = '',
     this.coordinateMap,
     this.languageFilter = '',
@@ -29,6 +31,7 @@ class ReaderContent {
   final Map<int, String> placementIds;
   final Map<int, ReaderRichParagraph> formats;
   final Map<String, String> notes;
+  final Map<int, InlineReview> reviews;
   final String revision;
   final ReaderCoordinateMap? coordinateMap;
   final String languageFilter;
@@ -70,6 +73,7 @@ class ReaderContent {
       placementIds: placementIds,
       formats: formats,
       notes: notes,
+      reviews: reviews,
       revision: revision,
       coordinateMap: coordinateMap,
       languageFilter: names.join(','),
@@ -96,6 +100,7 @@ class ReaderContent {
       placementIds: placementIds,
       formats: formats,
       notes: notes,
+      reviews: reviews,
       revision: revision,
       coordinateMap: coordinateMap,
       languageFilter: languageFilter,
@@ -107,8 +112,19 @@ class ReaderContent {
     final rich = source.length > 64 * 1024
         ? await compute(_splitParagraphs, source)
         : _splitParagraphs(source);
+    final reviews = <int, InlineReview>{};
+    final paragraphs = source.contains(InlineReview.prefix)
+        ? [for (final (index, text) in rich.paragraphs.indexed)
+            text.replaceAllMapped(InlineReview.marker, (match) {
+              if (text.substring(0, match.start).trim().isNotEmpty) {
+                reviews[index] = InlineReview.fromMarker(match as RegExpMatch);
+              }
+              return '';
+            })]
+        : rich.paragraphs;
     return ReaderContent(
-      List.unmodifiable(rich.paragraphs),
+      List.unmodifiable(paragraphs),
+      reviews: Map.unmodifiable(reviews),
       formats: rich.formats,
       notes: rich.notes,
       revision: rich.revision,
@@ -134,6 +150,7 @@ class ReaderContent {
     }
     return ReaderContent(
       List.unmodifiable(localized),
+      reviews: reviews,
       readingOrder: readingOrder,
       inlineOwners: inlineOwners,
       placementIds: placementIds,

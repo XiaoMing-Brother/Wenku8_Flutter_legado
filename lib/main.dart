@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'personal_covers.dart';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -60,6 +61,7 @@ Future<void> main() async {
   unawaited(SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge));
   final state = await LibraryState.load();
   for (final load in [
+    PersonalCovers.shared.load,
     ReplaceRuleStore.shared.load,
     DictRuleStore.shared.load,
   ]) {

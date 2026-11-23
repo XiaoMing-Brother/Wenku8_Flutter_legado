@@ -30,6 +30,7 @@ class BookSourcesPage extends StatefulWidget {
     this.books,
     this.repository,
     this.onSourceSwitched,
+    this.onOpenBook,
   });
 
   final BookSourceLibrary library;
@@ -42,6 +43,7 @@ class BookSourcesPage extends StatefulWidget {
 
   /// 可选：批量换源完成后同步书架进度、书签与元数据。
   final Future<void> Function(Novel previous, Novel switched)? onSourceSwitched;
+  final void Function(BuildContext context, Novel book)? onOpenBook;
 
   @override
   State<BookSourcesPage> createState() => _BookSourcesPageState();
@@ -59,6 +61,8 @@ class _BookSourcesPageState extends State<BookSourcesPage> {
   _SourceFilter _filter = _SourceFilter.all;
   String? _groupFilter;
   _SourceSort _sort = _SourceSort.importOrder;
+  BookSource? _expandedSource;
+  Future<List<BookSourceExploreKind>>? _rankings;
 
   BookSourceLibrary get _library => widget.library;
 
@@ -447,6 +451,13 @@ class _BookSourcesPageState extends State<BookSourcesPage> {
               order: 5,
               onPressed: () => Navigator.pop(menu, 'batch'),
             ),
+          if (_visibleSources.isNotEmpty)
+            GlassMenuItem(
+              label: '校验当前列表',
+              icon: CupertinoIcons.checkmark_circle,
+              order: 6,
+              onPressed: () => Navigator.pop(menu, 'validate'),
+            ),
         ],
       ),
     );
@@ -464,8 +475,17 @@ class _BookSourcesPageState extends State<BookSourcesPage> {
         await _prepare();
       case 'batch':
         await _openBatch();
+      case 'validate':
+        await _openValidation(_visibleSources);
     }
   }
+
+  Future<void> _openValidation(List<BookSource> sources) => showJellySheet<void>(
+    context: context,
+    reduceMotion: MediaQuery.disableAnimationsOf(context),
+    heightFactor: .82,
+    builder: (_) => _SourceCheckSheet(library: _library, sources: sources),
+  );
 
   Future<void> _openBatch() async {
     final repository = widget.repository;
@@ -596,10 +616,17 @@ class _BookSourcesPageState extends State<BookSourcesPage> {
               order: 6,
               onPressed: () => Navigator.pop(menu, 'checkLogin'),
             ),
+          if (source.supported && source.canSearch)
+            GlassMenuItem(
+              label: '调试已保存规则',
+              icon: CupertinoIcons.search,
+              order: 7,
+              onPressed: () => Navigator.pop(menu, 'debug'),
+            ),
           GlassMenuItem(
             label: '删除书源',
             icon: CupertinoIcons.trash,
-            order: 7,
+            order: 8,
             onPressed: () => Navigator.pop(menu, 'delete'),
           ),
         ],
@@ -622,6 +649,13 @@ class _BookSourcesPageState extends State<BookSourcesPage> {
         await _logout(source);
       case 'checkLogin':
         await _checkLogin(source);
+      case 'debug':
+        await showJellySheet<void>(
+          context: context,
+          reduceMotion: MediaQuery.disableAnimationsOf(context),
+          heightFactor: .78,
+          builder: (_) => _SourceDebugSheet(library: _library, source: source),
+        );
       case 'delete':
         await _remove(source);
     }
@@ -720,13 +754,23 @@ class _BookSourcesPageState extends State<BookSourcesPage> {
                             padding: EdgeInsets.only(
                               bottom: _selecting
                                   ? DockLayout.underlayExtentOf(context) + 12
-                                  : MediaQuery.paddingOf(context).bottom + 24,
+                                  : featurePadding(context).bottom,
                             ),
                             itemCount: visible.length,
                             separatorBuilder: (_, _) =>
                                 const SizedBox(height: 14),
-                            itemBuilder: (context, index) =>
-                                _sourcePanel(context, visible[index]),
+                            itemBuilder: (context, index) {
+                              final source = visible[index];
+                              return Column(
+                                key: ValueKey(source.key),
+                                children: [
+                                  _sourcePanel(context, source),
+                                  if (!_selecting &&
+                                      identical(_expandedSource, source))
+                                    _sourceRankings(source),
+                                ],
+                              );
+                            },
                           ),
                   ),
                 ],
@@ -1033,6 +1077,12 @@ class _BookSourcesPageState extends State<BookSourcesPage> {
               onPressed: () => Navigator.pop(menu, 'ungroup'),
             ),
             GlassMenuItem(
+              label: '校验所选书源',
+              icon: CupertinoIcons.checkmark_circle,
+              order: 5,
+              onPressed: () => Navigator.pop(menu, 'validate'),
+            ),
+            GlassMenuItem(
               label: '导出',
               icon: CupertinoIcons.square_arrow_up,
               order: 4,
@@ -1042,7 +1092,7 @@ class _BookSourcesPageState extends State<BookSourcesPage> {
           GlassMenuItem(
             label: '完成多选',
             icon: CupertinoIcons.check_mark,
-            order: 5,
+            order: 6,
             onPressed: () => Navigator.pop(menu, 'complete'),
           ),
         ],
@@ -1060,9 +1110,106 @@ class _BookSourcesPageState extends State<BookSourcesPage> {
         await _updateSelectedGroups(add: false);
       case 'export':
         await _export(keys: _selectedKeys);
+      case 'validate':
+        await _openValidation([
+          for (final source in _library.sources)
+            if (keys.contains(source.key)) source,
+        ]);
       case 'complete':
         _toggleSelecting();
     }
+  }
+
+  void _toggleRankings(BookSource source) {
+    if (identical(_expandedSource, source)) {
+      setState(() {
+        _expandedSource = null;
+        _rankings = null;
+      });
+    } else {
+      _loadRankings(source);
+    }
+  }
+
+  void _loadRankings(BookSource source) {
+    setState(() {
+      _expandedSource = source;
+      _rankings = source.supported && source.enabled && source.canExplore
+          ? Future.sync(() => _library.exploreKinds(source))
+          : null;
+      _rankings?.ignore();
+    });
+  }
+
+  Widget _sourceRankings(BookSource source) {
+    final rankings = _rankings;
+    return Padding(
+      padding: const EdgeInsets.only(top: 10),
+      child: rankings == null
+          ? ContentNotice(
+              icon: CupertinoIcons.list_bullet,
+              title: !source.supported
+                  ? '暂不支持此类型的榜单'
+                  : !source.enabled
+                  ? '启用书源后可查看榜单'
+                  : source.exploreUrl.isEmpty
+                  ? '此书源未配置榜单'
+                  : '启用发现后可查看榜单',
+            )
+          : FutureBuilder<List<BookSourceExploreKind>>(
+              future: rankings,
+              builder: (context, snapshot) {
+                if (snapshot.connectionState != ConnectionState.done) {
+                  return const Padding(
+                    padding: EdgeInsets.all(12),
+                    child: CupertinoActivityIndicator(),
+                  );
+                }
+                if (snapshot.hasError) {
+                  return ContentNotice(
+                    icon: CupertinoIcons.exclamationmark_circle,
+                    title: '榜单加载失败',
+                    message: _sourceErrorMessage(snapshot.error!),
+                    onRetry: () => _loadRankings(source),
+                  );
+                }
+                final entries = snapshot.requireData.where(
+                  (kind) => kind.opensBooks,
+                );
+                if (entries.isEmpty) {
+                  return const ContentNotice(
+                    icon: CupertinoIcons.list_bullet,
+                    title: '此书源没有可直接打开的榜单',
+                  );
+                }
+                return Align(
+                  alignment: Alignment.centerLeft,
+                  child: Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      for (final kind in entries)
+                        GlassTextButton(
+                          onPressed: () => pushNovelPage<void>(
+                            context,
+                            _BookSourceRankingPage(
+                              source: source,
+                              kind: kind,
+                              library: _library,
+                              onOpenBook: widget.onOpenBook,
+                            ),
+                            reduceMotion: MediaQuery.disableAnimationsOf(
+                              context,
+                            ),
+                          ),
+                          child: AppText(kind.label),
+                        ),
+                    ],
+                  ),
+                );
+              },
+            ),
+    );
   }
 
   Widget _sourcePanel(BuildContext context, BookSource source) {
@@ -1073,6 +1220,7 @@ class _BookSourcesPageState extends State<BookSourcesPage> {
     final details = <String>[
       if (source.groups.isNotEmpty) source.groups.join(' / '),
       source.typeLabel,
+      if (source.supported && source.canExplore) '有榜单',
       if (source.hasReviewRule) '支持段评',
       if (host.isNotEmpty) host,
       if (source.lastUpdateTime > 0) '更新 ${_dateLabel(source.lastUpdateTime)}',
@@ -1085,7 +1233,7 @@ class _BookSourcesPageState extends State<BookSourcesPage> {
       backgroundColor: selected ? action?.withValues(alpha: .045) : null,
       onTap: _selecting
           ? () => _toggleSelected(source.key)
-          : () => _editSource(source),
+          : () => _toggleRankings(source),
       child: Row(
         children: [
           Expanded(
@@ -1165,6 +1313,149 @@ class _BookSourcesPageState extends State<BookSourcesPage> {
   }
 }
 
+class _BookSourceRankingPage extends StatefulWidget {
+  const _BookSourceRankingPage({
+    required this.source,
+    required this.kind,
+    required this.library,
+    required this.onOpenBook,
+  });
+
+  final BookSource source;
+  final BookSourceExploreKind kind;
+  final BookSourceLibrary library;
+  final void Function(BuildContext context, Novel book)? onOpenBook;
+
+  @override
+  State<_BookSourceRankingPage> createState() => _BookSourceRankingPageState();
+}
+
+class _BookSourceRankingPageState extends State<_BookSourceRankingPage> {
+  final _books = <int, Novel>{};
+  int _page = 0;
+  bool _hasMore = false;
+  bool _loading = false;
+  Object? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    if (_loading) return;
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      final page = _page + 1;
+      final result = await widget.library.explore(
+        widget.source,
+        widget.kind.url,
+        page: page,
+      );
+      if (!mounted) return;
+      setState(() {
+        final previousCount = _books.length;
+        for (final book in result.items) {
+          _books.putIfAbsent(book.id, () => book);
+        }
+        _page = page;
+        _hasMore = result.hasMore && _books.length > previousCount;
+        _loading = false;
+      });
+    } on Object catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _error = error;
+        _loading = false;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final books = _books.values.toList();
+    final error = _error;
+    return ArchiveFeaturePage(
+      title: widget.kind.label,
+      code: 'SOURCE / RANKING',
+      child: books.isEmpty
+          ? Padding(
+              padding: featurePadding(context),
+              child: _loading
+                  ? const Center(child: CupertinoActivityIndicator())
+                  : ContentNotice(
+                      icon: CupertinoIcons.book,
+                      title: error == null ? '榜单暂无书籍' : '榜单加载失败',
+                      message: error == null ? null : _sourceErrorMessage(error),
+                      onRetry: error == null ? null : _load,
+                    ),
+            )
+          : ListView.separated(
+              padding: featurePadding(context),
+              itemCount: books.length + 1,
+              separatorBuilder: (_, _) => const SizedBox(height: 14),
+              itemBuilder: (context, index) {
+                if (index == books.length) {
+                  if (_loading) {
+                    return const Center(child: CupertinoActivityIndicator());
+                  }
+                  if (error != null) {
+                    return ContentNotice(
+                      icon: CupertinoIcons.exclamationmark_circle,
+                      title: '下一页加载失败',
+                      message: _sourceErrorMessage(error),
+                      onRetry: _load,
+                    );
+                  }
+                  return _hasMore
+                      ? Center(
+                          child: GlassTextButton(
+                            onPressed: _load,
+                            child: const AppText('加载更多'),
+                          ),
+                        )
+                      : const SizedBox.shrink();
+                }
+                final book = books[index];
+                final openBook = widget.onOpenBook;
+                return ContentPanel(
+                  onTap: openBook == null ? null : () => openBook(context, book),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      AppText(
+                        book.title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontWeight: FontWeight.w600),
+                      ),
+                      const SizedBox(height: 5),
+                      AppText(
+                        [
+                          if (book.author.isNotEmpty) book.author,
+                          widget.source.name,
+                        ].join(' · '),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 12,
+                          height: 1.4,
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
+    );
+  }
+}
+
 String _sourceErrorMessage(Object error) {
   if (error is BookSourceImportException) return error.message;
   if (error is FormatException && error.message.toString().isNotEmpty) {
@@ -1185,6 +1476,185 @@ class _SourceEditorSheet extends StatefulWidget {
   State<_SourceEditorSheet> createState() => _SourceEditorSheetState();
 }
 
+class _SourceCheckSheet extends StatefulWidget {
+  const _SourceCheckSheet({required this.library, required this.sources});
+
+  final BookSourceLibrary library;
+  final List<BookSource> sources;
+
+  @override
+  State<_SourceCheckSheet> createState() => _SourceCheckSheetState();
+}
+
+class _SourceCheckSheetState extends State<_SourceCheckSheet> {
+  final _query = TextEditingController(text: '我的');
+  final _results = <String>[];
+  Object? _run;
+  String _status = '';
+
+  @override
+  void dispose() {
+    _run = null;
+    _query.dispose();
+    super.dispose();
+  }
+
+  Future<void> _start() async {
+    final term = _query.text.trim();
+    if (_run != null || term.isEmpty) return;
+    final run = Object();
+    bool cancelled() => !mounted || !identical(_run, run);
+    setState(() {
+      _run = run;
+      _results.clear();
+      _status = '';
+    });
+    for (final source in widget.sources) {
+      final result = await widget.library.checkTextSource(
+        source,
+        term,
+        cancelled: cancelled,
+        onStage: (stage) => setState(() => _status = '${source.name} · $stage'),
+      );
+      if (cancelled() || result == null) return;
+      setState(() => _results.add(result));
+    }
+    setState(() {
+      _run = null;
+      _status = '校验完成';
+    });
+  }
+
+  void _stop() => setState(() {
+    _run = null;
+    _status = '已停止，未完成的书源不计入结果';
+  });
+
+  @override
+  Widget build(BuildContext context) => ListView.separated(
+    padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
+    itemCount: _results.length + 1,
+    separatorBuilder: (_, _) => const SizedBox(height: 14),
+    itemBuilder: (context, index) {
+      if (index == 0) {
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const ArchiveSection(title: '文字书源校验', code: 'SOURCE / VALIDATION'),
+            const SizedBox(height: 12),
+            const AppText('逐源搜索并读取首本书的详情、目录和首章。优先用源内校验词；未命中不代表失效，不会更改分组或启用状态。'),
+            const SizedBox(height: 14),
+            TextField(
+              controller: _query,
+              enabled: _run == null,
+              onChanged: (_) => setState(() {}),
+              onSubmitted: (_) => _start(),
+              decoration: const InputDecoration(labelText: '默认校验关键词'),
+            ),
+            const SizedBox(height: 14),
+            AppText('已校验 ${_results.length}/${widget.sources.length}　$_status'),
+            const SizedBox(height: 8),
+            GlassTextButton(
+              onPressed: _run != null ? _stop : (_query.text.trim().isEmpty ? null : _start),
+              child: AppText(_run != null ? '停止校验' : '开始校验'),
+            ),
+          ],
+        );
+      }
+      return ContentPanel(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            AppText(widget.sources[index - 1].name,
+                style: const TextStyle(fontWeight: FontWeight.w600)),
+            const SizedBox(height: 4),
+            AppText(_results[index - 1], maxLines: 2, overflow: TextOverflow.ellipsis,
+                style: TextStyle(fontSize: 12, height: 1.4,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant)),
+          ],
+        ),
+      );
+    },
+  );
+}
+
+class _SourceDebugSheet extends StatefulWidget {
+  const _SourceDebugSheet({required this.library, required this.source});
+  final BookSourceLibrary library;
+  final BookSource source;
+
+  @override
+  State<_SourceDebugSheet> createState() => _SourceDebugSheetState();
+}
+
+class _SourceDebugSheetState extends State<_SourceDebugSheet> {
+  final _query = TextEditingController();
+  final _lines = <String>[];
+  bool _busy = false;
+
+  @override
+  void dispose() {
+    _query.dispose();
+    super.dispose();
+  }
+
+  Future<void> _run() async {
+    final term = _query.text.trim();
+    if (_busy || term.isEmpty) return;
+    setState(() { _busy = true; _lines.clear(); });
+    var stage = '搜索';
+    void report(String message) => setState(() => _lines.add('$stage：$message'));
+    try {
+      final library = widget.library;
+      final page = await library.searchInSource(widget.source, term);
+      if (!mounted) return;
+      report('本页 ${page.items.length} 本');
+      if (page.items.isEmpty || library is! NovelRepository) return;
+      final repository = library as NovelRepository;
+      stage = '详情';
+      final book = await repository.detail(page.items.first);
+      if (!mounted) return;
+      report(book.title);
+      stage = '目录';
+      final chapters = await repository.chapters(book.id);
+      if (!mounted) return;
+      report('${chapters.length} 章');
+      if (chapters.isEmpty) return;
+      if (widget.source.resourceType != 0) {
+        report('首项：${chapters.first.title}；请从阅读页打开媒体或文件');
+        return;
+      }
+      stage = '正文';
+      final body = await repository.chapterContent(book.id, chapters.first);
+      if (mounted) report('${chapters.first.title} · ${body.length} 字符');
+    } catch (error) {
+      if (mounted) report(_sourceErrorMessage(error));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => ListView(
+    padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
+    children: [
+      const ArchiveSection(title: '调试已保存规则', code: 'SOURCE / DEBUG'),
+      const SizedBox(height: 12),
+      AppText('仅请求「${widget.source.name}」。将读取第一本搜索结果的详情、目录和首章；不会加入书架。'),
+      const SizedBox(height: 14),
+      TextField(controller: _query, enabled: !_busy, onChanged: (_) => setState(() {}),
+        decoration: const InputDecoration(labelText: '测试关键词'), onSubmitted: (_) => _run()),
+      const SizedBox(height: 14),
+      GlassTextButton(onPressed: _busy || _query.text.trim().isEmpty ? null : _run,
+        child: AppText(_busy ? '正在调试…' : '开始调试')),
+      if (_lines.isNotEmpty) ...[
+        const SizedBox(height: 14),
+        ContentPanel(child: AppText(_lines.join('\n'))),
+      ],
+    ],
+  );
+}
+
 class _SourceEditorSheetState extends State<_SourceEditorSheet> {
   late final _name = TextEditingController(text: widget.source.name);
   late final _groups = TextEditingController(
@@ -1192,6 +1662,9 @@ class _SourceEditorSheetState extends State<_SourceEditorSheet> {
   );
   late final _search = TextEditingController(text: widget.source.searchUrl);
   late final _explore = TextEditingController(text: widget.source.exploreUrl);
+  late final _initialRules = widget.source.ruleDocument;
+  late final _rules = TextEditingController(text: _initialRules);
+  String? _ruleError;
   late bool _enabled = widget.source.enabled;
   late bool _enabledExplore = widget.source.enabledExplore;
 
@@ -1201,17 +1674,27 @@ class _SourceEditorSheetState extends State<_SourceEditorSheet> {
     _groups.dispose();
     _search.dispose();
     _explore.dispose();
+    _rules.dispose();
     super.dispose();
   }
 
   void _save() {
+    var source = widget.source;
+    if (_rules.text != _initialRules) {
+      try {
+        source = source.withRuleDocument(_rules.text);
+      } on FormatException catch (error) {
+        setState(() => _ruleError = '规则 JSON 无效：${error.message}');
+        return;
+      }
+    }
     final groups = _groups.text
         .split(RegExp(r'[,;，；]'))
         .map((value) => value.trim())
         .where((value) => value.isNotEmpty);
     Navigator.pop(
       context,
-      widget.source.withEdits(
+      source.withEdits(
         name: _name.text,
         groups: groups,
         searchUrl: _search.text,
@@ -1272,7 +1755,7 @@ class _SourceEditorSheetState extends State<_SourceEditorSheet> {
         ),
         const SizedBox(height: 12),
         const AppText(
-          '可修改名称、分组、搜索地址和发现地址；源地址是书源身份，保持不变。',
+          '可修改基本信息和解析规则；书源地址保持不变。',
           style: TextStyle(fontSize: 13, height: 1.6),
         ),
         const SizedBox(height: 14),
@@ -1288,6 +1771,24 @@ class _SourceEditorSheetState extends State<_SourceEditorSheet> {
                 decoration: const InputDecoration(
                   labelText: '名称',
                   helperText: '留空时使用源地址作为名称',
+                ),
+              ),
+              const SizedBox(height: 10),
+              TextFormField(
+                key: const ValueKey('book-source-rule-document'),
+                controller: _rules,
+                minLines: 3,
+                maxLines: 12,
+                autocorrect: false,
+                enableSuggestions: false,
+                onChanged: (_) {
+                  if (_ruleError != null) setState(() => _ruleError = null);
+                },
+                decoration: InputDecoration(
+                  labelText: '解析规则 JSON',
+                  helperText: '可编辑搜索、发现、详情、目录和正文规则。省略规则组保留原值，设为 null 移除。',
+                  helperMaxLines: 2,
+                  errorText: _ruleError,
                 ),
               ),
               const SizedBox(height: 10),
@@ -1411,7 +1912,7 @@ Future<void> showBookSourceLoginSheet(
   try {
     state = await library.loginInfo(source);
   } on Object catch (error) {
-    onFeedback(_sourceErrorMessage(error), error: true);
+    if (context.mounted) onFeedback(_sourceErrorMessage(error), error: true);
     return;
   }
   if (!context.mounted) return;
@@ -1475,6 +1976,8 @@ class BookSourceLoginSheet extends StatefulWidget {
 class _BookSourceLoginSheetState extends State<BookSourceLoginSheet> {
   final Map<String, String> _values = {};
   final Map<String, TextEditingController> _controllers = {};
+  final _fields = <BookSourceLoginField>[];
+  final _selectOptions = <String, List<String>>{};
   bool _busy = false;
   String? _error;
 
@@ -1482,25 +1985,34 @@ class _BookSourceLoginSheetState extends State<BookSourceLoginSheet> {
   void initState() {
     super.initState();
     _values.addAll(widget.initial.values);
+    final inputs = <String>{};
     for (final field in widget.initial.fields) {
+      if (!field.isButton && !inputs.add(field.name)) continue;
+      _fields.add(field);
       if (field.isButton) continue;
-      if (field.isToggle || field.isSelect) {
-        final current = _values[field.name] ?? '';
-        final options = field.chars.where((value) => value.isNotEmpty).toList();
-        if (current.isEmpty) {
-          _values[field.name] = field.defaultValue.isNotEmpty
+      final current = _values[field.name] ?? field.defaultValue;
+      if (field.isSelect) {
+        final options = field.chars
+            .where((value) => value.isNotEmpty)
+            .toSet()
+            .toList();
+        if (options.isNotEmpty) {
+          _selectOptions[field.name] = options;
+          _values[field.name] = options.contains(current)
+              ? current
+              : options.contains(field.defaultValue)
               ? field.defaultValue
-              : (options.isNotEmpty ? options.first : '');
-        } else if (field.isSelect &&
-            options.isNotEmpty &&
-            !options.contains(current)) {
-          _values[field.name] = options.first;
+              : options.first;
+          continue;
         }
-      } else {
-        _controllers[field.name] = TextEditingController(
-          text: _values[field.name] ?? '',
-        );
       }
+      if (field.isToggle) {
+        final (onValue, offValue) = _toggleValues(field);
+        _values[field.name] = current == offValue ? offValue : onValue;
+        continue;
+      }
+      _values[field.name] = current;
+      _controllers[field.name] = TextEditingController(text: current);
     }
   }
 
@@ -1515,22 +2027,20 @@ class _BookSourceLoginSheetState extends State<BookSourceLoginSheet> {
   Future<void> _runAction(BookSourceLoginField field) async {
     final action = field.action.trim();
     if (action.isEmpty || _busy) return;
-    if (action.startsWith('http://') || action.startsWith('https://')) {
-      final uri = Uri.tryParse(action);
-      if (uri == null) return;
-      try {
-        await launchUrl(uri, mode: LaunchMode.externalApplication);
-      } on Object catch (error) {
-        if (mounted) setState(() => _error = _sourceErrorMessage(error));
-      }
-      return;
-    }
     setState(() {
       _busy = true;
       _error = null;
     });
     try {
-      await widget.library.loginAction(widget.source, action, values: _values);
+      if (action.startsWith('http://') || action.startsWith('https://')) {
+        final uri = Uri.tryParse(action);
+        final opened = uri != null &&
+            uri.host.isNotEmpty &&
+            await launchUrl(uri, mode: LaunchMode.externalApplication);
+        if (!opened && mounted) setState(() => _error = '无法打开登录操作链接');
+      } else {
+        await widget.library.loginAction(widget.source, action, values: _values);
+      }
     } on Object catch (error) {
       if (mounted) setState(() => _error = _sourceErrorMessage(error));
     } finally {
@@ -1549,7 +2059,7 @@ class _BookSourceLoginSheetState extends State<BookSourceLoginSheet> {
     });
     try {
       final state = await widget.library.login(widget.source, _values);
-      if (!mounted) return;
+      if (!mounted || ModalRoute.of(context)?.isCurrent == false) return;
       Navigator.pop(context, state);
     } on Object catch (error) {
       if (!mounted) return;
@@ -1576,31 +2086,55 @@ class _BookSourceLoginSheetState extends State<BookSourceLoginSheet> {
   );
 
   Widget _selectField(BookSourceLoginField field) {
-    final options = field.chars.where((value) => value.isNotEmpty).toList();
-    if (options.isEmpty) return _textField(field);
-    final current = _values[field.name] ?? '';
-    return DropdownButtonFormField<String>(
+    final options = _selectOptions[field.name];
+    if (options == null) return _textField(field);
+    return GlassTextButton(
       key: ValueKey('book-source-login-${field.name}'),
-      initialValue: options.contains(current) ? current : options.first,
-      decoration: InputDecoration(
-        labelText: field.title,
-        border: const OutlineInputBorder(),
-      ),
-      items: [
-        for (final option in options)
-          DropdownMenuItem(value: option, child: AppText(option)),
-      ],
-      onChanged: _busy
+      onPressed: _busy
           ? null
-          : (value) {
-              if (value != null) setState(() => _values[field.name] = value);
+          : () async {
+              final value = await showJellySheet<String>(
+                context: context,
+                reduceMotion: MediaQuery.disableAnimationsOf(context),
+                heightFactor: .66,
+                maxWidth: 560,
+                builder: (_) => _OptionPickerSheet<String>(
+                  title: field.title,
+                  code: 'SOURCE / LOGIN OPTION',
+                  selected: _values[field.name],
+                  options: [for (final option in options) (option, option)],
+                ),
+              );
+              if (mounted && value != null) {
+                setState(() => _values[field.name] = value);
+              }
             },
+      child: AppText(
+        '${field.title}：${_values[field.name]}',
+        maxLines: 2,
+        overflow: TextOverflow.ellipsis,
+      ),
+    );
+  }
+
+  (String, String) _toggleValues(BookSourceLoginField field) {
+    final options = field.chars
+        .where((value) => value.isNotEmpty)
+        .toSet()
+        .toList();
+    final onValue = options.firstOrNull ?? 'true';
+    return (
+      onValue,
+      options.length > 1
+          ? options[1]
+          : onValue == 'false'
+          ? 'true'
+          : 'false',
     );
   }
 
   Widget _toggleField(BookSourceLoginField field) {
-    final onValue = field.chars.isNotEmpty ? field.chars.first : 'true';
-    final offValue = field.chars.length > 1 ? field.chars[1] : 'false';
+    final (onValue, offValue) = _toggleValues(field);
     final value = (_values[field.name] ?? onValue) != offValue;
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
@@ -1624,8 +2158,7 @@ class _BookSourceLoginSheetState extends State<BookSourceLoginSheet> {
   Widget _buttonField(BookSourceLoginField field) => Align(
     alignment: Alignment.centerLeft,
     child: GlassTextButton(
-      key: ValueKey('book-source-login-${field.name}'),
-      onPressed: _busy ? null : () => _runAction(field),
+      onPressed: _busy || field.action.isEmpty ? null : () => _runAction(field),
       child: AppText(field.title),
     ),
   );
@@ -1680,8 +2213,7 @@ class _BookSourceLoginSheetState extends State<BookSourceLoginSheet> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      for (final (index, field)
-                          in widget.initial.fields.indexed) ...[
+                      for (final (index, field) in _fields.indexed) ...[
                         if (index > 0) const SizedBox(height: 12),
                         _field(field),
                       ],
@@ -2039,11 +2571,13 @@ class _OptionPickerSheet<T> extends StatelessWidget {
     required this.title,
     required this.options,
     this.selected,
+    this.code,
   });
 
   final String title;
   final List<(T, String)> options;
   final T? selected;
+  final String? code;
 
   @override
   Widget build(BuildContext context) => SizedBox(
@@ -2056,13 +2590,15 @@ class _OptionPickerSheet<T> extends StatelessWidget {
           child: Row(
             children: [
               Expanded(
-                child: AppText(
-                  title,
-                  style: const TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
+                child: code == null
+                    ? AppText(
+                        title,
+                        style: const TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      )
+                    : ArchiveSection(title: title, code: code!),
               ),
               GlassIconButton(
                 icon: CupertinoIcons.xmark,

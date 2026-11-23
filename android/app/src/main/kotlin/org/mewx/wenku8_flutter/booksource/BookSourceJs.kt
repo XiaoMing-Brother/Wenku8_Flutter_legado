@@ -8,8 +8,10 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
+import okio.ByteString.Companion.decodeHex
 import org.json.JSONArray
 import org.json.JSONObject
+import org.jsoup.nodes.Element
 import org.mozilla.javascript.BaseFunction
 import org.mozilla.javascript.Context
 import org.mozilla.javascript.NativeArray
@@ -23,8 +25,41 @@ import org.mozilla.javascript.Undefined
 import org.mozilla.javascript.WrappedException
 
 internal class BookSourceJs(private val http: BookSourceHttp) {
+    private val ruleVariableName = Regex("[A-Za-z_][A-Za-z0-9_]*")
     private val cache = JsCache()
+    private val ephemeralVariables = BookSourceVariables(null)
     private val remoteLibs = ConcurrentHashMap<String, String>()
+
+    fun formatChapterTitles(script: String?, chapters: List<ChapterData>): List<ChapterData> {
+        if (script.isNullOrBlank()) return chapters
+        val cx = Context.enter()
+        try {
+            cx.optimizationLevel = -1
+            cx.languageVersion = Context.VERSION_ES6
+            val scope = cx.initSafeStandardObjects()
+            val compiled = try {
+                cx.compileString(script, "ruleToc.formatJs", 1, null)
+            } catch (_: RhinoException) {
+                return chapters
+            }
+            ScriptableObject.putProperty(scope, "gInt", 0)
+            return chapters.mapIndexed { index, chapter ->
+                val value = toJs(cx, scope, chapter.toMap()) as Scriptable
+                ScriptableObject.putProperty(value, "index", index)
+                ScriptableObject.putProperty(scope, "chapter", value)
+                ScriptableObject.putProperty(scope, "index", index + 1)
+                ScriptableObject.putProperty(scope, "title", chapter.title)
+                try {
+                    val title = compiled.exec(cx, scope)
+                    if (title == null || title is Undefined) chapter else chapter.copy(title = Context.toString(title))
+                } catch (_: RhinoException) {
+                    chapter
+                }
+            }
+        } finally {
+            Context.exit()
+        }
+    }
 
     fun eval(script: String, env: JsEnv, followup: String? = null): Any? {
         val cx = Context.enter()
@@ -211,7 +246,7 @@ internal class BookSourceJs(private val http: BookSourceHttp) {
         }
         method("getLoginInfoMap", 0) {
             jsonObjectValue(cx, scope, env.variables?.get(loginInfoKey(env.source.key)))
-                ?: cx.newObject(scope)
+                ?: toJs(cx, scope, emptyMap<String, String>())
         }
         method("getLoginHeader", 0) {
             env.variables?.get(loginHeaderKey(env.source.key))?.ifBlank { null }
@@ -303,6 +338,11 @@ internal class BookSourceJs(private val http: BookSourceHttp) {
                 ScriptableObject.putProperty(result, name, function)
             }
             method("get", 1) { args -> cache.get(stringArg(args, 0)) }
+            method("getFromMemory", 1) { args -> cache.get(stringArg(args, 0)) }
+            method("putMemory", 2) { args ->
+                cache.put(stringArg(args, 0), stringArg(args, 1), 0L)
+                null
+            }
             method("put", 3) { args ->
                 val ttl = stringArg(args, 2).toLongOrNull() ?: 0L
                 cache.put(stringArg(args, 0), stringArg(args, 1), ttl)
@@ -349,6 +389,13 @@ internal class BookSourceJs(private val http: BookSourceHttp) {
         }
         fn("get", 2) { args ->
             val url = stringArg(args, 0)
+            if (args.size == 1 && ruleVariableName.matches(url)) {
+                return@fn when (url) {
+                    "bookName" -> env.book?.name.orEmpty()
+                    "title" -> env.chapter?.title.orEmpty()
+                    else -> variables[url]?.toString().orEmpty()
+                }
+            }
             val headers = headerMap(args.getOrNull(1))
             val spec = RequestSpec(
                 http.resolve(env.source.key, url),
@@ -416,6 +463,12 @@ internal class BookSourceJs(private val http: BookSourceHttp) {
         }
         fn("base64Decode", 1) { args ->
             String(Base64.decode(stringArg(args, 0), Base64.DEFAULT))
+        }
+        fn("hexDecodeToString", 1) { args ->
+            stringArg(args, 0).decodeHex().utf8()
+        }
+        fn("androidId", 0) { _ ->
+            (env.variables ?: ephemeralVariables).deviceId(env.source.key)
         }
         fn("md5Encode", 1) { args ->
             MessageDigest.getInstance("MD5")
@@ -509,8 +562,8 @@ internal class BookSourceJs(private val http: BookSourceHttp) {
             http.setCookie(env.source.key, stringArg(args, 0), stringArg(args, 1))
             null
         }
-        method("removeCookie", 1) { _ ->
-            http.removeCookie(env.source.key)
+        method("removeCookie", 1) { args ->
+            http.setCookie(env.source.key, stringArg(args, 0), "")
             null
         }
         method("cookieToMap", 1) { args ->
@@ -666,6 +719,7 @@ internal class BookSourceJs(private val http: BookSourceHttp) {
             getter.prototype = ScriptableObject.getFunctionPrototype(scope)
             ScriptableObject.putProperty(objectValue, "get", getter)
         }
+        is Element -> Context.javaToJS(value, scope)
         is Iterable<*> -> cx.newArray(
             scope,
             value.map { toJs(cx, scope, it) }.toTypedArray(),
@@ -828,4 +882,10 @@ private fun ChapterData.toMap(): Map<String, Any?> = mapOf(
     "title" to title,
     "url" to url,
     "nextUrl" to nextUrl,
+    "bookUrl" to bookUrl,
+    "baseUrl" to baseUrl,
+    "tag" to tag,
+    "isVolume" to isVolume,
+    "isVip" to isVip,
+    "isPay" to isPay,
 )

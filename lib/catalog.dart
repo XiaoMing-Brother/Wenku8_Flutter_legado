@@ -87,6 +87,7 @@ class Novel {
           id: entry.target.chapterId,
           volumeId: volumeId,
           volumeTitle: volumeTitle,
+          isLocked: chapter.isLocked,
         ),
       );
     }

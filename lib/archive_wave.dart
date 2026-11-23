@@ -988,7 +988,7 @@ class _LazyArchiveCoverState extends State<_LazyArchiveCover> {
   void _prewarm() {
     final book = widget.book;
     if (!_warm ||
-        book.coverUrl == null ||
+        novelCoverUrl(book) == null ||
         !TickerMode.valuesOf(context).enabled) {
       return;
     }
@@ -996,12 +996,12 @@ class _LazyArchiveCoverState extends State<_LazyArchiveCover> {
       widget.width,
       MediaQuery.devicePixelRatioOf(context),
     );
-    final key = (book.id, book.coverUrl, width);
+    final key = (book.id, novelCoverUrl(book), width);
     if (_warming == key) return;
     _warming = key;
     unawaited(() async {
       try {
-        final bytes = await novelCoverBytes(book);
+        final bytes = await novelCoverBytes(book, preferBookCache: true);
         if (!mounted || !_warm || _warming != key) return;
         // Decode one detent before the face is mounted, at exactly the same
         // resolution/key as NovelCover. No extra image widgets or tickers.

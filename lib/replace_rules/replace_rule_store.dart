@@ -5,6 +5,8 @@ import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 
+import '../book_identity.dart';
+import '../catalog.dart';
 import 'replace_rule.dart';
 import 'replace_rule_engine.dart';
 
@@ -31,6 +33,9 @@ class ReplaceRuleStore extends ChangeNotifier {
   static final shared = ReplaceRuleStore();
   static const version = 1;
   static const maxRules = 5000;
+
+  static String originFor(Novel book) =>
+      book.source?.sourceKey ?? (isLocalBook(book.id) ? 'loc_book' : '');
 
   Directory? _directory;
   Future<void>? _loading;
@@ -99,11 +104,11 @@ class ReplaceRuleStore extends ChangeNotifier {
   }
 
   static List<ReplaceRule> _sorted(Iterable<ReplaceRule> values) {
-    final rules = values.toList()
-      ..sort((a, b) {
-        final order = a.order.compareTo(b.order);
-        return order != 0 ? order : a.id.compareTo(b.id);
-      });
+    final rules = values.toList();
+    mergeSort(
+      rules,
+      compare: (first, second) => first.order.compareTo(second.order),
+    );
     return List.unmodifiable(rules);
   }
 
@@ -216,15 +221,24 @@ class ReplaceRuleStore extends ChangeNotifier {
     final byId = {for (final rule in _rules) rule.id: rule};
     var added = 0;
     var updated = 0;
-    var order = _rules.isEmpty ? 0 : _rules.last.order + 10;
+    var nextOrder = _rules.isEmpty ? 0 : _rules.last.order + 10;
     for (final rule in batch.rules) {
-      if (byId.containsKey(rule.id)) {
-        byId[rule.id] = rule.copyWith(order: byId[rule.id]!.order);
+      if (rule.order != ReplaceRule.unspecifiedOrder && rule.order >= nextOrder) {
+        nextOrder = rule.order + 10;
+      }
+    }
+    for (final rule in batch.rules) {
+      final previous = byId[rule.id];
+      if (previous != null) {
         updated++;
       } else {
-        byId[rule.id] = rule.copyWith(order: order);
-        order += 10;
         added++;
+      }
+      if (rule.order == ReplaceRule.unspecifiedOrder) {
+        byId[rule.id] = rule.copyWith(order: previous?.order ?? nextOrder);
+        if (previous == null) nextOrder += 10;
+      } else {
+        byId[rule.id] = rule;
       }
     }
     if (byId.length > maxRules) {

@@ -5,6 +5,8 @@ import 'dart:convert';
 /// The original Legado fields are kept as their public names so exported JSON
 /// can be imported back into Legado without a conversion step.
 class ReplaceRule {
+  static const unspecifiedOrder = -2147483648;
+
   const ReplaceRule({
     required this.id,
     required this.name,
@@ -94,11 +96,11 @@ class ReplaceRule {
       return fallback;
     }
 
-    int number(String key) {
+    int number(String key, int fallback) {
       final value = json[key];
       if (value is int) return value;
       if (value is num) return value.toInt();
-      return int.tryParse('$value') ?? 0;
+      return int.tryParse('$value') ?? fallback;
     }
 
     final rawId = json['id'];
@@ -110,11 +112,13 @@ class ReplaceRule {
     final replacement = text('replacement');
     final name = legacy ? text('replaceSummary') : text('name');
     final scope = legacy ? text('useTo') : text('scope');
-    final enabled = legacy ? flag('enable', true) : flag('isEnabled', true);
-    final regex = legacy ? flag('isRegex', true) : flag('isRegex', true);
-    final order = legacy ? number('serialNumber') : number('order');
+    final enabled = legacy ? flag('enable', false) : flag('isEnabled', true);
+    final regex = flag('isRegex', !legacy);
+    final order = legacy
+        ? number('serialNumber', 0)
+        : number('order', unspecifiedOrder);
     final scopeTitle = flag('scopeTitle', false);
-    final scopeContent = flag('scopeContent', !scopeTitle);
+    final scopeContent = flag('scopeContent', true);
 
     return ReplaceRule(
       id: id,
@@ -128,7 +132,7 @@ class ReplaceRule {
       scopeContent: scopeContent,
       enabled: enabled,
       regex: regex,
-      order: order == 0 ? index : order,
+      order: order,
     );
   }
 

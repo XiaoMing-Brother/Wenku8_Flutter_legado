@@ -9,6 +9,7 @@ Future<bool> confirmNovelAction(
   required String title,
   required String message,
   required String confirmLabel,
+  String cancelLabel = '取消',
   bool reduceMotion = false,
 }) async =>
     await showJellySheet<bool>(
@@ -35,7 +36,7 @@ Future<bool> confirmNovelAction(
             const SizedBox(height: 8),
             GlassTextButton(
               onPressed: () => Navigator.pop(sheet, false),
-              child: const AppText('取消'),
+              child: AppText(cancelLabel),
             ),
           ],
         ),

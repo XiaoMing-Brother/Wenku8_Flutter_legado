@@ -9,7 +9,7 @@ import 'package:path_provider/path_provider.dart';
 import 'catalog.dart';
 import 'ui_notifiers.dart';
 
-const _bodyFormatMarker = '\u0000WK-BODY-3\n';
+const _bodyFormatMarker = '\u0000WK-BODY-${OfflineCacheStore.bodyFormat}\n';
 final _bodyFormatPrefix = RegExp('^\u0000WK-BODY-(\\d+)\n');
 List<int> _encodeBody(String text) => utf8.encode('$_bodyFormatMarker$text');
 List<int> _encodeMetadata(Map<String, Object?> data) =>
@@ -74,7 +74,7 @@ class OfflineCacheStore extends ChangeNotifier {
   final Directory directory;
 
   /// 正文提取规则变更时递增：旧正文仍可离线阅读，联网阅读会重新抓取。
-  static const bodyFormat = 3;
+  static const bodyFormat = 4;
   static const maxBodyBytes = 8 * 1024 * 1024;
   static const maxIllustrationBytes = 8 * 1024 * 1024;
   final Map<int, OfflineBook> _books = {};
@@ -280,6 +280,7 @@ class OfflineCacheStore extends ChangeNotifier {
             title,
             '',
             id: cid,
+            isLocked: value['isLocked'] == true,
             volumeId: value['volumeId'] is int ? value['volumeId'] as int : 0,
             volumeTitle: value['volumeTitle'] is String
                 ? value['volumeTitle'] as String
@@ -360,6 +361,7 @@ class OfflineCacheStore extends ChangeNotifier {
             {
               'id': chapter.id,
               'title': chapter.title,
+              if (chapter.isLocked) 'isLocked': true,
               if (chapter.volumeId != 0) 'volumeId': chapter.volumeId,
               if (chapter.volumeTitle.isNotEmpty)
                 'volumeTitle': chapter.volumeTitle,

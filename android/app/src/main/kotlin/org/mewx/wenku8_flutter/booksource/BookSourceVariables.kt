@@ -1,6 +1,7 @@
 package org.mewx.wenku8_flutter.booksource
 
 import android.content.Context
+import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 
 /// Legado 书源用 `source.getVariable()/putVariable()` 保存发现页筛选、
@@ -50,6 +51,14 @@ internal class BookSourceVariables(context: Context?) {
             secrets?.remove(key)
         }
         preferences?.edit()?.remove(preferenceKey(key))?.apply()
+    }
+
+    @Synchronized
+    fun deviceId(sourceKey: String): String {
+        val key = "scriptDeviceId:$sourceKey"
+        return get(key).ifEmpty {
+            UUID.randomUUID().toString().replace("-", "").take(16).also { put(key, it) }
+        }
     }
 
     private fun preferenceKey(key: String): String =

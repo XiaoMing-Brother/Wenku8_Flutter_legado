@@ -34,6 +34,12 @@ abstract interface class BookSourceLibrary {
   bool get changeSourceCheckAuthor;
 
   Future<void> prepare({bool force = false});
+  Future<String?> checkTextSource(
+    BookSource source,
+    String keyword, {
+    required bool Function() cancelled,
+    required void Function(String) onStage,
+  });
   Future<BookSourceImportResult> importSources(String text);
   Future<BookSourceImportResult> importFromUrl(String url);
   Future<void> updateSource(BookSource source);
@@ -52,6 +58,7 @@ abstract interface class BookSourceLibrary {
   Future<void> cancelSearch();
   String exportSources({Set<String>? keys});
   Future<Novel> switchSource(Novel current, Novel candidate);
+  List<Novel> cachedCoverCandidates(Novel book, BookSourceSearchScope scope);
   Future<BookSourceCandidateSearchResult> searchSourceCandidates(
     Novel book, {
     required bool checkAuthor,
@@ -105,6 +112,7 @@ abstract interface class BookSourceLibrary {
     String author = '',
     String intro = '',
     String coverUrl = '',
+    String customCoverUrl = '',
   });
 }
 

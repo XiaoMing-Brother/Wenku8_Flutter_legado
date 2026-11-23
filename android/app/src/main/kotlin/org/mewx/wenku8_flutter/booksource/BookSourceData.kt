@@ -16,6 +16,12 @@ internal data class ChapterData(
     val title: String = "",
     val url: String = "",
     val nextUrl: String = "",
+    val bookUrl: String = "",
+    val baseUrl: String = "",
+    val tag: String = "",
+    val isVolume: Boolean = false,
+    val isVip: Boolean = false,
+    val isPay: Boolean = false,
 )
 
 internal data class RuleContext(

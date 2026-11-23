@@ -1574,7 +1574,7 @@ class _ReaderToolsState extends State<ReaderTools>
       _adjustment(
         EffectiveReplacesInline(
           bookTitle: widget.novel.title,
-          origin: widget.novel.source?.sourceKey ?? '',
+          origin: ReplaceRuleStore.originFor(widget.novel),
           active: _replaceRulesEnabled,
         ),
       ),

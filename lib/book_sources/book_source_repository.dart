@@ -3,7 +3,7 @@ import 'dart:convert';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart' show rootBundle;
+import 'package:flutter/services.dart' show PlatformException, rootBundle;
 
 import '../book_identity.dart';
 import '../catalog.dart';
@@ -11,6 +11,7 @@ import '../official_books.dart';
 import 'book_source.dart';
 import 'book_source_downloader.dart';
 import 'book_source_images.dart';
+import 'inline_review.dart';
 import 'book_source_identity_store.dart';
 import 'book_source_library.dart';
 import 'book_source_reference.dart';
@@ -197,6 +198,7 @@ class BookSourceRepository extends NovelRepository
   Future<void> removeSource(String key) async {
     final removed = store.source(key);
     await store.remove(key);
+    await BookSourceImages.invalidateSource(key);
     if (removed != null && _engineAvailable) {
       try {
         await transport.removeSource(key);
@@ -214,6 +216,9 @@ class BookSourceRepository extends NovelRepository
         if (store.source(key) case final source?) source.key,
     ];
     await store.removeMany(removed);
+    for (final key in removed) {
+      await BookSourceImages.invalidateSource(key);
+    }
     if (!_engineAvailable) return;
     for (final key in removed) {
       try {
@@ -335,30 +340,38 @@ class BookSourceRepository extends NovelRepository
   ) async {
     await prepare();
     _requireEngine();
-    return transport.login(source.key, values).timeout(_loginTimeout);
+    final state = await transport.login(source.key, values).timeout(_loginTimeout);
+    await BookSourceImages.invalidateSource(source.key);
+    return state;
   }
 
   @override
   Future<BookSourceLoginState> logout(BookSource source) async {
     await prepare();
     _requireEngine();
-    return transport.logout(source.key).timeout(requestTimeout);
+    final state = await transport.logout(source.key).timeout(requestTimeout);
+    await BookSourceImages.invalidateSource(source.key);
+    return state;
   }
 
   @override
   Future<BookSourceLoginState?> webLogin(BookSource source) async {
     await prepare();
     _requireEngine();
-    return transport.webLogin(
+    final state = await transport.webLogin(
       source.key,
     ).timeout(const Duration(minutes: 10));
+    if (state != null) await BookSourceImages.invalidateSource(source.key);
+    return state;
   }
 
   @override
   Future<BookSourceLoginState> checkLogin(BookSource source) async {
     await prepare();
     _requireEngine();
-    return transport.checkLogin(source.key).timeout(_loginTimeout);
+    final state = await transport.checkLogin(source.key).timeout(_loginTimeout);
+    await BookSourceImages.invalidateSource(source.key);
+    return state;
   }
 
   @override
@@ -372,9 +385,70 @@ class BookSourceRepository extends NovelRepository
     await transport
         .loginAction(sourceKey: source.key, action: action, values: values)
         .timeout(_loginTimeout);
+    await BookSourceImages.invalidateSource(source.key);
   }
 
   Duration get _loginTimeout => requestTimeout * 2;
+
+  @override
+  Future<String?> checkTextSource(
+    BookSource source,
+    String keyword, {
+    required bool Function() cancelled,
+    required void Function(String) onStage,
+  }) async {
+    if (cancelled()) return null;
+    if (source.type != 0) return '跳过：非文字书源';
+    if (!source.canSearch) return '跳过：未配置搜索地址';
+    final term = source.checkKeyword(keyword);
+    if (term.isEmpty) return '跳过：缺少校验关键词';
+    var stage = '准备';
+    try {
+      await prepare();
+      if (cancelled()) return null;
+      _requireEngine();
+      stage = '搜索';
+      onStage('$stage「$term」');
+      final page = await transport.search(sourceKey: source.key, keyword: term, page: 1)
+          .timeout(requestTimeout);
+      if (cancelled()) return null;
+      if (page.items.isEmpty) return '未命中：「$term」没有搜索结果';
+      final bookUrl = _string(page.items.first['bookUrl']);
+      if (bookUrl.isEmpty) throw const FormatException('首本书缺少详情地址');
+      stage = '详情';
+      onStage(stage);
+      final detail = await transport.detail(sourceKey: source.key, bookUrl: bookUrl)
+          .timeout(requestTimeout);
+      if (cancelled()) return null;
+      if (detail == null) throw const FormatException('没有返回书籍详情');
+      stage = '目录';
+      onStage(stage);
+      final rows = await transport.chapters(sourceKey: source.key, bookUrl: bookUrl,
+          tocUrl: _string(detail['tocUrl'])).timeout(requestTimeout);
+      if (cancelled()) return null;
+      final index = rows.indexWhere((row) => row['isVolume'] != true);
+      if (index < 0) throw const FormatException('目录没有可读章节');
+      final url = _string(rows[index]['url']);
+      if (url.isEmpty) throw const FormatException('首章缺少正文地址');
+      stage = '正文';
+      onStage(stage);
+      final content = await transport.content(sourceKey: source.key, bookUrl: bookUrl,
+          chapterUrl: url, chapterTitle: _string(rows[index]['title']),
+          nextChapterUrl: _nextChapterUrl(rows, index)).timeout(requestTimeout * 4);
+      if (cancelled()) return null;
+      final body = await _readerBody(content ?? '', url, source.key);
+      return cancelled() ? null : '通过：${_string(detail['name'])} · ${_string(rows[index]['title'])}（${body.length} 字符）';
+    } on Object catch (error) {
+      if (cancelled()) return null;
+      final message = switch (error) {
+        TimeoutException() => '请求超时',
+        FormatException() => error.message,
+        PlatformException() => error.message ?? error.code,
+        _ => error.toString(),
+      };
+      return '$stage失败：$message';
+    }
+  }
 
   @override
   Future<NovelPage> searchInSource(
@@ -403,6 +477,7 @@ class BookSourceRepository extends NovelRepository
     String author = '',
     String intro = '',
     String coverUrl = '',
+    String customCoverUrl = '',
   }) async {
     final url = bookUrl.trim();
     if (url.isEmpty) return null;
@@ -413,12 +488,14 @@ class BookSourceRepository extends NovelRepository
     final cleanTitle = sourceSearchTitle(title);
     final cleanAuthor = sourceAuthorName(author);
     final cover = coverUrl.trim();
+    final custom = BookSourceRef.webCover(customCoverUrl);
     final ref = await identities.refFor(
       source,
       url,
       title: cleanTitle,
       author: cleanAuthor,
       coverUrl: cover,
+      customCoverUrl: custom.isEmpty ? null : custom,
     );
     final id = identities.idFor(source.key, url);
     if (id == null) return null;
@@ -429,7 +506,7 @@ class BookSourceRepository extends NovelRepository
       genre: '书源',
       summary: intro.trim(),
       colors: _bookColors(source.key, url),
-      coverUrl: cover.isEmpty ? null : cover,
+      coverUrl: ref.displayCover,
       source: ref,
     );
   }
@@ -614,6 +691,24 @@ class BookSourceRepository extends NovelRepository
   }
 
   @override
+  List<Novel> cachedCoverCandidates(Novel book, BookSourceSearchScope scope) {
+    final enabled = store.enabled.where((source) => source.supported && scope.matches(source)).map((source) => source.key).toSet();
+    final title = sourceSearchTitleKey(sourceSearchKeyword(book.source?.title.isNotEmpty == true ? book.source!.title : book.title));
+    final items = <Novel>[];
+    for (final entry in identities.entries) {
+      final ref = entry.value;
+      if (ref.coverUrl.isEmpty || !enabled.contains(ref.sourceKey) || sourceSearchTitleKey(ref.title) != title ||
+          (book.author.trim().isNotEmpty && !sameSourceAuthor(book.author, ref.author))) {
+        continue;
+      }
+      items.add(Novel(id: entry.key, title: ref.title, author: ref.author, genre: '书源', summary: '',
+        colors: book.colors, coverUrl: ref.coverUrl, source: ref));
+    }
+    sortSourceCandidates(items, store.sources);
+    return items;
+  }
+
+  @override
   Future<BookSourceCandidateSearchResult> searchSourceCandidates(
     Novel book, {
     required bool checkAuthor,
@@ -794,7 +889,7 @@ class BookSourceRepository extends NovelRepository
         genre: '书源',
         summary: '',
         colors: _bookColors(ref.sourceKey, ref.bookUrl),
-        coverUrl: ref.coverUrl.isEmpty ? null : ref.coverUrl,
+        coverUrl: ref.displayCover,
         source: ref,
       ),
     );
@@ -804,7 +899,8 @@ class BookSourceRepository extends NovelRepository
   Future<Novel> detail(Novel novel) async {
     await prepare();
     _requireEngine();
-    final ref = _refForNovel(novel);
+    final stored = _refForNovel(novel);
+    final ref = stored.copyWith(resourceType: store.source(stored.sourceKey)?.resourceType);
     if (OfficialBookService.isOfficialKey(ref.sourceKey)) {
       await identities.remember(novel.id, ref);
       final data = await OfficialBookService.detail(ref);
@@ -827,7 +923,7 @@ class BookSourceRepository extends NovelRepository
         summary: data.intro,
         colors: novel.colors,
         isComplete: data.isComplete,
-        coverUrl: data.coverUrl.isEmpty ? null : data.coverUrl,
+        coverUrl: nextRef.displayCover,
         lastUpdate: data.updateTime,
         chapterCount: data.chapterCount,
         wordCount: data.wordCount,
@@ -853,7 +949,7 @@ class BookSourceRepository extends NovelRepository
           );
     final coverUrl = _prefer(
       _string(loaded?['coverUrl']),
-      novel.coverUrl ?? '',
+      ref.customCoverUrl.isEmpty ? _prefer(novel.coverUrl ?? '', ref.coverUrl) : ref.coverUrl,
     );
     final lastUpdate = _prefer(
       _string(loaded?['updateTime']),
@@ -875,7 +971,7 @@ class BookSourceRepository extends NovelRepository
       colors: novel.colors,
       chapters: novel.chapters,
       isComplete: _isComplete(loaded?['status']) || novel.isComplete,
-      coverUrl: coverUrl.isEmpty ? null : coverUrl,
+      coverUrl: nextRef.displayCover,
       lastUpdate: lastUpdate.isEmpty ? null : lastUpdate,
       chapterCount: _int(loaded?['totalChapterNum']) ?? novel.chapterCount,
       wordCount: _int(loaded?['wordCount']) ?? novel.wordCount,
@@ -900,7 +996,7 @@ class BookSourceRepository extends NovelRepository
         currentRef.bookUrl == candidateRef.bookUrl) {
       return current;
     }
-    final ref = candidateRef.copyWith(sourceName: source.name);
+    final ref = candidateRef.copyWith(sourceName: source.name, resourceType: source.resourceType);
     final loaded = await transport
         .detail(sourceKey: ref.sourceKey, bookUrl: ref.bookUrl)
         .timeout(requestTimeout);
@@ -913,7 +1009,7 @@ class BookSourceRepository extends NovelRepository
     );
     final coverUrl = _prefer(
       _string(loaded?['coverUrl']),
-      candidate.coverUrl ?? '',
+      ref.customCoverUrl.isEmpty ? _prefer(candidate.coverUrl ?? '', ref.coverUrl) : ref.coverUrl,
     );
     // 换源后封面跟随新书源，作者名保持本书原值，避免书架作者被来源改写。
     final effectiveAuthor = current.author.trim().isNotEmpty
@@ -929,6 +1025,7 @@ class BookSourceRepository extends NovelRepository
       title: title.isEmpty ? ref.title : title,
       author: effectiveAuthor.isEmpty ? ref.author : effectiveAuthor,
       coverUrl: effectiveCover.isEmpty ? ref.coverUrl : effectiveCover,
+      customCoverUrl: currentRef?.customCoverUrl ?? '',
     );
     // Load both halves before committing the identity so a broken candidate
     // leaves the original source and directory untouched.
@@ -945,7 +1042,7 @@ class BookSourceRepository extends NovelRepository
       colors: current.colors,
       chapters: chapters,
       isComplete: _isComplete(loaded?['status']) || candidate.isComplete,
-      coverUrl: effectiveCover.isEmpty ? null : effectiveCover,
+      coverUrl: nextRef.displayCover,
       lastUpdate: lastUpdate.isEmpty ? null : lastUpdate,
       chapterCount: _int(loaded?['totalChapterNum']) ?? chapters.length,
       wordCount: _int(loaded?['wordCount']) ?? candidate.wordCount,
@@ -1005,25 +1102,22 @@ class BookSourceRepository extends NovelRepository
           tocUrl: ref.tocUrl,
         )
         .timeout(requestTimeout);
-    final filtered = <Map<String, Object?>>[];
-    var nextVolumeId = 0;
+    final usedIds = <int>{};
+    final chapters = <NovelChapter>[];
+    var volumeId = 0;
     var volumeTitle = '';
-    for (final row in rows) {
+    for (var index = 0; index < rows.length; index++) {
+      final row = rows[index];
       if (row['isVolume'] == true) {
-        nextVolumeId++;
+        volumeId++;
         volumeTitle = _string(row['title']);
         continue;
       }
-      filtered.add(row);
-    }
-    final usedIds = <int>{};
-    final chapters = <NovelChapter>[];
-    for (var index = 0; index < filtered.length; index++) {
-      final row = filtered[index];
+      final chapterIndex = chapters.length;
       final url = _string(row['url']);
-      final title = _prefer(_string(row['title']), '第 ${index + 1} 章');
+      final title = _prefer(_string(row['title']), '第 ${chapterIndex + 1} 章');
       final chapterId = _stableChapterId(
-        url.isEmpty ? '$id\u0000$index\u0000$title' : url,
+        url.isEmpty ? '$id\u0000$chapterIndex\u0000$title' : url,
         usedIds,
       );
       chapters.add(
@@ -1031,10 +1125,11 @@ class BookSourceRepository extends NovelRepository
           title,
           '',
           id: chapterId,
-          volumeId: nextVolumeId,
+          volumeId: volumeId,
           volumeTitle: volumeTitle,
           sourceUrl: url.isEmpty ? null : url,
-          sourceNextUrl: _nextChapterUrl(filtered, index),
+          sourceNextUrl: _nextChapterUrl(rows, index),
+          isLocked: row['isVip'] == true && row['isPay'] != true,
         ),
       );
     }
@@ -1180,7 +1275,6 @@ class BookSourceRepository extends NovelRepository
     );
     final id = identities.idFor(source.key, bookUrl);
     if (id == null) return null;
-    final coverUrl = _string(row['coverUrl']);
     final lastUpdate = _string(row['updateTime']);
     return Novel(
       id: id,
@@ -1190,7 +1284,7 @@ class BookSourceRepository extends NovelRepository
       summary: _string(row['intro']),
       colors: _bookColors(source.key, bookUrl),
       isComplete: _isComplete(row['status']),
-      coverUrl: coverUrl.isEmpty ? null : coverUrl,
+      coverUrl: ref.displayCover,
       lastUpdate: lastUpdate.isEmpty ? null : lastUpdate,
       chapterCount: _int(row['totalChapterNum']) ?? 0,
       source: ref,
@@ -1238,6 +1332,7 @@ class BookSourceRepository extends NovelRepository
 
   static String? _nextChapterUrl(List<Map<String, Object?>> rows, int index) {
     for (var next = index + 1; next < rows.length; next++) {
+      if (rows[next]['isVolume'] == true) continue;
       final url = _string(rows[next]['url']);
       if (url.isNotEmpty) return url;
     }
@@ -1296,10 +1391,17 @@ String legadoContentToReader(
 }) {
   if (source.trim().isEmpty) return '';
   final images = <String>[];
+  final reviews = <InlineReview>[];
   var text = source.replaceAllMapped(
     RegExp(r'<img\b[^>]*>', caseSensitive: false),
     (match) {
       final tag = match.group(0)!;
+      final review = InlineReview.fromImage(tag);
+      if (review != null) {
+        final token = '\u0000REVIEW${reviews.length}\u0000';
+        reviews.add(review);
+        return token;
+      }
       final src =
           RegExp(
             r'''(?:data-src|data-original|src)\s*=\s*(['"])(.*?)\1''',
@@ -1358,7 +1460,10 @@ String legadoContentToReader(
       '<!--image-->${images[index]}<!--image-->',
     );
   }
-  return text;
+  return text.replaceAllMapped(RegExp('\u0000REVIEW(\\d+)\u0000'), (match) {
+    final index = int.tryParse(match[1]!);
+    return index != null && index < reviews.length ? reviews[index].encode() : '';
+  });
 }
 
 String? _absoluteImageUrl(String value, String baseUrl) {

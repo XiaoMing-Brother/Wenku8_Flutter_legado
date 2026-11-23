@@ -59,6 +59,7 @@ class DiscoveryRankingsPageState extends State<DiscoveryRankingsPage> {
   bool _loading = false;
   bool _loaded = false;
   int _generation = 0;
+  final _firstPages = <String, ({DateTime saved, OfficialRankingPage result})>{};
 
   List<OfficialRanking> get _rankings =>
       officialRankings.where((item) => item.site == _site).toList();
@@ -142,11 +143,13 @@ class DiscoveryRankingsPageState extends State<DiscoveryRankingsPage> {
     unawaited(_load(reset: false));
   }
 
-  Future<void> _load({required bool reset}) async {
+  Future<void> _load({required bool reset, bool refresh = false}) async {
     final generation = ++_generation;
     final ranking = _ranking;
     final library = _site == OfficialSite.fanqie && _fanqieLibrary;
     final page = reset ? 1 : _page + 1;
+    final key = _contentKey;
+    final cached = reset && !refresh ? _firstPages[key] : null;
     if (reset && _scrollController.hasClients && _scrollController.offset > 0) {
       _scrollController.jumpTo(0);
     }
@@ -161,7 +164,8 @@ class DiscoveryRankingsPageState extends State<DiscoveryRankingsPage> {
       }
     });
     try {
-      final result = library
+      final fromCache = cached != null && DateTime.now().difference(cached.saved) < const Duration(minutes: 5);
+      final result = fromCache ? cached.result : library
           ? await OfficialBookService.fanqieLibrary(
               gender: _fanqieLibraryGender,
               categoryId: _fanqieLibraryCategoryId.isEmpty
@@ -172,21 +176,19 @@ class DiscoveryRankingsPageState extends State<DiscoveryRankingsPage> {
             )
           : await OfficialBookService.ranking(ranking, page);
       if (!mounted || generation != _generation) return;
-      final next = result.books
-          .map(_novelFromOfficial)
-          .whereType<Novel>()
-          .toList(growable: false);
-      final items = reset
-          ? next
-          : [
-              ..._items,
-              for (final item in next)
-                if (!_items.any((known) => known.id == item.id)) item,
-            ];
+      if (reset && !fromCache) {
+        _firstPages.remove(key);
+        if (result.books.isNotEmpty) _firstPages[key] = (saved: DateTime.now(), result: result);
+        if (_firstPages.length > 24) _firstPages.remove(_firstPages.keys.first);
+      }
+      final ids = {if (!reset) for (final book in _items) book.id};
+      final next = [for (final book in result.books)
+        if (book.title.trim().isNotEmpty && ids.add(OfficialBookService.idFor(book))) book.toNovel()];
+      final items = [if (!reset) ..._items, ...next];
       setState(() {
         _items = List.unmodifiable(items);
         _page = page;
-        _hasMore = result.hasMore;
+        _hasMore = next.isNotEmpty && result.hasMore;
         _loaded = true;
         _error = null;
       });
@@ -198,36 +200,6 @@ class DiscoveryRankingsPageState extends State<DiscoveryRankingsPage> {
         setState(() => _loading = false);
       }
     }
-  }
-
-  Novel? _novelFromOfficial(OfficialBook book) {
-    if (book.title.trim().isEmpty) return null;
-    return Novel(
-      id: OfficialBookService.idFor(book),
-      title: book.title,
-      author: book.author,
-      genre: book.kind,
-      summary: book.summary,
-      colors: const [Color(0xFF31405A), Color(0xFF1B2333)],
-      coverUrl: book.coverUrl.isEmpty ? null : book.coverUrl,
-      wordCount: _wordCountFromLabel(book.wordCount),
-      source: OfficialBookService.refFor(book),
-    );
-  }
-
-  int? _wordCountFromLabel(String? value) {
-    final text = value?.trim() ?? '';
-    if (text.isEmpty) return null;
-    final tenK = RegExp(r'([\d.]+)\s*万字').firstMatch(text);
-    if (tenK != null) {
-      final amount = double.tryParse(tenK.group(1)!);
-      return amount == null ? null : (amount * 10000).round();
-    }
-    final chars = RegExp(r'([\d.]+)\s*字').firstMatch(text);
-    if (chars != null) {
-      return double.tryParse(chars.group(1)!)?.round();
-    }
-    return int.tryParse(text);
   }
 
   String _formatGridWordCount(int? value) {
@@ -361,7 +333,7 @@ class DiscoveryRankingsPageState extends State<DiscoveryRankingsPage> {
     await _load(reset: true);
   }
 
-  Future<void> _refresh() => _load(reset: true);
+  Future<void> _refresh() => _load(reset: true, refresh: true);
 
   Future<void> _openBook(Novel book) async {
     if (_site.supportsDirectReading) {

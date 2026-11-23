@@ -163,6 +163,7 @@ ReaderContent placeIllustrations(
     placementIds: Map.unmodifiable(ids),
     formats: source.formats,
     notes: source.notes,
+    reviews: source.reviews,
     revision: source.revision,
     coordinateMap: source.coordinateMap,
   );

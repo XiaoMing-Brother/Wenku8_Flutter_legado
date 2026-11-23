@@ -29,6 +29,7 @@ internal data class BookInfoRule(
     val tocUrl: String?,
     val status: String?,
     val totalChapterNum: String?,
+    val downloadUrls: String?,
     val wordCount: String?,
 )
 
@@ -37,6 +38,9 @@ internal data class TocRule(
     val chapterName: String?,
     val chapterUrl: String?,
     val isVolume: String?,
+    val isVip: String?,
+    val isPay: String?,
+    val formatJs: String?,
     val updateTime: String?,
     val nextTocUrl: String?,
 )
@@ -47,6 +51,7 @@ internal data class ContentRule(
     val nextContentUrl: String?,
     val title: String?,
     val replaceRegex: String?,
+    val imageDecode: String?,
 )
 
 internal class BookSource(private val raw: JSONObject) {
@@ -58,7 +63,9 @@ internal class BookSource(private val raw: JSONObject) {
         is String -> value.trim().toIntOrNull() ?: 0
         else -> 0
     }
-    val supported: Boolean = type == 0 || type == 3
+    val supported: Boolean
+        get() = type == 0 || type == 3 || (!content.content.isNullOrBlank() &&
+            (type == 1 || type == 4 || (type == 2 && content.imageDecode.isNullOrBlank())))
     val searchUrl: String = raw.optString("searchUrl").trim()
     val exploreUrl: String = raw.optString("exploreUrl").trim()
     val loginUrl: String? = raw.stringOrNull("loginUrl")
@@ -142,6 +149,7 @@ internal class BookSource(private val raw: JSONObject) {
             status = raw.stringOrNull("status"),
             totalChapterNum = raw.stringOrNull("totalChapterNum"),
             wordCount = raw.stringOrNull("wordCount"),
+            downloadUrls = raw.stringOrNull("downloadUrls"),
         )
 
         private fun parseTocRule(raw: JSONObject?): TocRule = TocRule(
@@ -149,6 +157,9 @@ internal class BookSource(private val raw: JSONObject) {
             chapterName = raw.stringOrNull("chapterName"),
             chapterUrl = raw.stringOrNull("chapterUrl"),
             isVolume = raw.stringOrNull("isVolume"),
+            isVip = raw.stringOrNull("isVip"),
+            isPay = raw.stringOrNull("isPay"),
+            formatJs = raw.stringOrNull("formatJs"),
             updateTime = raw.stringOrNull("updateTime"),
             nextTocUrl = raw.stringOrNull("nextTocUrl"),
         )
@@ -160,6 +171,7 @@ internal class BookSource(private val raw: JSONObject) {
             // 正文内的章节标题规则，优先用它剥离正文里重复的标题块。
             title = raw.stringOrNull("title"),
             replaceRegex = raw.stringOrNull("replaceRegex"),
+            imageDecode = raw.stringOrNull("imageDecode"),
         )
     }
 }

@@ -5,6 +5,7 @@ import '../book_search.dart';
 import '../book_identity.dart';
 import '../catalog.dart';
 import '../online_component.dart';
+import '../official_books.dart';
 import '../tag_catalogue.dart';
 import 'book_source_repository.dart';
 
@@ -15,10 +16,12 @@ import 'book_source_repository.dart';
 /// book source never changes the home catalogue or its paging.
 class LibrarySourcesRepository extends NovelRepository
     implements ProgressiveTagCatalogue, ProgressiveNovelSearch {
-  LibrarySourcesRepository({required this.library, required this.bookSources});
+  LibrarySourcesRepository({required this.library, required this.bookSources,
+    this.officialSearch = OfficialBookService.search});
 
   final NovelRepository library;
   final BookSourceRepository bookSources;
+  final Future<OfficialRankingPage> Function(OfficialSite, String, int) officialSearch;
   final Map<String, _SourceSearchSession> _sourceSearches = {};
   String? _scopeSignature;
   int _searchGeneration = 0;
@@ -45,14 +48,7 @@ class LibrarySourcesRepository extends NovelRepository
     String query, {
     int page = 1,
     bool refresh = false,
-  }) {
-    if (refresh) _sourceSearches.clear();
-    return _searchPrimaryThenSources(
-      () => library.searchPage(query, page: page, refresh: refresh),
-      () => _sourceSearchPage(query, page),
-      page,
-    );
-  }
+  }) => searchFilteredPageProgressively(query, page: page, refresh: refresh);
 
   @override
   Future<void> cancelSearch() async {
@@ -71,22 +67,7 @@ class LibrarySourcesRepository extends NovelRepository
     BookSearchField field = BookSearchField.all,
     int page = 1,
     bool refresh = false,
-  }) {
-    if (field == BookSearchField.all) {
-      return searchPage(query, page: page, refresh: refresh);
-    }
-    if (refresh) _sourceSearches.clear();
-    return _searchPrimaryThenSources(
-      () => library.searchFilteredPage(
-        query,
-        field: field,
-        page: page,
-        refresh: refresh,
-      ),
-      () => _filteredSourcePage(query, field: field, page: page),
-      page,
-    );
-  }
+  }) => searchFilteredPageProgressively(query, field: field, page: page, refresh: refresh);
 
   @override
   Future<NovelPage> searchFilteredPageProgressively(
@@ -103,43 +84,29 @@ class LibrarySourcesRepository extends NovelRepository
     }
     NovelPage? primaryResult;
     NovelSearchProgress? latestSourceProgress;
-    NovelSearchProgressCallback? progress;
-    if (onProgress != null) {
-      progress = (NovelSearchProgress value) {
-        if (current?.call() == false) return;
-        latestSourceProgress = value;
-        onProgress(
+    final generation = _searchGeneration;
+    void publish() {
+      if (generation == _searchGeneration && current?.call() != false) {
+        onProgress?.call(
           NovelSearchProgress(
-            items: _officialFirst(primaryResult?.items, value.items),
-            completedSources: value.completedSources,
-            totalSources: value.totalSources,
+            items: _officialFirst(primaryResult?.items, latestSourceProgress?.items ?? const []),
+            completedSources: latestSourceProgress?.completedSources ?? 0,
+            totalSources: latestSourceProgress?.totalSources ?? 0,
             officialItems: primaryResult?.items ?? const [],
           ),
         );
-      };
+      }
     }
     void acceptPrimary(NovelPage result) {
       primaryResult = result;
-      final latest = latestSourceProgress;
-      progress?.call(
-        NovelSearchProgress(
-          items: _officialFirst(result.items, latest?.items ?? const []),
-          completedSources: latest?.completedSources ?? 0,
-          totalSources: latest?.totalSources ?? 0,
-          officialItems: result.items,
-        ),
-      );
+      publish();
     }
-
+    void progress(NovelSearchProgress value) {
+      latestSourceProgress = value;
+      publish();
+    }
     return _searchPrimaryThenSources(
-      () => field == BookSearchField.all
-          ? library.searchPage(query, page: page, refresh: refresh)
-          : library.searchFilteredPage(
-              query,
-              field: field,
-              page: page,
-              refresh: refresh,
-            ),
+      () => _searchOfficial(query, field, page, refresh, acceptPrimary),
       () => field == BookSearchField.all
           ? _sourceSearchPage(query, page, onProgress: progress)
           : _filteredSourcePage(
@@ -150,8 +117,53 @@ class LibrarySourcesRepository extends NovelRepository
             ),
       page,
       current: current,
-      onPrimary: progress == null ? null : acceptPrimary,
     );
+  }
+
+  Future<NovelPage> _searchOfficial(String query, BookSearchField field, int page,
+      bool refresh, void Function(NovelPage) publish) async {
+    if (!bookSources.searchScope.isAll || query.trim().isEmpty) {
+      return NovelPage(items: const [], page: page, totalPages: page);
+    }
+    final sites = OfficialBookService.searchSites;
+    final pages = <OfficialSite, NovelPage>{};
+    final failures = <String, Object>{};
+    NovelPage? wenku;
+    final pattern = BookSearch(query, field: field);
+    NovelPage snapshot() {
+      final available = [for (final site in sites) ?pages[site], ?wenku];
+      return NovelPage(items: [for (final result in available) ...result.items], page: page,
+        totalPages: available.fold<int>(page, (highest, result) => math.max(highest, result.totalPages ?? (result.hasMore ? page + 1 : page))),
+        searchFailures: wenku?.searchFailures ?? const {}, sourceFailures: Map.of(failures));
+    }
+    Future<void> loadSite(OfficialSite site) async {
+      try {
+        final result = await officialSearch(site, query.trim(), page).timeout(const Duration(seconds: 8));
+        pages[site] = NovelPage(page: page, totalPages: result.hasMore ? page + 1 : page,
+          items: [for (final book in result.books)
+            if (field == BookSearchField.all || pattern.matches(title: book.title, author: book.author, tags: book.kind)) book.toNovel()]);
+      } on Object catch (error) {
+        failures['${site.label}官方'] = error;
+      }
+      publish(snapshot());
+    }
+    Future<void> loadWenku() async {
+      try {
+        wenku = await (field == BookSearchField.all
+            ? library.searchPage(query, page: page, refresh: refresh)
+            : library.searchFilteredPage(query, field: field, page: page, refresh: refresh));
+      } on OnlineComponentUnavailable {
+        return;
+      } on Object catch (error) {
+        failures['轻小说文库'] = error;
+      }
+      publish(snapshot());
+    }
+    await Future.wait([loadWenku(),
+      if (field != BookSearchField.tags && field != BookSearchField.id && !query.trimLeft().startsWith('#'))
+        for (final site in sites) loadSite(site),
+    ]);
+    return snapshot();
   }
 
   @override
@@ -271,7 +283,6 @@ class LibrarySourcesRepository extends NovelRepository
     Future<NovelPage> Function() sourcePage,
     int page, {
     bool Function()? current,
-    void Function(NovelPage primary)? onPrimary,
   }) async {
     final generation = _searchGeneration;
     bool cancelled() =>
@@ -290,8 +301,6 @@ class LibrarySourcesRepository extends NovelRepository
         primaryError = error;
         return;
       }
-      final result = primary;
-      if (result != null) onPrimary?.call(result);
     }
 
     Future<void> loadSources() async {
@@ -349,6 +358,7 @@ class LibrarySourcesRepository extends NovelRepository
       byId.putIfAbsent(book.id, () => book);
     }
     final failures = <String, Object>{
+      ...?primary?.sourceFailures,
       ...?external?.sourceFailures,
       '轻小说文库': ?primaryFailure,
       '书源': ?externalError,

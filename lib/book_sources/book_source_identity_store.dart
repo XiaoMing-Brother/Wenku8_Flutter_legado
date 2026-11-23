@@ -31,6 +31,7 @@ class BookSourceIdentityStore {
   }
 
   BookSourceRef? byId(int id) => _byId[id];
+  Iterable<MapEntry<int, BookSourceRef>> get entries => _byId.entries;
 
   BookSourceRef? bySource(String sourceKey, String bookUrl) =>
       _byKey[_key(sourceKey, bookUrl)];
@@ -138,6 +139,7 @@ class BookSourceIdentityStore {
     String? title,
     String? author,
     String? coverUrl,
+    String? customCoverUrl,
   }) async {
     await load();
     final key = _key(source.key, bookUrl);
@@ -147,17 +149,19 @@ class BookSourceIdentityStore {
           ? current.tocUrl
           : tocUrl;
       final next = current.copyWith(
+        resourceType: source.resourceType,
         sourceName: source.name,
         tocUrl: resolvedToc,
         title: title?.trim().isNotEmpty == true ? title : null,
         author: author?.trim().isNotEmpty == true ? author : null,
         coverUrl: coverUrl?.trim().isNotEmpty == true ? coverUrl : null,
+        customCoverUrl: customCoverUrl,
       );
       if (next.sourceName != current.sourceName ||
           next.tocUrl != current.tocUrl ||
           next.title != current.title ||
           next.author != current.author ||
-          next.coverUrl != current.coverUrl) {
+          next.coverUrl != current.coverUrl || next.customCoverUrl != current.customCoverUrl || next.resourceType != current.resourceType) {
         _byKey[key] = next;
         final id = _idByKey[key];
         if (id != null) _byId[id] = next;
@@ -172,6 +176,7 @@ class BookSourceIdentityStore {
       throw const FormatException('书源书籍标识已用尽');
     }
     final ref = BookSourceRef(
+      resourceType: source.resourceType,
       sourceKey: source.key,
       sourceName: source.name,
       bookUrl: bookUrl,
@@ -179,6 +184,7 @@ class BookSourceIdentityStore {
       title: title ?? '',
       author: author ?? '',
       coverUrl: coverUrl ?? '',
+      customCoverUrl: customCoverUrl ?? '',
     );
     final id = _nextId++;
     _byKey[key] = ref;

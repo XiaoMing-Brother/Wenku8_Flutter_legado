@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'app_ui.dart';
 import 'app_interactions.dart' show pushNovelPage, showNovelFeedback;
 import 'catalog.dart';
+import 'personal_covers.dart';
 import 'library_state.dart';
 import 'local_books.dart';
 import 'local_library_preferences.dart';
@@ -103,6 +104,9 @@ class _LocalBookEditorState extends State<LocalBookEditor> {
         } finally {
           await documents.releaseBooks([selected]);
         }
+      }
+      if (PersonalCovers.shared.choice(widget.book.id) != null) {
+        await PersonalCovers.shared.select(widget.book.id, null);
       }
       _coverChanged = true;
       final book = widget.books.book(widget.book.id)!;
@@ -361,7 +365,7 @@ class _LocalBookEditorState extends State<LocalBookEditor> {
                     onPressed: _busy ? null : _chooseCover,
                     child: const AppText('更换封面'),
                   ),
-                  if (widget.books.hasCustomCover(widget.book.id))
+                  if (widget.books.hasCustomCover(widget.book.id) || PersonalCovers.shared.choice(widget.book.id) != null)
                     GlassTextButton(
                       key: const ValueKey('local-restore-cover'),
                       compact: true,

@@ -1,16 +1,20 @@
 package org.mewx.wenku8_flutter.booksource
 
 import java.io.IOException
+import java.io.File
 import java.net.URI
 import java.net.URL
 import java.nio.charset.Charset
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 import okhttp3.Call
+import okhttp3.HttpUrl
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import okio.ByteString.Companion.decodeBase64
 import org.json.JSONObject
 import org.mozilla.universalchardet.UniversalDetector
 
@@ -20,6 +24,7 @@ internal data class UrlOption(
     val body: String?,
     val charset: String?,
     val js: String? = null,
+    val type: String? = null,
 )
 
 internal data class RequestSpec(val url: String, val option: UrlOption)
@@ -34,7 +39,8 @@ internal data class BookSourceResponse(
 internal class BookSourceHttp(
     private val variables: BookSourceVariables? = null,
 ) {
-    private val cookies = ConcurrentHashMap<String, MutableMap<String, String>>()
+    private val cookies = ConcurrentHashMap<String, BookSourceCookies>()
+    private data class SessionRequest(val source: BookSource, val initial: HttpUrl, val jar: BookSourceCookies, val headers: Map<String, String>)
     private val searchCalls = ConcurrentHashMap.newKeySet<Call>()
     private val searching = ThreadLocal<Int>()
     @Volatile private var searchGeneration = 0
@@ -45,6 +51,23 @@ internal class BookSourceHttp(
         .callTimeout(15, TimeUnit.SECONDS)
         .followRedirects(true)
         .followSslRedirects(true)
+        .addNetworkInterceptor { chain ->
+            val request = chain.request()
+            val session = request.tag(SessionRequest::class.java) ?: return@addNetworkInterceptor chain.proceed(request)
+            val url = request.url
+            val builder = request.newBuilder()
+            val sameTarget = url.origin() == session.initial.origin()
+            val headers = sourceHeaders(session.source, url, session.jar)
+            if (sameTarget) for ((name, value) in session.headers) headers[name.lowercase()] = value
+            val merged = session.jar.values(url) + parseCookie(headers.remove("cookie").orEmpty())
+            if (merged.isNotEmpty()) builder.header("Cookie", merged.entries.joinToString("; ") { "${it.key}=${it.value}" })
+            for ((name, value) in headers) {
+                if (name !in TransportHeaders && (name != "content-type" || request.body != null)) builder.header(name, value)
+            }
+            val response = chain.proceed(builder.build())
+            if (session.source.enabledCookieJar) session.jar.saveResponse(url, response.headers)
+            response
+        }
         .build()
 
     fun <T> asSearch(block: () -> T): T {
@@ -69,6 +92,25 @@ internal class BookSourceHttp(
         spec: RequestSpec,
         allowUnsuccessful: Boolean = false,
     ): BookSourceResponse {
+        if (spec.url.startsWith("data:")) {
+            val separator = spec.url.indexOf(',')
+            require(separator >= 0 && spec.url.substring(0, separator).endsWith(";base64")) {
+                "书源 data 地址格式无效"
+            }
+            require(spec.url.length - separator - 1 <= (MaxResponseBytes + 2) / 3 * 4) {
+                "来源响应超过 16 MB"
+            }
+            val bytes = requireNotNull(spec.url.substring(separator + 1).decodeBase64()) {
+                "书源 data 地址 Base64 无效"
+            }
+            require(bytes.size <= MaxResponseBytes) { "来源响应超过 16 MB" }
+            return BookSourceResponse(
+                url = spec.url,
+                text = if (spec.option.type != null) bytes.hex() else bytes.utf8(),
+                statusCode = 200,
+                headers = emptyMap(),
+            )
+        }
         val request = buildRequest(source, spec)
         val call = client.newCall(request)
         val generation = searching.get()
@@ -87,7 +129,6 @@ internal class BookSourceHttp(
                 if (!response.isSuccessful && !allowUnsuccessful) {
                     throw IllegalStateException("来源返回 HTTP ${response.code}")
                 }
-                storeCookies(source.key, response.headers.values("Set-Cookie"))
                 val body = response.body ?: throw IllegalStateException("来源响应为空")
                 val length = body.contentLength()
                 if (length > MaxResponseBytes) throw IllegalStateException("来源响应超过 16 MB")
@@ -119,7 +160,6 @@ internal class BookSourceHttp(
             if (!response.isSuccessful) {
                 throw IllegalStateException("来源返回 HTTP ${response.code}")
             }
-            storeCookies(source.key, response.headers.values("Set-Cookie"))
             val body = response.body ?: throw IllegalStateException("图片响应为空")
             val length = body.contentLength()
             if (length > MaxImageBytes) throw IllegalStateException("图片超过 8 MB")
@@ -127,6 +167,18 @@ internal class BookSourceHttp(
             if (bytes.size > MaxImageBytes) throw IllegalStateException("图片超过 8 MB")
             if (bytes.isEmpty()) throw IllegalStateException("图片响应为空")
             return bytes
+        }
+    }
+
+    fun downloadResource(source: BookSource, spec: RequestSpec, directory: File): File {
+        val call = client.newCall(buildRequest(source, spec))
+        call.timeout().timeout(120, TimeUnit.SECONDS)
+        return call.execute().use { response ->
+            check(response.isSuccessful) { "资源返回 HTTP ${response.code}" }
+            val body = response.body ?: error("资源响应为空")
+            val type = body.contentType()?.let { "${it.type}/${it.subtype}" }
+            val suffix = response.request.url.pathSegments.last().substringAfterLast('.', "").lowercase()
+            BookSourceResourceFiles.save(directory, source.type, type, suffix, body.contentLength(), body.byteStream())
         }
     }
 
@@ -178,6 +230,11 @@ internal class BookSourceHttp(
         return RequestSpec(resolve(sourceKey, urlText), option)
     }
 
+    fun pageKey(address: String, responseUrl: String? = null): String {
+        val split = OptionStartRegex.find(address)?.range?.first ?: address.length
+        return (responseUrl ?: address.substring(0, split)).substringBefore('#').trim() + address.substring(split)
+    }
+
     fun resolve(base: String, value: String): String {
         val text = value.trim()
         if (text.isEmpty()) return ""
@@ -200,23 +257,9 @@ internal class BookSourceHttp(
 
     private fun buildRequest(source: BookSource, spec: RequestSpec): Request {
         val builder = Request.Builder().url(spec.url)
-        val loginHeaders = loginHeaders(source.key)
-        for ((key, value) in source.headers) builder.header(key, value)
-        for ((key, value) in loginHeaders) builder.header(key, value)
-        for ((key, value) in spec.option.headers) builder.header(key, value)
-        if (source.headers.keys.none { it.equals("User-Agent", ignoreCase = true) } &&
-            loginHeaders.keys.none { it.equals("User-Agent", ignoreCase = true) } &&
-            spec.option.headers.keys.none { it.equals("User-Agent", ignoreCase = true) }
-        ) {
-            builder.header("User-Agent", DefaultUserAgent)
-        }
-        val hasExplicitCookie =
-            source.headers.keys.any { it.equals("Cookie", ignoreCase = true) } ||
-                loginHeaders.keys.any { it.equals("Cookie", ignoreCase = true) } ||
-                spec.option.headers.keys.any { it.equals("Cookie", ignoreCase = true) }
-        if (!hasExplicitCookie) {
-            cookieHeader(source.key, spec.url)?.let { builder.header("Cookie", it) }
-        }
+        val initial = requireNotNull(spec.url.toHttpUrlOrNull())
+        builder.tag(SessionRequest::class.java, SessionRequest(source, initial, cookieStore(source.key), spec.option.headers))
+        builder.header("User-Agent", DefaultUserAgent)
         val method = spec.option.method?.uppercase() ?: "GET"
         val mediaType = spec.option.headers.entries
             .firstOrNull { it.key.equals("Content-Type", ignoreCase = true) }
@@ -266,6 +309,7 @@ internal class BookSourceHttp(
             body = json.opt("body")?.takeUnless { it == JSONObject.NULL }?.toString(),
             charset = json.optString("charset").trim().ifEmpty { null },
             js = json.optString("js").trim().ifEmpty { null },
+            type = json.optString("type").trim().ifEmpty { null },
         )
     }
 
@@ -278,58 +322,33 @@ internal class BookSourceHttp(
         }
     }
 
-    private fun cookieHeader(sourceKey: String, url: String): String? {
-        val values = cookieStore(sourceKey)
-        if (!url.startsWith("http")) return null
-        if (values.isEmpty()) return null
-        return values.entries.joinToString("; ") { "${it.key}=${it.value}" }
-    }
-
-    private fun storeCookies(sourceKey: String, values: List<String>) {
-        if (values.isEmpty()) return
-        val store = cookieStore(sourceKey)
-        for (value in values) {
-            val pair = value.substringBefore(';').trim()
-            val separator = pair.indexOf('=')
-            if (separator <= 0) continue
-            store[pair.substring(0, separator).trim()] = pair.substring(separator + 1).trim()
-        }
-        persistCookies(sourceKey, store)
-    }
-
     fun cookie(sourceKey: String, url: String = ""): String {
-        if (url.isNotEmpty() && !url.startsWith("http")) return ""
-        val values = cookieStore(sourceKey)
-        if (values.isEmpty()) return ""
+        val target = url.ifEmpty { sourceKey }.toHttpUrlOrNull() ?: return ""
+        val values = cookieStore(sourceKey).values(target)
         return values.entries.joinToString("; ") { "${it.key}=${it.value}" }
     }
 
     fun cookieKey(sourceKey: String, url: String, key: String): String {
-        if (url.isNotEmpty() && !url.startsWith("http")) return ""
-        return cookieStore(sourceKey)[key].orEmpty()
+        val target = url.ifEmpty { sourceKey }.toHttpUrlOrNull() ?: return ""
+        return cookieStore(sourceKey).values(target)[key].orEmpty()
     }
 
     fun replaceCookie(sourceKey: String, url: String, cookie: String) {
-        if (url.isNotEmpty() && !url.startsWith("http")) return
-        val store = cookieStore(sourceKey)
-        for ((key, value) in parseCookie(cookie)) store[key] = value
-        persistCookies(sourceKey, store)
+        val target = url.ifEmpty { sourceKey }.toHttpUrlOrNull() ?: return
+        cookieStore(sourceKey).write(target, parseCookie(cookie), false)
     }
 
     fun setCookie(sourceKey: String, url: String, cookie: String) {
-        if (url.isNotEmpty() && !url.startsWith("http")) return
-        val store = cookieStore(sourceKey)
-        store.clear()
-        store.putAll(parseCookie(cookie))
-        persistCookies(sourceKey, store)
+        val target = url.ifEmpty { sourceKey }.toHttpUrlOrNull() ?: return
+        cookieStore(sourceKey).write(target, parseCookie(cookie), true)
     }
 
-    fun removeCookie(sourceKey: String) {
+    @Synchronized fun removeCookie(sourceKey: String) {
+        cookieStore(sourceKey).clear()
         cookies.remove(sourceKey)
-        variables?.remove(cookieKey(sourceKey))
     }
 
-    fun hasCookie(sourceKey: String): Boolean = cookieStore(sourceKey).isNotEmpty()
+    fun hasCookie(sourceKey: String): Boolean = cookieStore(sourceKey).hasCookies()
 
     fun applyLoginHeaderCookie(sourceKey: String, header: String) {
         val json = runCatching { JSONObject(header) }.getOrNull() ?: return
@@ -342,7 +361,7 @@ internal class BookSourceHttp(
         }
     }
 
-    private fun loginHeaders(sourceKey: String): Map<String, String> {
+    fun loginHeaders(sourceKey: String): Map<String, String> {
         val raw = variables?.get(loginHeaderKey(sourceKey)).orEmpty()
         if (raw.isBlank()) return emptyMap()
         return runCatching {
@@ -358,41 +377,24 @@ internal class BookSourceHttp(
         }.getOrDefault(emptyMap())
     }
 
-    private fun cookieStore(sourceKey: String): MutableMap<String, String> =
-        cookies.computeIfAbsent(sourceKey) {
-            loadCookies(sourceKey)
+    fun sourceHeaders(source: BookSource, url: HttpUrl, jar: BookSourceCookies): MutableMap<String, String> {
+        val sameSource = url.origin() == source.key.toHttpUrlOrNull()?.origin()
+        val headers = mutableMapOf<String, String>()
+        for ((name, value) in source.headers) {
+            if (sameSource || name.lowercase() in PublicSourceHeaders) headers[name.lowercase()] = value
         }
-
-    private fun loadCookies(sourceKey: String): MutableMap<String, String> {
-        val raw = variables?.get(cookieKey(sourceKey)).orEmpty()
-        if (raw.isBlank()) return ConcurrentHashMap()
-        return runCatching {
-            val json = JSONObject(raw)
-            ConcurrentHashMap<String, String>().apply {
-                for (key in json.keys()) {
-                    val value = json.opt(key)
-                    if (value != null && value != JSONObject.NULL) {
-                        put(key, value.toString())
-                    }
-                }
+        if (sameSource && cookies[source.key] === jar) {
+            for ((name, value) in loginHeaders(source.key)) {
+                if (!name.equals("cookie", true)) headers[name.lowercase()] = value
             }
-        }.getOrDefault(ConcurrentHashMap())
-    }
-
-    private fun persistCookies(
-        sourceKey: String,
-        store: MutableMap<String, String>,
-    ) {
-        if (store.isEmpty()) {
-            variables?.remove(cookieKey(sourceKey))
-            return
         }
-        val json = JSONObject()
-        for ((key, value) in store) json.put(key, value)
-        variables?.put(cookieKey(sourceKey), json.toString())
+        return headers
     }
 
-    private fun parseCookie(cookie: String): Map<String, String> {
+    @Synchronized fun cookieStore(sourceKey: String): BookSourceCookies =
+        cookies.getOrPut(sourceKey) { BookSourceCookies(sourceKey, variables) }
+
+    fun parseCookie(cookie: String): Map<String, String> {
         if (cookie.isBlank()) return emptyMap()
         return buildMap {
             for (part in cookie.split(';')) {
@@ -443,6 +445,8 @@ internal class BookSourceHttp(
     }
 
     companion object {
+        private val PublicSourceHeaders = setOf("accept", "accept-language", "user-agent", "referer", "origin")
+        private val TransportHeaders = setOf("host", "content-length", "transfer-encoding", "connection")
         private const val MaxResponseBytes = 16 * 1024 * 1024
         private const val MaxImageBytes = 8 * 1024 * 1024
         private const val MaxLibBytes = 2 * 1024 * 1024

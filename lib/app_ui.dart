@@ -13,7 +13,6 @@ import 'archive_icons.dart';
 import 'app_haptics.dart';
 import 'app_window_insets.dart';
 import 'catalog.dart';
-import 'local_book_media.dart';
 import 'cover_images.dart';
 import 'local_book_import_warning.dart';
 import 'cover_arrival.dart';
@@ -1555,7 +1554,12 @@ class NovelCover extends StatelessWidget {
   final bool fadeIn;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => ListenableBuilder(
+    listenable: PersonalCovers.shared,
+    builder: (context, _) => _buildCover(context),
+  );
+
+  Widget _buildCover(BuildContext context) {
     final cover = _visual();
     Widget warning(Widget child) =>
         LocalBookImportWarningCover(book: novel, width: width, child: child);
@@ -1595,8 +1599,7 @@ class NovelCover extends StatelessWidget {
                   direction == HeroFlightDirection.push ? to : from,
                 )?.animation ??
                 animation,
-            imageProvider: switch (LocalBookMedia.peek(novel.coverUrl) ??
-                peekNovelCover(novel)) {
+            imageProvider: switch (peekNovelCover(novel)) {
               final bytes? => ResizeImage.resizeIfNeeded(
                 novelCoverDecodeWidth(
                   flightWidth,
@@ -1616,7 +1619,7 @@ class NovelCover extends StatelessWidget {
             endOcclusion: PaperCoverPlane.occlusionFromHero(
               pushing ? to : from,
             ),
-            backingColor: novel.coverUrl == null
+            backingColor: novelCoverUrl(novel) == null
                 ? accent
                 : Theme.of(context).colorScheme.surface,
             child: FittedBox(
@@ -1665,7 +1668,8 @@ class NovelCover extends StatelessWidget {
         ],
       ),
     );
-    final face = novel.coverUrl == null
+    final url = novelCoverUrl(novel);
+    final face = url == null || url.isEmpty
         ? fallback
         : Builder(
             builder: (context) {
@@ -1677,11 +1681,9 @@ class NovelCover extends StatelessWidget {
                 ),
               );
               return FutureBuilder<Uint8List>(
-                key: ValueKey('cover-bytes-${novel.id}'),
-                future: novelCoverBytes(novel),
-                initialData:
-                    LocalBookMedia.peek(novel.coverUrl) ??
-                    peekNovelCover(novel),
+                key: ValueKey((novel.id, url)),
+                future: novelCoverBytes(novel, preferBookCache: !isDetailCover),
+                initialData: peekNovelCover(novel),
                 builder: (context, snapshot) {
                   final bytes = snapshot.data;
                   if (bytes == null) {
@@ -1689,7 +1691,7 @@ class NovelCover extends StatelessWidget {
                   }
                   return Image.memory(
                     bytes,
-                    key: ValueKey(('book-cover', novel.id, novel.coverUrl)),
+                    key: ValueKey(('book-cover', novel.id, url)),
                     cacheWidth: novelCoverDecodeWidth(
                       width,
                       MediaQuery.devicePixelRatioOf(context),

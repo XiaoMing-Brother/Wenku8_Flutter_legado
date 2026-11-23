@@ -1,10 +1,98 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 
 import 'app_interactions.dart';
 import 'app_ui.dart';
 import 'reader_paragraph_review.dart';
+
+class ReaderWebReviewSheet extends StatefulWidget {
+  const ReaderWebReviewSheet({super.key, required this.url});
+
+  final Uri url;
+
+  @override
+  State<ReaderWebReviewSheet> createState() => _ReaderWebReviewSheetState();
+}
+
+class _ReaderWebReviewSheetState extends State<ReaderWebReviewSheet> {
+  bool _failed = false;
+  bool _loading = true;
+
+  void _fail() {
+    if (mounted) setState(() => _failed = true);
+  }
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const ArchiveSection(title: '本段段评', code: 'REVIEW / PARAGRAPH'),
+        const SizedBox(height: 8),
+        Expanded(
+          child: _failed
+              ? ContentNotice(
+                  icon: CupertinoIcons.exclamationmark_circle,
+                  title: '段评网页加载失败',
+                  onRetry: () => setState(() {
+                    _failed = false;
+                    _loading = true;
+                  }),
+                )
+              : Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(12),
+                      child: InAppWebView(
+                        initialUrlRequest: URLRequest(
+                          url: WebUri(widget.url.toString()),
+                        ),
+                        initialSettings: InAppWebViewSettings(
+                          useShouldOverrideUrlLoading: true,
+                          allowFileAccess: false,
+                          allowContentAccess: false,
+                          javaScriptCanOpenWindowsAutomatically: false,
+                          thirdPartyCookiesEnabled: false,
+                        ),
+                        shouldOverrideUrlLoading: (_, action) async {
+                          final url = action.request.url;
+                          return url != null &&
+                                  url.hasAuthority &&
+                                  url.userInfo.isEmpty &&
+                                  url.scheme == widget.url.scheme &&
+                                  url.host == widget.url.host &&
+                                  url.port == widget.url.port
+                              ? NavigationActionPolicy.ALLOW
+                              : NavigationActionPolicy.CANCEL;
+                        },
+                        onLoadStop: (_, _) {
+                          if (mounted && _loading) {
+                            setState(() => _loading = false);
+                          }
+                        },
+                        onReceivedError: (_, request, _) {
+                          if (request.isForMainFrame == true) _fail();
+                        },
+                        onReceivedHttpError: (_, request, _) {
+                          if (request.isForMainFrame == true) _fail();
+                        },
+                      ),
+                    ),
+                    if (_loading)
+                      const IgnorePointer(
+                        child: Center(child: CupertinoActivityIndicator()),
+                      ),
+                  ],
+                ),
+        ),
+      ],
+    ),
+  );
+}
 
 /// 本章段评面板。
 ///
@@ -20,6 +108,7 @@ class ReaderReviewSheet extends StatefulWidget {
     this.sourceSupportsReview = true,
     this.loader,
     this.focusPara,
+    this.useChapterCache = true,
     this.providerLabel = '官方',
   });
 
@@ -35,6 +124,7 @@ class ReaderReviewSheet extends StatefulWidget {
 
   /// 若指定，则只显示该段落号（paraIndex）的段评（点段落气泡时传入）。
   final int? focusPara;
+  final bool useChapterCache;
 
   /// 评论来源的应用名称，用于提示更多评论的查看入口。
   final String providerLabel;
@@ -50,7 +140,9 @@ class _ReaderReviewSheetState extends State<ReaderReviewSheet> {
   @override
   void initState() {
     super.initState();
-    _data = ChapterReviewCache.shared.lookup(widget.bookId, widget.chapterId);
+    if (widget.useChapterCache) {
+      _data = ChapterReviewCache.shared.lookup(widget.bookId, widget.chapterId);
+    }
     final focus = widget.focusPara;
     if (_data == null ||
         _data!.items.isEmpty ||

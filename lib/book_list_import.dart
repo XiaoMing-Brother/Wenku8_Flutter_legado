@@ -1,5 +1,7 @@
 import 'dart:convert';
 
+import 'book_sources/book_source_reference.dart';
+
 const int maxBookListBytes = 16 * 1024 * 1024;
 const int maxBookListChars = maxBookListBytes;
 const int maxBookListEntries = 5000;
@@ -13,6 +15,7 @@ class BookListEntry {
     this.origin = '',
     this.originName = '',
     this.coverUrl = '',
+    this.customCoverUrl = '',
   });
 
   final String title;
@@ -22,6 +25,7 @@ class BookListEntry {
   final String origin;
   final String originName;
   final String coverUrl;
+  final String customCoverUrl;
 }
 
 class BookListDocument {
@@ -126,6 +130,7 @@ BookListDocument parseBookList(String input) {
           _text(item, const ['coverUrl', 'cover', 'imageUrl']),
           4096,
         ),
+        customCoverUrl: BookSourceRef.webCover(item['customCoverUrl']),
       ),
     );
   }

@@ -501,6 +501,7 @@ class OfflineNovelRepository extends FrameChangeNotifier
     for (var index = 0; index < a.length; index++) {
       if (a[index].id != b[index].id ||
           a[index].title != b[index].title ||
+          a[index].isLocked != b[index].isLocked ||
           a[index].volumeId != b[index].volumeId ||
           a[index].volumeTitle != b[index].volumeTitle) {
         return false;

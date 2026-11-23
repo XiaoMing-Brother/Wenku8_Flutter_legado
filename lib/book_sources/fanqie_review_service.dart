@@ -4,6 +4,7 @@ import 'dart:io';
 import 'dart:math' as math;
 
 import '../reader_paragraph_review.dart';
+import 'inline_review.dart';
 
 /// 番茄官方段评服务。
 ///
@@ -22,6 +23,18 @@ class FanqieReviewService {
   static const _maxCommentParagraphs = 8;
   static const _commentWorkers = 3;
   static const _timeout = Duration(seconds: 12);
+
+  Future<ChapterReviewData?> fetchInline(InlineReview target, int chapterId) async {
+    final client = _clientFactory()..connectionTimeout = _timeout;
+    try {
+      final items = await _firstComments(client, target.book, target.chapter, target.version, target.paragraph);
+      if (items == null) return null;
+      return ChapterReviewData(chapterId: chapterId, reviewUrl: '', items: items,
+        paragraphCounts: {if (target.count != null) target.paragraph: target.count!});
+    } finally {
+      client.close(force: true);
+    }
+  }
 
   /// 拉取一章的段评。
   ///

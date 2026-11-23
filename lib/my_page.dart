@@ -11,7 +11,7 @@ import 'dock_layout.dart';
 import 'feature_pages.dart';
 import 'library_state.dart';
 import 'offline_repository.dart';
-import 'pages.dart' show SettingsPage;
+import 'pages.dart' show SettingsPage, openDetail;
 import 'ui_notifiers.dart';
 import 'updates/app_updates.dart';
 import 'updates/update_page.dart';
@@ -109,6 +109,8 @@ class MyPage extends StatelessWidget {
                             repository: repository,
                             onSourceSwitched: (previous, switched) =>
                                 state.applySourceSwitch(previous, switched),
+                            onOpenBook: (page, book) =>
+                                openDetail(page, book, state, repository),
                           ),
                           reduceMotion: state.reduceMotion,
                         ),

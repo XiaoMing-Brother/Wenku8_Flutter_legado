@@ -646,7 +646,7 @@ class _ReplaceRuleEditorState extends State<_ReplaceRuleEditor> {
                 hint: r'留空表示删除；正则可用 $1 引用分组',
                 maxLines: 3,
               ),
-              _field('作用范围', _scope, hint: '可填书名、作者或书源地址的一部分；留空为全部'),
+              _field('作用范围', _scope, hint: '填写完整书名或书源地址；本地书填 loc_book，留空为全部'),
               _field('排除范围', _exclude, hint: '命中这些书时不应用此规则'),
               const SizedBox(height: 6),
               _switch('使用正则表达式', _regex, (value) {

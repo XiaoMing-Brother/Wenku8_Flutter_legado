@@ -397,6 +397,8 @@ class _ReaderCatalogueState extends State<ReaderCatalogue>
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
+                  if (chapter.isLocked)
+                    const AppText('VIP', style: TextStyle(fontSize: 10)),
                   if (current)
                     const AppText('正在阅读', style: TextStyle(fontSize: 10)),
                   if (widget.cache case final OfflineCacheStore cache)

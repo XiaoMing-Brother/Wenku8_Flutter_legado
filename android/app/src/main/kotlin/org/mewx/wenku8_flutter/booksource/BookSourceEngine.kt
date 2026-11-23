@@ -1,12 +1,29 @@
 package org.mewx.wenku8_flutter.booksource
 
 import java.util.concurrent.ConcurrentHashMap
+import java.io.File
+import okhttp3.HttpUrl
+import okhttp3.HttpUrl.Companion.toHttpUrl
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Element
 import org.json.JSONArray
 import org.json.JSONObject
 
 private const val MaxContentPages = 100
+private const val MaxTocPages = 20
+private val FalseChapterFlags = setOf("", "null", "false", "no", "not", "0", "0.0")
+
+internal data class WebLoginConfig(
+    val url: String,
+    val title: String,
+    val headers: Map<String, String>,
+    val cookieTargets: List<HttpUrl>,
+    val cookies: List<String>,
+    val jar: BookSourceCookies,
+) {
+    val cookieUrl: HttpUrl get() = cookieTargets.first()
+}
 
 private data class ContentPage(
     val body: String,
@@ -93,45 +110,27 @@ internal class BookSourceEngine(
         return loginState(sourceKey)
     }
 
-    fun webLoginConfig(sourceKey: String): Map<String, Any?> {
+    fun webLoginConfig(sourceKey: String): WebLoginConfig {
         val source = requireSource(sourceKey)
         val raw = source.loginUrl?.trim().orEmpty()
         if (raw.isEmpty()) throw IllegalArgumentException("书源没有配置登录地址")
-        val url = resolveWebLoginUrl(source, raw)
-        val headers = linkedMapOf<String, String>()
-        headers.putAll(source.headers)
-        headers.putAll(loginHeaders(sourceKey))
-        val headerCookie = headers.entries
-            .firstOrNull { it.key.equals("Cookie", ignoreCase = true) }
-            ?.value
-            .orEmpty()
-        val storedCookie = http.cookie(sourceKey, url)
-        val cookie = listOf(headerCookie, storedCookie)
-            .filter { it.isNotBlank() }
-            .distinct()
-            .joinToString("; ")
-        if (cookie.isNotBlank() &&
-            headers.keys.none { it.equals("Cookie", ignoreCase = true) }
-        ) {
-            headers["Cookie"] = cookie
-        }
-        return mapOf(
-            "url" to url,
-            "title" to source.name,
-            "headers" to headers,
-            "cookie" to cookie,
-            "userAgent" to headers.entries
-                .firstOrNull { it.key.equals("User-Agent", ignoreCase = true) }
-                ?.value
-                .orEmpty(),
-        )
+        val jar = http.cookieStore(sourceKey)
+        val url = resolveWebLoginUrl(source, raw).toHttpUrl()
+        val targets = (sourceKey.toHttpUrlOrNull() ?: url).webCookieTargets(listOf(sourceKey, url.toString()))
+        val headers = http.sourceHeaders(source, url, jar)
+        val explicit = http.parseCookie(headers.remove("cookie").orEmpty())
+        return WebLoginConfig(url.toString(), source.name, headers, targets, jar.webLoginCookies(targets, explicit), jar)
     }
 
     fun importWebLoginCookie(
         sourceKey: String,
-        cookie: String,
+        config: WebLoginConfig,
+        cookies: List<String>,
+        scoped: Boolean = false,
+        completedUrl: String? = null,
     ): Map<String, Any?> {
-        http.setCookie(sourceKey, "", cookie)
+        val targets = if (scoped) config.cookieTargets else listOf(config.cookieUrl)
+        config.jar.importWebCookies(targets, completedUrl.takeIf { scoped }, cookies)
         return loginState(sourceKey)
     }
 
@@ -210,10 +209,9 @@ internal class BookSourceEngine(
         val items = rows.mapNotNull { row ->
             searchItem(source, analyzer, row, context)
         }
-        val supportsPage = template.contains("{{page}}")
         mapOf(
             "items" to items,
-            "hasMore" to (supportsPage && items.size >= 10),
+            "hasMore" to BookSourceUrlRule.hasNext(template, page, items.isNotEmpty(), jsonIsLastPage(loaded.text)),
         )
     }
 
@@ -356,20 +354,9 @@ internal class BookSourceEngine(
         val items = rows.mapNotNull { row ->
             searchItem(source, analyzer, row, context, rule)
         }
-        // 模板里的 page 可能写在表达式里（如 {{(page-1)*20}}），同样视为可翻页。
-        val supportsPage =
-            Regex("\\{\\{[^}]*\\bpage\\b[^}]*\\}\\}").containsMatchIn(template)
-        // 接口型来源（如起点 JSON 榜单）会显式返回 isLast / hasNext，
-        // 用它判断末页比“条数 >= 10”可靠，避免最后一页之后再多请求一次空页。
-        val lastPage = jsonIsLastPage(loaded.text)
-        val hasMore = supportsPage && items.isNotEmpty() && when (lastPage) {
-            true -> false
-            false -> true
-            null -> items.size >= 10
-        }
         mapOf(
             "items" to items,
-            "hasMore" to hasMore,
+            "hasMore" to BookSourceUrlRule.hasNext(template, page, items.isNotEmpty(), jsonIsLastPage(loaded.text)),
         )
     }
 
@@ -386,19 +373,23 @@ internal class BookSourceEngine(
             (root.opt("data") as? JSONObject)?.let { add(it) }
         }
         for (container in containers) {
-            if (container.has("isLast")) return jsonTruthy(container.opt("isLast"))
+            jsonPageFlag(container.opt("isLast"))?.let { return it }
             for (key in listOf("hasMore", "hasNext")) {
-                if (container.has(key)) return !jsonTruthy(container.opt(key))
+                jsonPageFlag(container.opt(key))?.let { return !it }
             }
         }
         return null
     }
 
-    private fun jsonTruthy(value: Any?): Boolean = when (value) {
+    private fun jsonPageFlag(value: Any?): Boolean? = when (value) {
         is Boolean -> value
         is Number -> value.toInt() != 0
-        is String -> value == "1" || value.equals("true", ignoreCase = true)
-        else -> false
+        is String -> when (value.trim().lowercase()) {
+            "1", "true" -> true
+            "0", "false" -> false
+            else -> null
+        }
+        else -> null
     }
 
     fun exploreAction(
@@ -431,7 +422,7 @@ internal class BookSourceEngine(
         )
     }
 
-    fun detail(sourceKey: String, bookUrl: String): Map<String, Any?> {
+    fun detail(sourceKey: String, bookUrl: String, includeDownloads: Boolean = false): Map<String, Any?> {
         val source = requireSource(sourceKey)
         requireTextSource(source)
         val analyzer = analyzer(source)
@@ -478,8 +469,11 @@ internal class BookSourceEngine(
             .getString(info.wordCount, context)
             .trim()
             .toIntOrNull()
+        val downloads = if (includeDownloads) analyzer.getStrings(info.downloadUrls, context).flatMap { it.lines() }
+            .filter { it.isNotBlank() }.map { http.resolve(response.url, it) }.distinct() else emptyList()
         return mapOf(
             "name" to name,
+            "downloadUrls" to downloads,
             "author" to analyzer.getString(info.author, context),
             "coverUrl" to http.resolve(
                 response.url,
@@ -503,47 +497,70 @@ internal class BookSourceEngine(
     ): List<Map<String, Any?>> {
         val source = requireSource(sourceKey)
         requireTextSource(source)
+        if (source.type == 3 && !source.bookInfo.downloadUrls.isNullOrBlank()) {
+            val downloads = detail(sourceKey, bookUrl, includeDownloads = true)["downloadUrls"] as List<*>
+            check(downloads.isNotEmpty()) { "文件规则没有返回下载地址" }
+            return downloads.indices.map { index -> mapOf("title" to "文件 ${index + 1}", "url" to "wenku-download:$index") }
+        }
         val analyzer = analyzer(source)
         val book = BookData(bookUrl = bookUrl, tocUrl = tocUrl.orEmpty())
-        val result = mutableListOf<Map<String, Any?>>()
+        val result = mutableListOf<ChapterData>()
         val visited = mutableSetOf<String>()
-        val requestedToc = tocUrl.orEmpty().trim()
-        var nextUrl = if (requestedToc.isEmpty()) {
-            bookUrl
-        } else {
-            http.resolve(source.key, requestedToc)
-        }
-        while (nextUrl.isNotBlank() && visited.add(nextUrl) && visited.size <= 20) {
+        val rawRule = source.toc.chapterList.orEmpty().trim()
+        val reverse = rawRule.startsWith('-')
+        val listRule = rawRule.removePrefix("-").removePrefix("+")
+        var pageCount = 0
+        fun loadPage(url: String, readNext: Boolean): List<String> {
+            val key = http.pageKey(url)
+            if (pageCount >= MaxTocPages || !visited.add(key)) return emptyList()
+            pageCount++
             val response = applyLoginCheck(
                 source,
                 fetchResponse(
                     source,
-                    http.requestSpec(source.key, nextUrl),
+                    http.requestSpec(source.key, url),
                     book = book,
                 ),
                 key = "",
                 page = 1,
                 book = book,
             )
-            val context = RuleContext(response.text, response.url, book = book)
-            val rows = analyzer.getObjects(source.toc.chapterList, context)
-            if (rows.isEmpty() && result.isEmpty()) {
-                throw IllegalStateException("目录规则没有返回章节")
-            }
+            val finalKey = http.pageKey(url, response.url)
+            if (key != finalKey && !visited.add(finalKey)) return emptyList()
+            val context = RuleContext(response.text, url, book = book, redirectUrl = response.url)
+            val rows = analyzer.getObjects(listRule, context)
             for (row in rows) {
                 result.add(chapterRow(source, analyzer, row, response.url, book))
             }
-            val nextRule = source.toc.nextTocUrl
-            nextUrl = if (nextRule.isNullOrBlank()) {
-                ""
-            } else {
-                http.resolve(
-                    response.url,
-                    analyzer.getString(nextRule, context),
-                )
+            if (!readNext) return emptyList()
+            return analyzer.nextPageUrls(source.toc.nextTocUrl, context, visited)
+        }
+        val start = http.resolve(bookUrl, tocUrl.orEmpty()).ifBlank { bookUrl }
+        val pending = loadPage(start, true)
+        if (pending.size == 1) {
+            var next = pending.firstOrNull()
+            while (next != null) next = loadPage(next, true).firstOrNull()
+        } else {
+            for (url in pending) {
+                if (pageCount >= MaxTocPages) break
+                loadPage(url, false)
             }
         }
-        return result
+        if (result.isEmpty()) throw IllegalStateException("目录规则没有返回章节")
+        val seen = mutableSetOf<String>()
+        val ordered = (if (reverse) result else result.asReversed()).filter { chapter ->
+            chapter.url.isBlank() || seen.add(http.resolve(chapter.baseUrl, chapter.url))
+        }.asReversed()
+        return js.formatChapterTitles(source.toc.formatJs, ordered).map { chapter ->
+            mapOf(
+                "title" to chapter.title,
+                "url" to http.resolve(chapter.baseUrl, chapter.url),
+                "isVolume" to chapter.isVolume,
+                "isVip" to chapter.isVip,
+                "isPay" to chapter.isPay,
+                "updateTime" to chapter.tag,
+            )
+        }
     }
 
     fun content(
@@ -563,13 +580,18 @@ internal class BookSourceEngine(
         val subRule = source.content.subContent
         var pageTitle: String? = null
 
-        fun pageKey(value: String): String = value.substringBefore('#').trim()
+        var nextChapterKey: String? = null
+        var pageCount = 0
 
         fun loadPage(
             url: String,
             nextUrl: String,
             readSubContent: Boolean = false,
-        ): ContentPage {
+            readNext: Boolean = true,
+        ): ContentPage? {
+            val key = http.pageKey(url)
+            if (key == nextChapterKey || !visited.add(key)) return null
+            pageCount++
             val chapter = ChapterData(
                 title = chapterTitle.orEmpty(),
                 url = url,
@@ -588,6 +610,8 @@ internal class BookSourceEngine(
                 book = book,
                 chapter = chapter,
             )
+            val finalKey = http.pageKey(url, response.url)
+            if (finalKey == nextChapterKey || (finalKey != key && !visited.add(finalKey))) return null
             val context = RuleContext(
                 content = response.text,
                 // Legado 的 baseUrl 保持请求前的章节地址，跳转后的地址单独
@@ -598,7 +622,8 @@ internal class BookSourceEngine(
                 chapter = chapter,
             )
             val pieces = mutableListOf<String>()
-            val body = analyzer.getContent(source.content.content, context)
+            val extracted = analyzer.getContent(source.content.content, context)
+            val body = if (source.type == 2) comicImages(extracted, response.url) else extracted
             if (body.isNotBlank()) pieces.add(body)
             val subContent = if (readSubContent && !subRule.isNullOrBlank()) {
                 val extra = analyzer.getContent(subRule, context)
@@ -629,13 +654,10 @@ internal class BookSourceEngine(
                 pieces.joinToString("\n\n"),
                 titleForStrip,
             )
-            val nextUrls = if (nextRule.isNullOrBlank()) {
+            val nextUrls = if (!readNext || nextRule.isNullOrBlank()) {
                 emptyList()
             } else {
-                analyzer.getStrings(nextRule, context)
-                    .map { http.resolve(response.url, it) }
-                    .filter { it.isNotBlank() }
-                    .distinct()
+                analyzer.nextPageUrls(nextRule, context, visited)
             }
             return ContentPage(content, response.url, nextUrls, subContent)
         }
@@ -644,48 +666,37 @@ internal class BookSourceEngine(
             chapterUrl,
             nextChapterUrl.orEmpty(),
             readSubContent = true,
-        )
-        visited.add(pageKey(chapterUrl))
-        visited.add(pageKey(first.url))
+        ) ?: throw IllegalStateException("正文规则没有返回内容")
         if (first.body.isNotBlank()) parts.add(first.body)
         val nextChapter = if (nextChapterUrl.isNullOrBlank()) {
             ""
         } else {
             http.resolve(first.url, nextChapterUrl)
         }
+        nextChapterKey = nextChapter.takeIf { it.isNotBlank() }?.let { http.pageKey(it) }
 
         val pending = first.nextUrls
         if (pending.size > 1) {
             // Legado：一次返回多个下一页地址时属于并列分页，全部抓取，不再递归。
             for (url in pending) {
-                if (nextChapter.isNotBlank() && pageKey(url) == pageKey(nextChapter)) {
-                    continue
-                }
-                if (!visited.add(pageKey(url))) continue
+                if (pageCount >= MaxContentPages) break
                 // 某一页失败不应丢掉已抓到的内容，跳过该页继续。
-                val page = runCatching { loadPage(url, "") }.getOrNull() ?: continue
+                val page = runCatching { loadPage(url, nextChapter, readNext = false) }.getOrNull() ?: continue
                 if (page.body.isNotBlank()) parts.add(page.body)
             }
         } else if (pending.size == 1) {
             var currentUrl = pending.first()
-            var pageCount = 1
             while (currentUrl.isNotBlank() && pageCount < MaxContentPages) {
-                // Legado：下一页地址命中下一章时熔断，避免把后一章内容接进来。
-                if (nextChapter.isNotBlank() && pageKey(currentUrl) == pageKey(nextChapter)) {
-                    break
-                }
-                if (!visited.add(pageKey(currentUrl))) break
                 // 末页偶发网络错误时保留已抓到的部分，而不是整章失败。
-                val page = runCatching { loadPage(currentUrl, "") }.getOrNull() ?: break
+                val page = runCatching { loadPage(currentUrl, nextChapter) }.getOrNull() ?: break
                 if (page.body.isNotBlank()) parts.add(page.body)
-                pageCount++
                 currentUrl = page.nextUrls.firstOrNull().orEmpty()
             }
         }
         if (first.subContent.isNotBlank()) {
             if (parts.isNotEmpty()) parts.add(first.subContent)
         }
-        if (parts.isEmpty()) throw IllegalStateException("正文规则没有返回内容")
+        if (parts.isEmpty()) throw IllegalStateException(if (source.type == 2) "漫画正文规则没有返回可读的 HTTP 图片" else "正文规则没有返回内容")
         // 阅读器按空行切分段落，页与页之间必须保留段落边界。
         var result = parts.joinToString("\n\n")
         // Legado 的全文替换规则：按行去空白后把整章交给 replaceRegex 处理。
@@ -830,46 +841,13 @@ internal class BookSourceEngine(
         page: Int,
         infoMap: MutableMap<String, String>?,
     ): String {
-        val value = template.trim()
-        val resolved = when {
-            value.startsWith("@js:", ignoreCase = true) ->
-                js.eval(
-                    value.substring(4),
-                    JsEnv(
-                        source = source,
-                        analyzer = analyzer,
-                        content = null,
-                        baseUrl = source.key,
-                        key = key,
-                        page = page,
-                        infoMap = infoMap,
-                        variables = variables,
-                    ),
-                )?.toString().orEmpty()
-            value.startsWith("<js>", ignoreCase = true) -> {
-                val end = value.lastIndexOf("</js>")
-                val script = if (end > 4) value.substring(4, end) else value.substring(4)
-                js.eval(
-                    script,
-                    JsEnv(
-                        source = source,
-                        analyzer = analyzer,
-                        content = null,
-                        baseUrl = source.key,
-                        key = key,
-                        page = page,
-                        infoMap = infoMap,
-                        variables = variables,
-                    ),
-                )?.toString().orEmpty()
-            }
-            else -> value
-        }
-        return analyzer.expand(
-            resolved,
-            key = key,
-            page = page,
-            baseUrl = source.key,
+        return BookSourceUrlRule.resolve(
+            template.trim(), page,
+            evaluate = { script, previous ->
+                js.eval(script, JsEnv(source, analyzer, previous, source.key, key, page,
+                    infoMap = infoMap, variables = variables))?.toString().orEmpty()
+            },
+            expand = { analyzer.expand(it, key = key, page = page, baseUrl = source.key) },
         )
     }
 
@@ -919,29 +897,29 @@ internal class BookSourceEngine(
 
     private fun loginState(sourceKey: String): Map<String, Any?> {
         val source = requireSource(sourceKey)
-        val rows = loginUi(sourceKey)
         val stored = storedLoginInfo(sourceKey)
+        val rows = loginUi(source, stored)
         return mapOf(
             "values" to if (stored.isEmpty()) defaultLoginInfo(rows) else stored,
             "loginUi" to rows,
             "loginUrl" to source.loginUrl.orEmpty(),
             "loginCheckJs" to source.loginCheckJs.orEmpty(),
-            "hasLoginHeader" to loginHeaders(sourceKey).isNotEmpty(),
+            "hasLoginHeader" to http.loginHeaders(sourceKey).isNotEmpty(),
             "hasCookie" to http.hasCookie(sourceKey),
         )
     }
 
-    private fun loginUi(sourceKey: String): List<Map<String, Any?>> {
-        val source = requireSource(sourceKey)
+    private fun loginUi(source: BookSource, values: Map<String, String>): List<Map<String, Any?>> {
         val raw = source.loginUi?.trim().orEmpty()
         if (raw.isEmpty()) return emptyList()
+        val env = loginEnv(source, values)
         val evaluated = when {
             raw.startsWith("@js:", ignoreCase = true) ->
-                js.eval(loginUiScript(source, raw.substring(4)), loginEnv(source))
+                js.eval(loginUiScript(source, raw.substring(4)), env)
             raw.startsWith("<js>", ignoreCase = true) -> {
                 val end = raw.lastIndexOf("</js>")
                 val script = if (end > 4) raw.substring(4, end) else raw.substring(4)
-                js.eval(loginUiScript(source, script), loginEnv(source))
+                js.eval(loginUiScript(source, script), env)
             }
             else -> raw
         }
@@ -1039,18 +1017,6 @@ internal class BookSourceEngine(
         }
     }
 
-    private fun loginHeaders(sourceKey: String): Map<String, String> {
-        val raw = variables?.get(loginHeaderKey(sourceKey)).orEmpty()
-        if (raw.isBlank()) return emptyMap()
-        val json = runCatching { JSONObject(raw) }.getOrNull() ?: return emptyMap()
-        return buildMap {
-            for (key in json.keys()) {
-                val value = json.opt(key)
-                if (value != null && value != JSONObject.NULL) put(key, value.toString())
-            }
-        }
-    }
-
     private fun loginHeaderFromResult(value: Any?): String? {
         val json = when (value) {
             is Map<*, *> -> toJsonObject(value)
@@ -1145,7 +1111,7 @@ internal class BookSourceEngine(
 
     private fun loginEnv(
         source: BookSource,
-        info: MutableMap<String, String> = mutableMapOf(),
+        info: Map<String, String> = emptyMap(),
     ): JsEnv = JsEnv(
         source = source,
         analyzer = analyzer(source),
@@ -1187,36 +1153,35 @@ internal class BookSourceEngine(
         row: Any?,
         baseUrl: String,
         book: BookData,
-    ): Map<String, Any?> {
-        val context = RuleContext(row, baseUrl, book = book)
+    ): ChapterData {
+        var chapter = ChapterData(bookUrl = book.bookUrl, baseUrl = baseUrl)
+        fun read(expression: String?) = analyzer.getString(expression, RuleContext(row, baseUrl, book = book, chapter = chapter))
+        fun flag(expression: String?): Boolean = read(expression).trim().lowercase() !in FalseChapterFlags
         val rule = source.toc
-        val rawUrl = analyzer.getString(rule.chapterUrl, context).ifBlank {
-            when (row) {
-                is Element -> row.attr("href")
-                is Map<*, *> -> row["url"]?.toString().orEmpty()
-                else -> ""
-            }
-        }
-        val title = analyzer.getString(rule.chapterName, context).ifBlank {
+        val title = read(rule.chapterName).ifBlank {
             when (row) {
                 is Element -> row.text()
                 is Map<*, *> -> row["title"]?.toString().orEmpty()
                 else -> analyzer.stringValue(row)
             }
         }
-        val isVolume = analyzer.getString(rule.isVolume, context)
-            .lowercase()
-            .let { it == "true" || it == "1" || it == "是" || it == "yes" }
-        return mapOf(
-            "title" to title,
-            "url" to if (rawUrl.isBlank()) "" else http.resolve(baseUrl, rawUrl),
-            "isVolume" to isVolume,
-            "updateTime" to analyzer.getString(rule.updateTime, context),
-        )
+        chapter = chapter.copy(title = title)
+        val rawUrl = read(rule.chapterUrl).ifBlank {
+            when (row) {
+                is Element -> row.attr("href")
+                is Map<*, *> -> row["url"]?.toString().orEmpty()
+                else -> ""
+            }
+        }
+        chapter = chapter.copy(url = rawUrl)
+        chapter = chapter.copy(tag = read(rule.updateTime))
+        chapter = chapter.copy(isVolume = flag(rule.isVolume))
+        chapter = chapter.copy(isVip = flag(rule.isVip))
+        return chapter.copy(isPay = flag(rule.isPay))
     }
 
     private fun analyzer(source: BookSource): BookSourceAnalyzer =
-        BookSourceAnalyzer(source, http, js)
+        BookSourceAnalyzer(source, http, js, variables)
 
     private fun fetchResponse(
         source: BookSource,
@@ -1274,7 +1239,52 @@ internal class BookSourceEngine(
 
     private fun requireTextSource(source: BookSource) {
         if (!source.supported) {
-            throw IllegalArgumentException("当前只支持文字和文件类型书源")
+            throw IllegalArgumentException(when {
+                source.type != 2 -> "当前不支持该书源类型"
+                !source.content.imageDecode.isNullOrBlank() -> "暂不支持带 imageDecode 的漫画书源"
+                else -> "漫画书源缺少正文规则"
+            })
+        }
+    }
+
+    fun downloadResource(key: String, bookUrl: String, chapterUrl: String, title: String, directory: File): File {
+        val source = requireSource(key)
+        requireTextSource(source)
+        val book = BookData(bookUrl = bookUrl)
+        val chapter = ChapterData(title = title, url = chapterUrl)
+        val address = when (source.type) {
+            1, 4 -> {
+                val response = applyLoginCheck(source, fetchResponse(source, http.requestSpec(key, chapterUrl), book = book, chapter = chapter),
+                    "", 1, book, chapter)
+                val context = RuleContext(response.text, chapterUrl, book = book, chapter = chapter, redirectUrl = response.url)
+                val link = analyzer(source).getString(source.content.content, context).trim()
+                require(link.isNotBlank() && !link.startsWith('<')) { "媒体规则没有返回直链" }
+                http.resolve(response.url, link)
+            }
+            3 -> {
+                require(!source.bookInfo.downloadUrls.isNullOrBlank() && chapterUrl.startsWith("wenku-download:")) { "没有文件下载规则" }
+                val links = detail(key, bookUrl, includeDownloads = true)["downloadUrls"] as List<*>
+                links.getOrNull(chapterUrl.substringAfter(':').toIntOrNull() ?: -1) as? String ?: error("文件下载地址已失效")
+            }
+            else -> error("该书源不是音视频或下载型书源")
+        }
+        val spec = applyRequestJs(source, http.requestSpec(key, address), "", 1, book, chapter)
+        return http.downloadResource(source, spec, directory)
+    }
+
+    private fun comicImages(raw: String, pageUrl: String): String {
+        val base = pageUrl.toHttpUrl()
+        val html = raw.trimStart().startsWith('<')
+        val sources = if (html) {
+            Jsoup.parseBodyFragment(raw, pageUrl).select("img").map { image ->
+                listOf("data-src", "data-original", "src").firstNotNullOfOrNull { image.attr(it).trim().takeIf(String::isNotEmpty) }.orEmpty()
+            }
+        } else raw.lineSequence().map(String::trim).filter { line ->
+            line.startsWith('/') || line.startsWith("./") || line.startsWith("../") || line.toHttpUrlOrNull() != null ||
+                ComicImageFile.containsMatchIn(line)
+        }.toList()
+        return sources.filter(String::isNotBlank).mapNotNull { base.resolve(it) }.joinToString("\n") { url ->
+            Element("img").attr("src", url.toString()).outerHtml()
         }
     }
 
@@ -1284,6 +1294,7 @@ internal class BookSourceEngine(
     }
 
     companion object {
+        private val ComicImageFile = Regex("""^[^\s<>]+\.(?:png|jpe?g|gif|webp|avif|bmp)(?:[?#].*)?$""", RegexOption.IGNORE_CASE)
         private const val LoginCallScript =
             "if (typeof login === 'function') { login.apply(this); }"
     }

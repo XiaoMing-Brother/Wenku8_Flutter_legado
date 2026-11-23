@@ -14,20 +14,26 @@ const releaseRightsNotice =
 const releaseReadingNotice = '**在线内容以轻小说文库开放状态为准，不提供因版权限制而停止开放的在线书籍阅读。**';
 const releaseMaintenanceNotice =
     '后续版本通过当前仓库的 GitHub Release 发布，可在「关于文库阅读」中检查更新。';
-const _discovery = '发现页补充七猫分类榜与番茄分类书库，官网结果优先展示，跨书源搜索可合并同一本书并实时刷新进度。';
-const _reader = '阅读器新增 Legado 内置主题库与主题背景，标题字号、字重、对齐和留白可调，正文支持 0–4 字首行缩进、斜体和更大的页边距范围。';
-const _sourceSwitch = '换源支持独立搜索范围与作者校验，候选按书源顺序排列，切换后按章节与阅读比例迁移进度。';
 const _bookSourceRules =
-    '书源引擎修正跳转后的 baseUrl、url/redirectUrl 与章节标题上下文，提升依赖页面路由和章节变量的书源兼容性。';
-const _reviews = '段评补充番茄、七猫来源，显示评论作者与总数；新增发现页书籍扉页和未收藏书籍退出提醒。';
-const _releaseNames = '发布附件统一使用 legado-wenku8- 前缀，不再上传旧 wenku8- 名称。';
+    '书源目录支持串行与并列翻页、分卷、VIP 标记和标题格式化；元素规则新增方括号选取与排除，搜索和发现共用分页判断。';
+const _cookies = '书源 Cookie 按来源与目标站点隔离，匹配路径和有效期，WebView 登录按 Cookie 路径回收。';
+const _validation = '书源管理新增当前列表与所选书源校验，可检查详情、目录和第一章正文；书源行可展开发现榜单。';
+const _discovery = '发现页接入七猫、书旗官方榜单，榜单按分类缓存五分钟；搜索并行查询官方站与已启用书源，官方命中优先。';
+const _fanqie = '番茄关键词搜索改用无需签名的接口，并新增独立字体映射还原书名、作者和简介。';
+const _covers = '图书详情支持更换封面，可选本机图片、图片地址、默认文字封面或恢复原封面；新增封面图集与磁盘缓存。';
+const _reviews = '阅读器支持正文段评标记与网页段评弹层，段评数量未知时气泡显示「评」。';
+const _replaceRules = '替换规则按 Legado 语义匹配书名或来源，标题与正文开关独立，并保留规则顺序。';
+const _details = '详情页和「我的」页统一打开书籍详情，未收藏退出时默认提示加入书架，本地书也可使用完整菜单。';
 const _changes = [
-  _discovery,
-  _reader,
-  _sourceSwitch,
   _bookSourceRules,
+  _cookies,
+  _validation,
+  _discovery,
+  _fanqie,
+  _covers,
   _reviews,
-  _releaseNames,
+  _replaceRules,
+  _details,
 ];
 const _androidInstall =
     '**Android**：本版为 arm64-v8a 正式构建，包名仍为 legado.wenku，可直接覆盖同包名的旧版；仍识别旧附件前缀的旧版需手动安装一次。';
@@ -52,12 +58,15 @@ $releaseReadingNotice
 
 ### 本次更新
 
-- $_discovery
-- $_reader
-- $_sourceSwitch
 - $_bookSourceRules
+- $_cookies
+- $_validation
+- $_discovery
+- $_fanqie
+- $_covers
 - $_reviews
-- $_releaseNames
+- $_replaceRules
+- $_details
 
 ### 后续维护
 

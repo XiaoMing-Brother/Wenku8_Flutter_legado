@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'book_source_transport.dart';
+import '../cover_disk_cache.dart';
 
 /// Book-source images need the source's headers and cookies, which live in the
 /// Android engine. Reader markers therefore carry both the source key and the
@@ -11,6 +12,8 @@ abstract final class BookSourceImages {
   static const markerScheme = 'legado-image';
   static const _transport = BookSourceTransport();
   static final _cache = _ImageCache();
+  static final _readerRevisions = <String, int>{};
+  static int _nextRevision = 0;
 
   static bool isMarker(String value) =>
       value.startsWith('$markerScheme:') && parseMarker(value) != null;
@@ -54,20 +57,34 @@ abstract final class BookSourceImages {
   static Uint8List? peekCover(String sourceKey, String url) =>
       _cache.peek(_coverKey(sourceKey, url));
 
-  static Future<Uint8List> coverBytes(String sourceKey, String url) =>
+  static Future<Uint8List> coverBytes(String sourceKey, String url, {String? bookKey}) =>
       _cache.load(
         _coverKey(sourceKey, url),
-        () => _fetch((sourceKey: sourceKey, url: url)),
+        () => CoverDiskCache.shared.load(
+          sourceKey, url, () => _fetch((sourceKey: sourceKey, url: url)), bookKey: bookKey,
+        ),
       );
 
   static Future<Uint8List> _fetch(({String sourceKey, String url}) image) =>
       _transport.image(sourceKey: image.sourceKey, url: image.url);
 
-  static String _coverKey(String sourceKey, String url) =>
-      'cover\u0000$sourceKey\u0000$url';
+  static int markerRevision(String marker) {
+    final image = parseMarker(marker);
+    if (image == null) return 0;
+    return _readerRevisions.putIfAbsent(image.sourceKey, () => ++_nextRevision);
+  }
 
-  static String _key(({String sourceKey, String url}) image) =>
-      '${image.sourceKey}\u0000${image.url}';
+  static Future<void> invalidateSource(String sourceKey) {
+    _readerRevisions.remove(sourceKey);
+    _cache.invalidate(sourceKey);
+    return CoverDiskCache.shared.invalidate(sourceKey);
+  }
+
+  static _ImageKey _coverKey(String sourceKey, String url) =>
+      (sourceKey: sourceKey, url: url, cover: true);
+
+  static _ImageKey _key(({String sourceKey, String url}) image) =>
+      (sourceKey: image.sourceKey, url: image.url, cover: false);
 
   static String _encode(String value) =>
       base64Url.encode(utf8.encode(value)).replaceAll('=', '');
@@ -76,23 +93,35 @@ abstract final class BookSourceImages {
       utf8.decode(base64Url.decode(base64Url.normalize(value)));
 }
 
+typedef _ImageKey = ({String sourceKey, String url, bool cover});
+
 class _ImageCache {
   static const maxBytes = 16 * 1024 * 1024;
   static const maxEntries = 256;
   static const retryDelay = Duration(seconds: 30);
 
-  final _entries = <String, Uint8List>{};
-  final _pending = <String, Future<Uint8List>>{};
-  final _failures = <String, (DateTime, Future<Uint8List>)>{};
+  final _entries = <_ImageKey, Uint8List>{};
+  final _pending = <_ImageKey, Future<Uint8List>>{};
+  final _failures = <_ImageKey, (DateTime, Future<Uint8List>)>{};
   int _bytes = 0;
 
-  Uint8List? peek(String key) {
+  void invalidate(String sourceKey) {
+    _entries.removeWhere((key, bytes) {
+      if (key.sourceKey != sourceKey) return false;
+      _bytes -= bytes.length;
+      return true;
+    });
+    _pending.removeWhere((key, _) => key.sourceKey == sourceKey);
+    _failures.removeWhere((key, _) => key.sourceKey == sourceKey);
+  }
+
+  Uint8List? peek(_ImageKey key) {
     final value = _entries.remove(key);
     if (value != null) _entries[key] = value;
     return value;
   }
 
-  Future<Uint8List> load(String key, Future<Uint8List> Function() request) {
+  Future<Uint8List> load(_ImageKey key, Future<Uint8List> Function() request) {
     final cached = peek(key);
     if (cached != null) return Future.value(cached);
     final failure = _failures[key];
@@ -108,11 +137,12 @@ class _ImageCache {
     unawaited(() async {
       try {
         final image = await request();
+        if (!identical(_pending[key], future)) throw StateError('书源图片会话已变更');
         if (image.isEmpty || image.length > 8 * 1024 * 1024) {
           throw const FormatException('书源图片大小无效');
         }
         final bytes = Uint8List.fromList(image).asUnmodifiableView();
-        if (identical(_pending[key], future)) _store(key, bytes);
+        _store(key, bytes);
         completer.complete(bytes);
       } catch (error, stack) {
         if (identical(_pending[key], future)) {
@@ -129,7 +159,7 @@ class _ImageCache {
     return future;
   }
 
-  void _store(String key, Uint8List bytes) {
+  void _store(_ImageKey key, Uint8List bytes) {
     final previous = _entries.remove(key);
     if (previous != null) _bytes -= previous.length;
     if (bytes.length > maxBytes) return;

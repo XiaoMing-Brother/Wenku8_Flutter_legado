@@ -106,6 +106,10 @@ flutter {
 }
 
 dependencies {
+    implementation("androidx.webkit:webkit:1.17.0")
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
+    testImplementation("org.json:json:20250517")
     implementation("org.apache.poi:poi-scratchpad:5.5.1")
     implementation("com.github.albfernandez:juniversalchardet:2.0.4")
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs_nio:2.1.5")

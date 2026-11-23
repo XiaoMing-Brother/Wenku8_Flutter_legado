@@ -31,7 +31,7 @@ class BookSourcePlugin :
     private data class PendingWebLogin(
         val sourceKey: String,
         val result: MethodChannel.Result,
-        val token: Any,
+        var config: WebLoginConfig? = null,
     )
 
     override fun onAttachedToEngine(binding: FlutterPlugin.FlutterPluginBinding) {
@@ -203,7 +203,7 @@ class BookSourcePlugin :
             result.error("NO_ENGINE", "书源引擎不可用", null)
             return
         }
-        val request = PendingWebLogin(sourceKey, result, Any())
+        val request = PendingWebLogin(sourceKey, result)
         pendingWebLogin = request
         // loginUrl 可能是 @js:，脚本里可能发网络请求，不能在主线程解析。
         worker.execute {
@@ -226,23 +226,14 @@ class BookSourcePlugin :
                     result.error("NO_ACTIVITY", "请在文库页面执行网页登录", null)
                     return@post
                 }
-                @Suppress("UNCHECKED_CAST")
-                val headers = config["headers"] as? Map<String, String> ?: emptyMap()
+                request.config = config
                 val intent = Intent(current, WebLoginActivity::class.java).apply {
-                    putExtra(WebLoginActivity.EXTRA_URL, config["url"]?.toString().orEmpty())
-                    putExtra(
-                        WebLoginActivity.EXTRA_TITLE,
-                        config["title"]?.toString().orEmpty(),
-                    )
-                    putExtra(
-                        WebLoginActivity.EXTRA_COOKIE,
-                        config["cookie"]?.toString().orEmpty(),
-                    )
-                    putExtra(
-                        WebLoginActivity.EXTRA_USER_AGENT,
-                        config["userAgent"]?.toString().orEmpty(),
-                    )
-                    putExtra(WebLoginActivity.EXTRA_HEADERS, HashMap(headers))
+                    putExtra(WebLoginActivity.EXTRA_URL, config.url)
+                    putExtra(WebLoginActivity.EXTRA_TITLE, config.title)
+                    putStringArrayListExtra(WebLoginActivity.EXTRA_COOKIE_TARGETS, ArrayList(config.cookieTargets.map { it.toString() }))
+                    putStringArrayListExtra(WebLoginActivity.EXTRA_COOKIES, ArrayList(config.cookies))
+                    putExtra(WebLoginActivity.EXTRA_USER_AGENT, config.headers["user-agent"])
+                    putExtra(WebLoginActivity.EXTRA_HEADERS, HashMap(config.headers))
                 }
                 try {
                     current.startActivityForResult(intent, WebLoginRequestCode)
@@ -271,12 +262,12 @@ class BookSourcePlugin :
             pending.result.error("NO_ENGINE", "书源引擎不可用", null)
             return true
         }
-        val cookie = data
-            ?.getStringExtra(WebLoginActivity.EXTRA_COOKIES_RESULT)
-            .orEmpty()
         try {
             pending.result.success(
-                engine.importWebLoginCookie(pending.sourceKey, cookie),
+                engine.importWebLoginCookie(pending.sourceKey, checkNotNull(pending.config),
+                    checkNotNull(data?.getStringArrayListExtra(WebLoginActivity.EXTRA_COOKIES_RESULT)),
+                    scoped = data.getBooleanExtra(WebLoginActivity.EXTRA_SCOPED, false),
+                    completedUrl = data.getStringExtra(WebLoginActivity.EXTRA_COMPLETED_URL)),
             )
         } catch (error: Throwable) {
             pending.result.error("BOOK_SOURCE_ERROR", message(error), null)

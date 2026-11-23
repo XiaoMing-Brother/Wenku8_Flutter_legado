@@ -32,6 +32,38 @@ Future<Uint8List> preparePersonalImageBytes(
   );
 }
 
+Future<Uint8List> prepareCoverFromUrl(String input) async {
+  final uri = Uri.tryParse(input.trim());
+  if (uri == null ||
+      !{'https', 'http'}.contains(uri.scheme) ||
+      uri.host.isEmpty ||
+      uri.userInfo.isNotEmpty) {
+    throw const FormatException('请输入完整的 HTTP 或 HTTPS 图片地址');
+  }
+  const timeout = Duration(seconds: 20);
+  final client = HttpClient()..connectionTimeout = timeout;
+  try {
+    final request = await client.getUrl(uri).timeout(timeout);
+    request.headers.set(HttpHeaders.acceptHeader, 'image/*');
+    final response = await request.close().timeout(timeout);
+    if (response.statusCode != HttpStatus.ok) {
+      throw const FormatException('图片地址不可访问');
+    }
+    const limit = 20 * 1024 * 1024;
+    final bytes = BytesBuilder(copy: false);
+    await for (final chunk in response.timeout(timeout)) {
+      if (response.contentLength > limit ||
+          bytes.length + chunk.length > limit) {
+        throw const FormatException('请选择 20 MiB 以内的图片');
+      }
+      bytes.add(chunk);
+    }
+    return await preparePersonalImageBytes(bytes.takeBytes(), cover: true);
+  } finally {
+    client.close(force: true);
+  }
+}
+
 Future<Uint8List> _prepareImageBuffer(
   ui.ImmutableBuffer buffer, {
   required bool cover,

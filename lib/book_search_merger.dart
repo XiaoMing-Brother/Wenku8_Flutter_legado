@@ -1,4 +1,5 @@
 import 'catalog.dart';
+import 'official_books.dart';
 
 /// 将同一本书在不同书源中的结果合并为一行，并保持 Legado 的搜索排序语义。
 class NovelSearchMerger {
@@ -26,7 +27,7 @@ class NovelSearchMerger {
       _mergeBook(book, pin: true);
     }
     for (final book in incoming) {
-      _mergeBook(book, pin: false);
+      _mergeBook(book, pin: _officialRank(book) < OfficialBookService.searchSites.length);
     }
     return _sortedItems();
   }
@@ -38,7 +39,7 @@ class NovelSearchMerger {
     final current = _books[key];
     if (current == null) {
       _books[key] = _MergedSearchBook(book, _nextOrder++);
-    } else if (pin) {
+    } else if (pin && (!_pinned.contains(key) || _officialRank(book) <= _officialRank(current.novel))) {
       // 官网结果与书源命中同一本书时，保留官网的书籍信息作为展示行。
       current.novel = book;
     }
@@ -59,9 +60,17 @@ class NovelSearchMerger {
         rows.add(entry);
       }
     }
-    pinnedRows.sort(
-      (a, b) => (_pinnedOrder[a.key] ?? 0).compareTo(_pinnedOrder[b.key] ?? 0),
-    );
+    pinnedRows.sort((left, right) {
+      final leftRank = _officialRank(left.value.novel);
+      final rightRank = _officialRank(right.value.novel);
+      final count = OfficialBookService.searchSites.length;
+      if (leftRank < count && rightRank < count) {
+        final match = left.value.bucket(_query).compareTo(right.value.bucket(_query));
+        if (match != 0) return match;
+      }
+      final site = leftRank.compareTo(rightRank);
+      return site != 0 ? site : (_pinnedOrder[left.key] ?? 0).compareTo(_pinnedOrder[right.key] ?? 0);
+    });
     rows.sort((a, b) {
       final left = a.value;
       final right = b.value;
@@ -99,6 +108,15 @@ class NovelSearchMerger {
   }
 
   static String _origin(Novel book) => book.source?.sourceKey ?? 'wenku8';
+
+  static int _officialRank(Novel book) {
+    final sites = OfficialBookService.searchSites;
+    final sourceKey = book.source?.sourceKey;
+    for (var index = 0; index < sites.length; index++) {
+      if (sourceKey == OfficialBookService.sourceKey(sites[index])) return index;
+    }
+    return sites.length;
+  }
 
   static final _spacing = RegExp(r'[\s\u3000·・_\-—–，,。.:：()（）\[\]【】「」『』《》]');
 

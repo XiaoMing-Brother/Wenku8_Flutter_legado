@@ -54,7 +54,7 @@ Future<String?> _capture(Novel book, String reference) async {
     return await _readSnapshot(file) == null ? null : reference;
   }
 
-  final url = book.coverUrl;
+  final url = novelCoverUrl(book);
   final Uint8List? source;
   if (url != null && url.startsWith('wenku-local:')) {
     final uri = Uri.tryParse(url);
@@ -63,7 +63,7 @@ Future<String?> _capture(Novel book, String reference) async {
     }
     source = LocalBookMedia.peek(url) ?? await LocalBookMedia.loadCover(url);
   } else {
-    source = peekNovelCover(book);
+    source = url == null ? null : await novelCoverBytes(book, cachedOnly: true);
   }
   if (source == null || source.isEmpty || source.length > _maxSourceBytes) {
     return null;

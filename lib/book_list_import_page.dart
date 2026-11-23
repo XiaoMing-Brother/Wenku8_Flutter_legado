@@ -165,6 +165,7 @@ class _BookListImportPageState extends State<BookListImportPage> {
             title: entry.title,
             author: entry.author,
             coverUrl: entry.coverUrl,
+            customCoverUrl: entry.customCoverUrl,
             origin: entry.origin,
             originName: entry.originName,
             bookUrl: entry.bookUrl,

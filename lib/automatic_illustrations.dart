@@ -85,6 +85,7 @@ ReaderContent autoIllustrationsFromReference(
     placementIds: source.placementIds,
     formats: source.formats,
     notes: source.notes,
+    reviews: source.reviews,
     revision: source.revision,
     coordinateMap: source.coordinateMap,
   );

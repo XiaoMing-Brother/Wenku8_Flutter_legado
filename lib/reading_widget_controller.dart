@@ -430,7 +430,7 @@ Future<String?> cachedReadingWidgetCover(
   if (id == null) return null;
   final novel = state.cachedNovel(id);
   if (novel == null) return null;
-  final url = novel.coverUrl;
+  final url = novelCoverUrl(novel);
   if (url == null) return null;
   try {
     final directory = Directory(

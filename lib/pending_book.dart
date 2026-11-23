@@ -18,6 +18,7 @@ class PendingBook {
     required this.title,
     this.author = '',
     this.coverUrl = '',
+    this.customCoverUrl = '',
     this.origin = '',
     this.originName = '',
     this.bookUrl = '',
@@ -28,6 +29,7 @@ class PendingBook {
   final String title;
   final String author;
   final String coverUrl;
+  final String customCoverUrl;
   final String origin;
   final String originName;
   final String bookUrl;
@@ -39,7 +41,8 @@ class PendingBook {
       id: novel.id,
       title: novel.title,
       author: novel.author,
-      coverUrl: novel.coverUrl ?? '',
+      coverUrl: source?.coverUrl ?? novel.coverUrl ?? '',
+      customCoverUrl: source?.customCoverUrl ?? '',
       origin: source?.sourceKey ?? '',
       originName: source?.sourceName ?? '',
       bookUrl: source?.bookUrl ?? '',
@@ -57,7 +60,7 @@ class PendingBook {
       genre: '待匹配',
       summary: '',
       colors: const [Color(0xFF202020), Color(0xFF333333)],
-      coverUrl: coverUrl.isEmpty ? null : coverUrl,
+      coverUrl: customCoverUrl.isNotEmpty ? customCoverUrl : (coverUrl.isEmpty ? null : coverUrl),
       source: hasCoordinates
           ? BookSourceRef(
               sourceKey: origin,
@@ -66,6 +69,7 @@ class PendingBook {
               title: title,
               author: author,
               coverUrl: coverUrl,
+              customCoverUrl: customCoverUrl,
             )
           : null,
     );
@@ -76,6 +80,7 @@ class PendingBook {
     'title': title,
     if (author.isNotEmpty) 'author': author,
     if (coverUrl.isNotEmpty) 'cover': coverUrl,
+    if (customCoverUrl.isNotEmpty) 'customCoverUrl': customCoverUrl,
     if (origin.isNotEmpty) 'origin': origin,
     if (originName.isNotEmpty) 'originName': originName,
     if (bookUrl.isNotEmpty) 'bookUrl': bookUrl,
@@ -96,6 +101,7 @@ class PendingBook {
       title: title,
       author: _text(value['author'], 500),
       coverUrl: _text(value['cover'], 4096),
+      customCoverUrl: BookSourceRef.webCover(value['customCoverUrl']),
       origin: _text(value['origin'], 4096),
       originName: _text(value['originName'], 512),
       bookUrl: _text(value['bookUrl'], 4096),

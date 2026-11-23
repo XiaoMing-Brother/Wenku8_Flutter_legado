@@ -13,6 +13,7 @@ import org.jsoup.Jsoup
 import org.jsoup.helper.W3CDom
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
+import org.mozilla.javascript.Context
 import org.mozilla.javascript.NativeArray
 import org.mozilla.javascript.Scriptable
 import org.w3c.dom.Node
@@ -22,6 +23,7 @@ internal class BookSourceAnalyzer(
     private val source: BookSource,
     private val http: BookSourceHttp,
     private val js: BookSourceJs,
+    private val variables: BookSourceVariables? = null,
 ) {
     fun expand(
         template: String,
@@ -33,7 +35,7 @@ internal class BookSourceAnalyzer(
         chapter: ChapterData? = null,
     ): String {
         if (!template.contains("{{")) return template
-        return TemplateRegex.replace(template) { match ->
+        return BookSourceUrlRule.expression.replace(template) { match ->
             val expression = match.groupValues[1].trim()
             when (expression) {
                 "key" -> key
@@ -57,8 +59,10 @@ internal class BookSourceAnalyzer(
                 } else {
                     js.eval(
                         expression,
-                        JsEnv(source, this, content, baseUrl, key, page, book, chapter),
-                    )?.toString() ?: ""
+                        JsEnv(source, this, content, baseUrl, key, page, book, chapter, variables = variables),
+                    ).let { value ->
+                        if (value is Number) Context.toString(value) else value?.toString().orEmpty()
+                    }
                 }
             }
         }
@@ -71,6 +75,14 @@ internal class BookSourceAnalyzer(
         if (rule.isNullOrBlank()) return emptyList()
         return flatten(evaluate(rule, context)).map(::stringValue)
     }
+
+    fun nextPageUrls(rule: String?, context: RuleContext, visited: Set<String>): List<String> =
+        getStrings(rule, context).asSequence()
+            .flatMap { it.lineSequence() }
+            .map { http.resolve(context.redirectUrl.ifBlank { context.baseUrl }, it) }
+            .filter { it.isNotBlank() && http.pageKey(it) !in visited }
+            .distinctBy { http.pageKey(it) }
+            .toList()
 
     /**
      * 正文规则可能返回单个容器、若干段落节点或文本节点。像
@@ -223,7 +235,7 @@ internal class BookSourceAnalyzer(
 
     fun getObjects(rule: String?, context: RuleContext): List<Any?> {
         if (rule.isNullOrBlank()) return emptyList()
-        return flatten(evaluate(rule, context))
+        return flatten(evaluate(rule, context, elements = true))
     }
 
     fun stringValue(value: Any?): String = when (value) {
@@ -237,7 +249,7 @@ internal class BookSourceAnalyzer(
         else -> value.toString()
     }
 
-    private fun evaluate(rule: String, context: RuleContext): List<Any?> {
+    private fun evaluate(rule: String, context: RuleContext, elements: Boolean = false): List<Any?> {
         val trimmedRule = rule.trimStart()
         val isScript = trimmedRule.startsWith("@js:") ||
             trimmedRule.startsWith("<js>", ignoreCase = true)
@@ -260,18 +272,30 @@ internal class BookSourceAnalyzer(
                 val fallback = splitTopLevel(expanded, "||")
                 if (fallback.size > 1) {
                     for (part in fallback) {
-                        val result = evaluatePart(part, context)
+                        val result = evaluatePart(part, context, elements)
                         if (result.any { stringValue(it).isNotBlank() }) return result
                     }
                     return emptyList()
                 }
                 val sequence = splitTopLevel(expanded, "&&")
                 if (sequence.size > 1) {
-                    return sequence.flatMap { evaluatePart(it, context) }
+                    return sequence.flatMap { evaluatePart(it, context, elements) }
+                }
+                if (!expanded.trimStart().startsWith("@regex:", ignoreCase = true)) {
+                    val alternating = splitTopLevel(expanded, "%%")
+                    if (alternating.size > 1) {
+                        val lists = alternating.map { evaluatePart(it, context, elements) }
+                            .filter { elements || it.isNotEmpty() }
+                        return buildList {
+                            for (row in 0 until (lists.firstOrNull()?.size ?: 0)) {
+                                for (list in lists) if (row < list.size) add(list[row])
+                            }
+                        }
+                    }
                 }
             }
         }
-        return evaluatePart(expanded, context)
+        return evaluatePart(expanded, context, elements)
     }
 
     /**
@@ -299,7 +323,7 @@ internal class BookSourceAnalyzer(
         }
     }
 
-    private fun evaluatePart(rule: String, context: RuleContext): List<Any?> {
+    private fun evaluatePart(rule: String, context: RuleContext, elements: Boolean = false): List<Any?> {
         val trimmed = rule.trim()
         if (trimmed.isEmpty()) return emptyList()
         // Legado 允许在任意规则后追加 @js: / <js> 对结果二次处理，
@@ -345,7 +369,7 @@ internal class BookSourceAnalyzer(
                 listOf(js.eval(script, env(context)))
             }
             trimmed.startsWith("@css:", ignoreCase = true) ->
-                css(trimmed.substring(5), context)
+                css(trimmed.substring(5), context, elementIndices = false, elements = elements)
             trimmed.startsWith("@json:", ignoreCase = true) ->
                 json(trimmed.substring(6), context)
             trimmed.startsWith("@xpath:", ignoreCase = true) ->
@@ -359,7 +383,7 @@ internal class BookSourceAnalyzer(
             context.content is Map<*, *> ->
                 jsonField(trimmed, context.content)
             else ->
-                css(trimmed, context)
+                css(trimmed, context, elements = elements)
         }
     }
 
@@ -497,9 +521,10 @@ internal class BookSourceAnalyzer(
         book = context.book,
         chapter = context.chapter,
         redirectUrl = context.redirectUrl,
+        variables = variables,
     )
 
-    private fun css(rule: String, context: RuleContext): List<Any?> {
+    private fun css(rule: String, context: RuleContext, elementIndices: Boolean = true, elements: Boolean = false): List<Any?> {
         val roots = when (val content = context.content) {
             is Element -> listOf(content)
             is Document -> listOf(content)
@@ -507,23 +532,36 @@ internal class BookSourceAnalyzer(
             else -> return emptyList()
         }
         var current: List<Any?> = roots
-        for (rawSegment in splitTopLevel(rule, "@")) {
+        val segments = splitTopLevel(rule, "@")
+        for ((position, rawSegment) in segments.withIndex()) {
             val segment = rawSegment.trim()
             if (segment.isEmpty()) continue
+            val indexed = if (elementIndices) elementIndex(segment) else null
+            if (indexed != null) {
+                val (base, filter) = indexed
+                val extractionSuffix = filter.exclude && !segment.endsWith(']') &&
+                    (isAttribute(base) || base.lowercase(Locale.ROOT) in ExtractionNames)
+                if (!extractionSuffix) {
+                    current = current.flatMap { parent -> filter.apply(select(parent, base.ifEmpty { "children" })) }
+                    continue
+                }
+            }
             val (selector, index) = splitIndex(segment)
             val values = if (index == null) current else applyIndex(current, index)
             when (selector.lowercase(Locale.ROOT)) {
-                "text" -> return values.map(::stringValue)
-                "owntext" -> return values.mapNotNull { (it as? Element)?.ownText() }
-                "textnodes" -> return values.flatMap { item ->
-                    (item as? Element)?.textNodes()?.map { it.text() } ?: emptyList()
+                "text" -> return values.map(::stringValue).filter { it.isNotEmpty() }
+                "owntext" -> return values.mapNotNull { (it as? Element)?.ownText()?.takeIf(String::isNotEmpty) }
+                "textnodes" -> return values.mapNotNull { item ->
+                    (item as? Element)?.textNodes()?.map { it.text().trim() }?.filter(String::isNotEmpty)
+                        ?.joinToString("\n")?.takeIf(String::isNotEmpty)
                 }
                 "html" -> return values.mapNotNull { (it as? Element)?.html() }
                 "outerhtml", "all" -> return values.mapNotNull {
                     (it as? Element)?.outerHtml()
                 }
-                else -> if (isAttribute(selector)) {
-                    return values.mapNotNull { attributeValue(it, selector) }
+                else -> if (isAttribute(selector) || (!elements && position == segments.lastIndex &&
+                        ATTRIBUTE_NAME.matches(selector) && values.any { it is Element && it.hasAttr(selector) })) {
+                    return values.mapNotNull { attributeValue(it, selector) }.filter(String::isNotBlank).distinct()
                 } else if (selector.isNotEmpty()) {
                     current = values.flatMap { item -> select(item, selector) }
                 } else {
@@ -592,6 +630,55 @@ internal class BookSourceAnalyzer(
             return element.absUrl(segment.substring(4))
         }
         return element.attr(segment)
+    }
+
+    private data class IndexSpan(val start: Int?, val end: Int?, val step: Int)
+
+    private data class ElementIndex(val exclude: Boolean, val spans: List<IndexSpan>) {
+        fun apply(values: List<Any?>): List<Any?> {
+            if (values.isEmpty()) return emptyList()
+            val size = values.size
+            val positions = linkedSetOf<Int>()
+            fun absolute(index: Int) = if (index < 0) size + index else index
+            for (span in spans) {
+                val start = absolute(span.start ?: 0)
+                val end = absolute(span.end ?: values.lastIndex)
+                if ((start < 0 && end < 0) || (start >= size && end >= size)) continue
+                val first = start.coerceIn(values.indices)
+                val last = end.coerceIn(values.indices)
+                val stride = when {
+                    span.step > 0 -> span.step
+                    span.step > -size -> size + span.step
+                    else -> 1
+                }
+                val range = if (first <= last) first..last else first downTo last
+                for (position in range step stride) positions.add(position)
+            }
+            return if (exclude) values.filterIndexed { index, _ -> index !in positions } else positions.map(values::get)
+        }
+    }
+
+    private fun elementIndex(segment: String): Pair<String, ElementIndex>? {
+        val bracket = segment.endsWith(']')
+        val split = if (bracket) segment.lastIndexOf('[') else segment.lastIndexOfAny(charArrayOf('.', '!'))
+        if (split < 0 || (split > 0 && segment[split - 1] == '\\')) return null
+        val suffix = if (bracket) segment.substring(split + 1, segment.lastIndex).trim() else segment.substring(split + 1)
+        if (suffix.none { it == ':' || it in '0'..'9' }) return null
+        val exclude = if (bracket) suffix.startsWith('!') else segment[split] == '!'
+        val expression = if (bracket && exclude) suffix.drop(1) else suffix
+        val spans = expression.split(if (bracket) ',' else ':').map { token ->
+            val fields = token.trim().split(':')
+            if (fields.size > 3) return null
+            val numbers = fields.map { field ->
+                val number = field.trim()
+                if (number.isEmpty()) null else number.toIntOrNull() ?: return null
+            }
+            if (numbers.size == 1) {
+                val single = numbers.first() ?: return null
+                IndexSpan(single, single, 1)
+            } else IndexSpan(numbers[0], numbers[1], numbers.getOrNull(2) ?: 1)
+        }
+        return segment.substring(0, split).trimEnd() to ElementIndex(exclude, spans)
     }
 
     private fun splitIndex(segment: String): Pair<String, String?> {
@@ -716,7 +803,7 @@ internal class BookSourceAnalyzer(
     }
 
     companion object {
-        private val TemplateRegex = Regex("""\{\{(.*?)\}\}""", RegexOption.DOT_MATCHES_ALL)
+        private val ExtractionNames = setOf("text", "owntext", "textnodes", "html", "outerhtml", "all")
         private val IndexRegex = Regex("""^(.*?)!(-?\d+(?::-?\d+)?)$""")
         private val ATTRIBUTE_NAME = Regex("""^[A-Za-z_][A-Za-z0-9_.:-]*$""")
         private val TitleWhitespace = Regex("""[\s\u00A0\u3000\uFEFF]+""")

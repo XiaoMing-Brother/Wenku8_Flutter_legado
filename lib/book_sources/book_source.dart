@@ -44,10 +44,39 @@ class BookSource {
   bool get enabled => _bool('enabled', fallback: true);
   bool get enabledExplore => _bool('enabledExplore', fallback: true);
 
-  bool get supported => type == 0 || type == 3;
+  Map? _ruleGroup(String field) {
+    var content = raw[field];
+    if (content is String) {
+      try {
+        content = jsonDecode(content);
+      } on FormatException {
+        return null;
+      }
+    }
+    return content is Map ? content : null;
+  }
+
+  int get resourceType => type == 3 && '${_ruleGroup('ruleBookInfo')?['downloadUrls'] ?? ''}'.trim().isNotEmpty
+      ? 3 : (type == 1 || type == 4 ? type : 0);
+
+  bool get supported {
+    if (type == 0 || type == 3) return true;
+    final content = _ruleGroup('ruleContent');
+    if (type == 1 || type == 4) return '${content?['content'] ?? ''}'.trim().isNotEmpty;
+    return type == 2 && content != null && '${content['content'] ?? ''}'.trim().isNotEmpty &&
+        '${content['imageDecode'] ?? ''}'.trim().isEmpty;
+  }
 
   String get exploreUrl => _string('exploreUrl');
   String get searchUrl => _string('searchUrl');
+  String checkKeyword(String fallback) {
+    final value = _ruleGroup('ruleSearch')?['checkKeyWord'];
+    if (value is! String || value.trim().isEmpty ||
+        ['http', '::', '++', '--'].any(value.contains)) {
+      return fallback.trim();
+    }
+    return value.trim();
+  }
   bool get canExplore => exploreUrl.isNotEmpty && enabledExplore;
   /// 旧版发现源的兼容标记：为 true 时榜单点击只跨书源搜索，不直接进详情。
   bool get discoveryOnly => _bool('wenkuDiscoveryOnly', fallback: false);
@@ -157,6 +186,34 @@ class BookSource {
   }
 
   Map<String, dynamic> toJson() => Map<String, dynamic>.from(raw);
+
+  static const editableRules = [
+    'ruleSearch', 'ruleExplore', 'ruleBookInfo', 'ruleToc', 'ruleContent',
+  ];
+
+  String get ruleDocument => const JsonEncoder.withIndent('  ').convert({
+    for (final field in editableRules) if (raw.containsKey(field)) field: raw[field],
+  });
+
+  BookSource withRuleDocument(String text) {
+    final document = jsonDecode(text);
+    if (document is! Map<String, dynamic>) throw const FormatException('规则必须是 JSON 对象');
+    final copy = toJson();
+    for (final entry in document.entries) {
+      if (!editableRules.contains(entry.key)) throw FormatException('不是可编辑的规则组：${entry.key}');
+      final value = entry.value;
+      if (value == null) {
+        copy.remove(entry.key);
+      } else {
+        if (value != raw[entry.key] && value is! Map &&
+            !(value is String && jsonDecode(value) is Map)) {
+          throw FormatException('${entry.key} 必须是对象、对象的 JSON 字符串或 null');
+        }
+        copy[entry.key] = value;
+      }
+    }
+    return BookSource(copy);
+  }
 
   static BookSource? tryParse(Object? value) {
     if (value is! Map) return null;
