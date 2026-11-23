@@ -36,6 +36,73 @@ enum ReaderPaper {
   final Color? background, ink, nightBackground, nightInk;
 }
 
+enum ReaderThemeMode {
+  follow('跟随应用'),
+  day('日间'),
+  night('夜间');
+
+  const ReaderThemeMode(this.label);
+  final String label;
+}
+
+class ReaderLook {
+  const ReaderLook({
+    this.paper = ReaderPaper.system,
+    this.theme,
+    this.backgroundImage,
+    this.baseColor,
+    this.textColor,
+    this.accent,
+    this.highlight,
+  });
+
+  final ReaderPaper paper;
+  final ReaderThemeSelection? theme;
+  final String? backgroundImage;
+  final Color? baseColor, textColor, accent, highlight;
+  String get choiceKey =>
+      theme == null ? 'paper:${paper.name}' : 'theme:${theme!.id}';
+  String get label => theme?.name ?? paper.label;
+  bool sameChoice(ReaderLook other) =>
+      theme?.id == other.theme?.id &&
+      (theme != null || paper == other.paper) &&
+      backgroundImage == other.backgroundImage &&
+      theme?.imageUrl == other.theme?.imageUrl;
+
+  Map<String, Object?> toJson() => {
+    'paper': paper.name,
+    if (baseColor != null) 'baseColor': baseColor!.toARGB32(),
+    if (textColor != null) 'textColor': textColor!.toARGB32(),
+    if (accent != null) 'accent': accent!.toARGB32(),
+    if (highlight != null) 'highlight': highlight!.toARGB32(),
+    if (theme != null) 'theme': theme!.toJson(),
+    if (backgroundImage != null) 'backgroundImage': backgroundImage,
+  };
+
+  factory ReaderLook.fromJson(Map<String, dynamic> json) {
+    final image = json['backgroundImage'];
+    if (image != null && !validBackgroundId(image)) {
+      throw const FormatException('阅读背景记录有误');
+    }
+    final rawTheme = json['theme'];
+    return ReaderLook(
+      paper:
+          ReaderPaper.values
+              .where((paper) => paper.name == json['paper'])
+              .firstOrNull ??
+          ReaderPaper.system,
+      theme: rawTheme == null
+          ? null
+          : ReaderThemeSelection.fromJson(rawTheme as Map<String, dynamic>),
+      backgroundImage: image as String?,
+      baseColor: json['baseColor'] is int ? Color(json['baseColor']) : null,
+      textColor: json['textColor'] is int ? Color(json['textColor']) : null,
+      accent: json['accent'] is int ? Color(json['accent']) : null,
+      highlight: json['highlight'] is int ? Color(json['highlight']) : null,
+    );
+  }
+}
+
 enum ReaderMode {
   scroll('上下滚动'),
   paged('横排翻页'),
@@ -150,6 +217,11 @@ class ReaderPreferences {
   const ReaderPreferences({
     this.paper = ReaderPaper.system,
     this.theme,
+    this.nightLook,
+    this.themeMode = ReaderThemeMode.follow,
+    this.recentLooks = const [],
+    this.dayShelf = const [],
+    this.nightShelf = const [],
     this.margin = 26,
     this.marginLeft,
     this.marginRight,
@@ -200,6 +272,124 @@ class ReaderPreferences {
 
   /// Legado 远程主题；存在时覆盖 [paper] 的底色和文字色。
   final ReaderThemeSelection? theme;
+  final ReaderLook? nightLook;
+  final ReaderThemeMode themeMode;
+  final List<ReaderLook> recentLooks;
+  final List<ReaderLook> dayShelf, nightShelf;
+
+  List<ReaderLook> shelf(bool night) {
+    final active = lookFor(night);
+    return <String, ReaderLook>{
+      for (final paper
+          in (night
+              ? [
+                  ReaderPaper.system,
+                  ReaderPaper.night,
+                  ReaderPaper.legadoWechat,
+                ]
+              : [
+                  ReaderPaper.system,
+                  ReaderPaper.milk,
+                  ReaderPaper.parchment,
+                  ReaderPaper.sage,
+                  ReaderPaper.legadoWechat,
+                ]))
+        'paper:${paper.name}': ReaderLook(paper: paper),
+      for (final look in night ? nightShelf : dayShelf) look.choiceKey: look,
+      active.choiceKey: active,
+    }.values.toList();
+  }
+
+  ReaderPreferences saveCard(bool night, ReaderLook look) {
+    final cards = <String, ReaderLook>{
+      for (final card in shelf(night)) card.choiceKey: card,
+      look.choiceKey: look,
+    }.values.toList();
+    final updated = night
+        ? copyWith(nightShelf: cards)
+        : copyWith(dayShelf: cards);
+    return lookFor(night).choiceKey == look.choiceKey
+        ? updated.setLook(night, look, remember: false)
+        : updated;
+  }
+
+  Iterable<ReaderLook> recentFor(bool night) =>
+      recentLooks.where((look) => !look.sameChoice(lookFor(night))).take(4);
+
+  bool usesNight(bool appDark) => switch (themeMode) {
+    ReaderThemeMode.follow => appDark,
+    ReaderThemeMode.day => false,
+    ReaderThemeMode.night => true,
+  };
+
+  ReaderLook lookFor(bool night) {
+    final active = night && nightLook != null
+        ? nightLook!
+        : ReaderLook(
+            paper: paper,
+            theme: theme,
+            backgroundImage: backgroundImage,
+          );
+    final saved = (night ? nightShelf : dayShelf)
+        .where((card) => card.choiceKey == active.choiceKey)
+        .firstOrNull;
+    return saved == null
+        ? active
+        : ReaderLook(
+            paper: active.paper,
+            theme: active.theme,
+            backgroundImage: active.backgroundImage,
+            baseColor: saved.baseColor,
+            textColor: saved.textColor,
+            accent: saved.accent,
+            highlight: saved.highlight,
+          );
+  }
+
+  ReaderPreferences setLook(
+    bool night,
+    ReaderLook look, {
+    bool remember = true,
+  }) {
+    final previous = lookFor(night);
+    final history = remember && !look.sameChoice(previous)
+        ? <ReaderLook>[
+            look,
+            previous,
+            ...recentLooks.where(
+              (item) => !item.sameChoice(previous) && !item.sameChoice(look),
+            ),
+          ].take(5).toList(growable: false)
+        : recentLooks;
+    if (night) return copyWith(nightLook: look, recentLooks: history);
+    return copyWith(
+      paper: look.paper,
+      theme: look.theme,
+      backgroundImage: look.backgroundImage,
+      clearBackground: look.backgroundImage == null,
+      nightLook: lookFor(true),
+      recentLooks: history,
+    );
+  }
+
+  ReaderPreferences removeBackground(String image) {
+    final used =
+        backgroundImage == image ||
+        nightLook?.backgroundImage == image ||
+        recentLooks.any((look) => look.backgroundImage == image);
+    if (!used) return this;
+    final night = nightLook;
+    return copyWith(
+      clearBackground: backgroundImage == image,
+      nightLook: night != null && night.backgroundImage == image
+          ? ReaderLook(paper: night.paper, theme: night.theme)
+          : night,
+      recentLooks: recentLooks
+          .where((look) => look.backgroundImage != image)
+          .toList(),
+    );
+  }
+
   final double margin, paragraphGap, autoScrollSpeed;
   final bool paragraphGapOverride, catalogueReversed;
   // Null horizontal edges preserve old records and existing margin callers.
@@ -281,7 +471,6 @@ class ReaderPreferences {
       footerTips.any((t) => t.value != ReaderTipValue.none);
 
   bool get showTitle => titlePosition != ReaderTitlePosition.hidden;
-  bool get usesThemeInk => theme != null || paper.ink != null;
   TextAlign get titleTextAlign => titlePosition == ReaderTitlePosition.center
       ? TextAlign.center
       : TextAlign.start;
@@ -326,8 +515,12 @@ class ReaderPreferences {
     return '$geometry$gapKey$modeKey$textKey$titleKey';
   }
 
-  Color background(bool dark) {
-    if (theme case final selected?) {
+  Color background(bool appDark) {
+    final dark = usesNight(appDark);
+    final look = lookFor(dark);
+    final paper = look.paper;
+    if (look.baseColor != null) return look.baseColor!;
+    if (look.theme case final selected?) {
       return dark ? selected.nightBackground : selected.background;
     }
     if (paper == ReaderPaper.system) {
@@ -337,25 +530,26 @@ class ReaderPreferences {
     return dark ? paper.nightBackground ?? backgroundColor : backgroundColor;
   }
 
-  Color controlForeground(bool dark) {
-    if (theme case final selected?) {
+  Color controlForeground(bool appDark) {
+    final dark = usesNight(appDark);
+    final look = lookFor(dark);
+    final paper = look.paper;
+    if (look.textColor != null) return look.textColor!;
+    if (look.theme case final selected?) {
       return dark ? selected.nightInk : selected.ink;
     }
     final themedInk = dark ? paper.nightInk ?? paper.ink : paper.ink;
     if (themedInk != null) return themedInk;
-    return darkPaper(dark) ? ArchiveDesign.darkInk : const Color(0xFF30352F);
+    return darkPaper(appDark) ? ArchiveDesign.darkInk : const Color(0xFF30352F);
   }
 
   bool darkPaper(bool dark) =>
       ThemeData.estimateBrightnessForColor(background(dark)) == Brightness.dark;
 
   Color foreground(bool dark) {
-    if (theme case final selected?) {
-      return dark ? selected.nightInk : selected.ink;
-    }
-    final themedInk = dark ? paper.nightInk ?? paper.ink : paper.ink;
-    if (themedInk != null) return themedInk;
-    return darkPaper(dark)
+    final look = lookFor(usesNight(dark));
+    if (look.textColor != null) return look.textColor!;
+    return look.theme == null && look.paper.ink == null && darkPaper(dark)
         ? Color.lerp(
             background(dark),
             controlForeground(dark),
@@ -365,6 +559,14 @@ class ReaderPreferences {
   }
 
   Map<String, Object?> toJson() => {
+    if (nightLook != null) 'nightLook': nightLook!.toJson(),
+    if (dayShelf.isNotEmpty)
+      'dayShelf': dayShelf.map((card) => card.toJson()).toList(),
+    if (nightShelf.isNotEmpty)
+      'nightShelf': nightShelf.map((card) => card.toJson()).toList(),
+    if (themeMode != ReaderThemeMode.follow) 'themeMode': themeMode.name,
+    if (recentLooks.isNotEmpty)
+      'recentLooks': [for (final look in recentLooks) look.toJson()],
     'paper': paper.name,
     if (theme != null) 'theme': theme!.toJson(),
     'margin': margin,
@@ -471,6 +673,25 @@ class ReaderPreferences {
         orElse: () => ReaderPaper.system,
       ),
       theme: theme,
+      nightLook: json['nightLook'] == null
+          ? null
+          : ReaderLook.fromJson(json['nightLook'] as Map<String, dynamic>),
+      dayShelf: [
+        for (final item in json['dayShelf'] as List? ?? const [])
+          ReaderLook.fromJson(item as Map<String, dynamic>),
+      ],
+      nightShelf: [
+        for (final item in json['nightShelf'] as List? ?? const [])
+          ReaderLook.fromJson(item as Map<String, dynamic>),
+      ],
+      recentLooks: [
+        for (final look
+            in (json['recentLooks'] as List? ?? const [])
+                .whereType<Map<String, dynamic>>()
+                .take(5))
+          ReaderLook.fromJson(look),
+      ],
+      themeMode: ReaderThemeMode.values.byName(json['themeMode'] ?? 'follow'),
       margin: number('margin', 0, 200, 26),
       marginLeft: json['marginLeft'] == null
           ? null
@@ -586,6 +807,11 @@ class ReaderPreferences {
   }
 
   ReaderPreferences copyWith({
+    ReaderLook? nightLook,
+    List<ReaderLook>? recentLooks,
+    List<ReaderLook>? dayShelf,
+    List<ReaderLook>? nightShelf,
+    ReaderThemeMode? themeMode,
     ReaderPaper? paper,
     ReaderThemeSelection? theme,
     bool clearTheme = false,
@@ -639,6 +865,11 @@ class ReaderPreferences {
     EdgeInsets? headerPadding,
     EdgeInsets? footerPadding,
   }) => ReaderPreferences(
+    nightLook: nightLook ?? this.nightLook,
+    recentLooks: recentLooks ?? this.recentLooks,
+    dayShelf: dayShelf ?? this.dayShelf,
+    nightShelf: nightShelf ?? this.nightShelf,
+    themeMode: themeMode ?? this.themeMode,
     paper: paper ?? this.paper,
     theme: clearTheme || (paper != null && theme == null)
         ? null
@@ -699,6 +930,11 @@ class ReaderPreferences {
   /// A book can keep its typography while interaction and device settings
   /// continue to follow the shared reader. Explicit null margins stay null.
   ReaderPreferences withLayoutOf(ReaderPreferences layout) => ReaderPreferences(
+    nightLook: layout.nightLook,
+    recentLooks: layout.recentLooks,
+    dayShelf: layout.dayShelf,
+    nightShelf: layout.nightShelf,
+    themeMode: layout.themeMode,
     paper: layout.paper,
     theme: layout.theme,
     margin: layout.margin,

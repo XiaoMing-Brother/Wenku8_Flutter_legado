@@ -116,7 +116,7 @@ class ReaderVerticalText extends LeafRenderObjectWidget {
       RenderReaderVerticalText(
         page,
         style,
-        Theme.of(context).colorScheme.onSurface.withValues(alpha: .14),
+        Theme.of(context).highlightColor,
         SelectionContainer.maybeOf(context),
         highlightParagraph,
         match,
@@ -137,7 +137,7 @@ class ReaderVerticalText extends LeafRenderObjectWidget {
   ) => renderObject.update(
     page,
     style,
-    Theme.of(context).colorScheme.onSurface.withValues(alpha: .14),
+    Theme.of(context).highlightColor,
     SelectionContainer.maybeOf(context),
     highlightParagraph,
     match,

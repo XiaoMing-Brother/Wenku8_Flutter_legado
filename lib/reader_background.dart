@@ -13,6 +13,8 @@ class ReaderBackground extends StatefulWidget {
     required this.store,
     required this.preferences,
     required this.paper,
+    required this.night,
+    this.preview = false,
     required this.child,
     this.reduceMotion = false,
   });
@@ -21,6 +23,8 @@ class ReaderBackground extends StatefulWidget {
   final Color paper;
   final Widget child;
   final bool reduceMotion;
+  final bool night, preview;
+  ReaderLook get look => preferences.lookFor(night);
   @override
   State<ReaderBackground> createState() => _ReaderBackgroundState();
 }
@@ -35,16 +39,15 @@ class _ReaderBackgroundState extends State<ReaderBackground> {
   }
 
   void _resolve() {
-    _file = widget.store.file(widget.preferences.backgroundImage);
-    final theme = widget.preferences.theme;
-    _themeFile = theme == null
+    _file = widget.store.file(widget.look.backgroundImage);
+    final theme = widget.look.theme;
+    final store = widget.store;
+    final preview = widget.preview;
+    _themeFile = theme == null || theme.imageCandidates.isEmpty
         ? null
-        : widget.store.themeFile(theme.id).then<File?>((file) {
-            if (file != null || theme.imageCandidates.isEmpty) return file;
-            return widget.store.cacheThemeImage(
-              theme.id,
-              theme.imageCandidates,
-            );
+        : store.themeFile(theme.id).then<File?>((file) {
+            if (file != null || preview) return file;
+            return store.cacheThemeImage(theme.id, theme.imageCandidates);
           });
   }
 
@@ -52,19 +55,16 @@ class _ReaderBackgroundState extends State<ReaderBackground> {
   void didUpdateWidget(ReaderBackground oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.store != widget.store ||
-        oldWidget.preferences.backgroundImage !=
-            widget.preferences.backgroundImage ||
-        oldWidget.preferences.theme?.id != widget.preferences.theme?.id ||
-        oldWidget.preferences.theme?.imageUrl !=
-            widget.preferences.theme?.imageUrl) {
+        oldWidget.look.backgroundImage != widget.look.backgroundImage ||
+        oldWidget.look.theme != widget.look.theme ||
+        oldWidget.preview != widget.preview) {
       _resolve();
     }
   }
 
   double get _imageOpacity {
-    final dark = widget.preferences.darkPaper(
-      Theme.of(context).brightness == Brightness.dark,
-    );
+    final dark =
+        ThemeData.estimateBrightnessForColor(widget.paper) == Brightness.dark;
     return dark
         ? (1 - widget.preferences.backgroundOpacity).clamp(.55, 1.0)
         : 1 - widget.preferences.backgroundOpacity;
@@ -75,7 +75,7 @@ class _ReaderBackgroundState extends State<ReaderBackground> {
     key: ValueKey(file.path),
     width: double.infinity,
     height: double.infinity,
-    fit: widget.preferences.backgroundFit,
+    fit: BoxFit.cover,
     color: widget.paper.withValues(alpha: _imageOpacity),
     colorBlendMode: BlendMode.srcOver,
     filterQuality: FilterQuality.low,
@@ -94,7 +94,7 @@ class _ReaderBackgroundState extends State<ReaderBackground> {
         key: ValueKey(url),
         width: double.infinity,
         height: double.infinity,
-        fit: widget.preferences.backgroundFit,
+        fit: BoxFit.cover,
         color: widget.paper.withValues(alpha: _imageOpacity),
         colorBlendMode: BlendMode.srcOver,
         filterQuality: FilterQuality.low,
@@ -108,9 +108,10 @@ class _ReaderBackgroundState extends State<ReaderBackground> {
 
   Widget _background() {
     // 主题自带背景图优先于手动背景，避免选择主题后仍显示旧的自定义图片。
-    final theme = widget.preferences.theme;
+    final theme = widget.look.theme;
     if (theme != null && theme.imageCandidates.isNotEmpty) {
       return FutureBuilder<File?>(
+        key: ValueKey(theme.imageUrl),
         future: _themeFile,
         initialData: widget.store.resolvedThemeFile(theme.id),
         builder: (context, snapshot) => AnimatedSwitcher(
@@ -123,9 +124,10 @@ class _ReaderBackgroundState extends State<ReaderBackground> {
         ),
       );
     }
-    final image = widget.preferences.backgroundImage;
+    final image = widget.look.backgroundImage;
     if (image != null) {
       return FutureBuilder<File?>(
+        key: ValueKey(image),
         future: _file,
         initialData: widget.store.resolvedFile(image),
         builder: (context, snapshot) => AnimatedSwitcher(

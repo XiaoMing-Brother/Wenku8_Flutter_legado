@@ -19,9 +19,16 @@ enum ReaderThemeFilter {
 ///
 /// 清单本身随应用打包；卡片缩略图按需加载，只有确认选择后才会缓存原图。
 class ReaderThemePicker extends StatefulWidget {
-  const ReaderThemePicker({super.key, this.selectedId});
+  const ReaderThemePicker({
+    super.key,
+    this.selectedId,
+    this.actionLabel = '应用主题',
+    required this.previewBuilder,
+  });
 
   final int? selectedId;
+  final String actionLabel;
+  final Widget Function(ReaderThemeSelection) previewBuilder;
 
   @override
   State<ReaderThemePicker> createState() => _ReaderThemePickerState();
@@ -31,6 +38,7 @@ class _ReaderThemePickerState extends State<ReaderThemePicker> {
   final _search = TextEditingController();
   ReaderThemeFilter _filter = ReaderThemeFilter.all;
   String _query = '';
+  int? _previewIndex;
 
   @override
   void dispose() {
@@ -74,8 +82,52 @@ class _ReaderThemePickerState extends State<ReaderThemePicker> {
                 theme.author.toLowerCase().contains(query);
           })
           .toList(growable: false);
+      final index = _previewIndex;
+      if (index != null) {
+        final theme = visible[index];
+        return ListView(
+          padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
+          children: [
+            ArchiveSection(title: theme.name, code: 'READER / THEME PREVIEW'),
+            widget.previewBuilder(theme.selection),
+            const SizedBox(height: 14),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                GlassTextButton(
+                  onPressed: index > 0
+                      ? () => setState(() => _previewIndex = index - 1)
+                      : null,
+                  child: const AppText('上一套'),
+                ),
+                GlassTextButton(
+                  onPressed: index + 1 < visible.length
+                      ? () => setState(() => _previewIndex = index + 1)
+                      : null,
+                  child: const AppText('下一套'),
+                ),
+                GlassTextButton(
+                  onPressed: () => setState(() => _previewIndex = null),
+                  child: const AppText('返回主题库'),
+                ),
+              ],
+            ),
+            const SizedBox(height: 14),
+            GlassTextButton(
+              selected: true,
+              onPressed: () => Navigator.of(context).pop(theme.selection),
+              child: AppText(widget.actionLabel),
+            ),
+            GlassTextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const AppText('取消'),
+            ),
+          ],
+        );
+      }
       return Padding(
-        padding: const EdgeInsets.fromLTRB(24, 4, 24, 24),
+        padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
@@ -105,7 +157,7 @@ class _ReaderThemePickerState extends State<ReaderThemePicker> {
             ),
             const SizedBox(height: 8),
             AppText(
-              '${visible.length} 套 · 选中后会缓存背景图，离线时仍保留底色',
+              '${visible.length} 套 · 点选主题试读正文',
               style: TextStyle(
                 fontSize: 12,
                 color: Theme.of(context).colorScheme.onSurfaceVariant,
@@ -141,8 +193,10 @@ class _ReaderThemePickerState extends State<ReaderThemePicker> {
                         return _ThemeCard(
                           theme: theme,
                           selected: theme.id == widget.selectedId,
-                          onTap: () =>
-                              Navigator.of(context).pop(theme.selection),
+                          onTap: () {
+                            FocusManager.instance.primaryFocus?.unfocus();
+                            setState(() => _previewIndex = index);
+                          },
                         );
                       },
                     ),
@@ -209,10 +263,25 @@ class _ThemeCard extends StatelessWidget {
                     Align(
                       alignment: Alignment.topRight,
                       child: selected
-                          ? const Icon(
-                              Icons.check_circle,
-                              size: 17,
-                              color: Colors.white,
+                          ? DecoratedBox(
+                              decoration: BoxDecoration(
+                                color: Theme.of(context).colorScheme.primary,
+                                borderRadius: BorderRadius.circular(20),
+                              ),
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 6,
+                                  vertical: 2,
+                                ),
+                                child: AppText(
+                                  '✓ 使用中',
+                                  style: TextStyle(
+                                    color: Theme.of(context).colorScheme.onPrimary,
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ),
                             )
                           : const SizedBox(height: 17),
                     ),

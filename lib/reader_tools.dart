@@ -14,7 +14,11 @@ import 'reader_annotation_editor.dart';
 import 'reader_bookmark_excerpt.dart';
 import 'local_platform.dart';
 import 'reader_preferences.dart';
+import 'reader_appearance.dart';
+import 'reader_background.dart';
+import 'reader_content.dart';
 import 'reader_theme_picker.dart';
+import 'reader_theme_shelf.dart';
 import 'reader_theme_presets.dart';
 import 'font_settings_page.dart';
 import 'reader_header_footer_page.dart';
@@ -324,6 +328,21 @@ class _ReaderChapterProgressState extends State<ReaderChapterProgress> {
 /// preferences are committed once, when the gesture ends.
 enum ReaderToolsScope { all, appearance, listening, operations, bookmarks }
 
+String readerThemeExcerpt(ReaderContent? content, int paragraph) {
+  String? first;
+  if (content != null) {
+    for (final index in content.order) {
+      final text = content.paragraphs[index].trim();
+      if (text.isEmpty || text == '[插图]' || readerIllustrationUrl(text) != null) {
+        continue;
+      }
+      first ??= text;
+      if (index >= paragraph) return text;
+    }
+  }
+  return first ?? '窗外的风翻过书页，阳光落在字里行间。她把书往前挪了挪，接着读了下去。';
+}
+
 class ReaderTools extends StatefulWidget {
   const ReaderTools({
     super.key,
@@ -349,8 +368,10 @@ class ReaderTools extends StatefulWidget {
     this.languages = const {},
     this.onHiddenLanguagesChanged,
     this.rangeContextResolver,
+    this.previewText = '',
   });
   final Novel novel;
+  final String previewText;
   final LibraryState state;
   final ReadingPosition? position;
   final Future<ReaderBookmark?> Function() onAddBookmark;
@@ -456,6 +477,13 @@ class _ReaderToolsState extends State<ReaderTools>
   }();
   ReaderPreferences get _readerPreferences =>
       widget.state.readerPreferencesFor(widget.novel.id);
+  bool get _appDark =>
+      (context.findAncestorWidgetOfExactType<ReaderAppearance>()?.appTheme ??
+              Theme.of(context))
+          .brightness ==
+      Brightness.dark;
+  bool get _night => _readerPreferences.usesNight(_appDark);
+  ReaderLook get _look => _readerPreferences.lookFor(_night);
   double get _fontSize => widget.state.readerFontSizeFor(widget.novel.id);
   double get _lineHeight => widget.state.readerLineHeightFor(widget.novel.id);
   bool get _replaceRulesEnabled => widget.state.replaceRulesEnabledFor(
@@ -470,7 +498,6 @@ class _ReaderToolsState extends State<ReaderTools>
   Future<List<String>>? _backgrounds;
   final _backgroundFiles = <String, Future<File?>>{};
   String? _category;
-  bool _turnAdvancedExpanded = false;
   bool _adding = false;
   String? _storageError;
   Key? _activeAdjustment;
@@ -485,19 +512,76 @@ class _ReaderToolsState extends State<ReaderTools>
     });
   }
 
-  Future<void> _openLegadoThemes() async {
+  Future<void> _openLegadoThemes(bool night) async {
+    final prefs = _readerPreferences;
     final selected = await showJellySheet<ReaderThemeSelection>(
       context: context,
       reduceMotion: widget.state.reduceMotion,
       heightFactor: .92,
       maxWidth: 720,
-      builder: (_) =>
-          ReaderThemePicker(selectedId: _readerPreferences.theme?.id),
+      builder: (_) => ReaderThemePicker(
+        actionLabel: '添加到${night ? '夜间' : '日间'}主题',
+        selectedId: prefs.lookFor(_night).theme?.id,
+        previewBuilder: (theme) {
+          final sample = prefs.copyWith(themeMode: night ? ReaderThemeMode.night : ReaderThemeMode.day).setLook(
+            night,
+            ReaderLook(theme: theme),
+            remember: false,
+          );
+          return SizedBox(
+            height: 220,
+            child: ReaderBackground(
+              key: ValueKey(theme.id),
+              preview: true,
+              night: night,
+              store: widget.state.backgrounds,
+              preferences: sample,
+              paper: sample.background(night),
+              reduceMotion: widget.state.reduceMotion,
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: ClipRect(
+                  child: Text(
+                    widget.previewText,
+                    overflow: TextOverflow.clip,
+                    textAlign: prefs.justify
+                        ? TextAlign.justify
+                        : TextAlign.start,
+                    style: TextStyle(
+                      fontFamily:
+                          widget.state.readerFontFamilyFor(widget.novel.id) ??
+                          'Roboto',
+                      fontSize: _fontSize,
+                      height: _lineHeight,
+                      letterSpacing: prefs.letterSpacing,
+                      fontWeight: prefs.textWeight.weight,
+                      fontStyle: prefs.italic
+                          ? FontStyle.italic
+                          : FontStyle.normal,
+                      color: sample.foreground(night),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          );
+        },
+      ),
     );
     if (!mounted || selected == null) return;
-    _preferences(
-      _readerPreferences.copyWith(theme: selected, clearBackground: true),
-    );
+    final card = ReaderLook(theme: selected);
+    if (_readerPreferences.shelf(night).any((item) => item.choiceKey == card.choiceKey)) {
+      showNovelFeedback(context, '主题已在列表中');
+      return;
+    }
+    _preferences(_readerPreferences.saveCard(night, card));
+    showNovelFeedback(context, '已添加到${night ? '夜间' : '日间'}主题');
+  }
+
+  void _applyLook(bool night, ReaderLook look) {
+    _preferences(_readerPreferences.setLook(night, look));
+    final selected = look.theme;
+    if (selected == null || selected.imageCandidates.isEmpty) return;
     unawaited(
       widget.state.backgrounds
           .cacheThemeImage(selected.id, selected.imageCandidates)
@@ -507,6 +591,7 @@ class _ReaderToolsState extends State<ReaderTools>
 
   Future<void> _importBackground() async {
     if (_backgroundBusy) return;
+    final night = _night;
     setState(() => _backgroundBusy = true);
     final documents = BookDocuments();
     try {
@@ -515,12 +600,7 @@ class _ReaderToolsState extends State<ReaderTools>
       try {
         final id = await widget.state.backgrounds.import(selected.path!);
         if (!mounted) return;
-        _preferences(
-          _readerPreferences.copyWith(
-            backgroundImage: id,
-            clearThemeImage: true,
-          ),
-        );
+        _setBackground(night, id);
         setState(() {
           _backgrounds = widget.state.backgrounds.list();
         });
@@ -540,7 +620,7 @@ class _ReaderToolsState extends State<ReaderTools>
   }
 
   Future<void> _removeBackground() async {
-    final id = _readerPreferences.backgroundImage;
+    final id = _look.backgroundImage;
     if (id == null || _backgroundBusy) return;
     if (!await confirmNovelAction(
       context,
@@ -622,23 +702,12 @@ class _ReaderToolsState extends State<ReaderTools>
                                 'reader-background-${id ?? 'plain'}',
                               ),
                               selected: id == null
-                                  ? _readerPreferences.backgroundImage ==
-                                            null &&
-                                        _readerPreferences.theme?.imageUrl ==
-                                            null
-                                  : _readerPreferences.backgroundImage == id,
+                                  ? _look.backgroundImage == null &&
+                                        _look.theme?.imageUrl == null
+                                  : _look.backgroundImage == id,
                               onPressed: _backgroundBusy
                                   ? null
-                                  : () => _preferences(
-                                      id == null
-                                          ? _readerPreferences.copyWith(
-                                              clearBackground: true,
-                                              clearThemeImage: true,
-                                            )
-                                          : _readerPreferences.copyWith(
-                                              backgroundImage: id,
-                                            ),
-                                    ),
+                                  : () => _setBackground(_night, id),
                               child: id == null
                                   ? const AppText(
                                       '纯色',
@@ -691,7 +760,7 @@ class _ReaderToolsState extends State<ReaderTools>
                         ),
                       ),
                     ),
-                    if (_readerPreferences.backgroundImage != null)
+                    if (_look.backgroundImage != null)
                       GlassIconButton(
                         icon: CupertinoIcons.trash,
                         label: '删除当前背景',
@@ -704,22 +773,10 @@ class _ReaderToolsState extends State<ReaderTools>
           ),
           AnimatedOptionSection(
             expanded:
-                _readerPreferences.backgroundImage != null ||
-                _readerPreferences.theme?.imageUrl != null,
+                _look.backgroundImage != null || _look.theme?.imageUrl != null,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                _adjustment(
-                  ReaderChoicePicker<BoxFit>(
-                    name: 'reader-background-fit',
-                    label: '图片布局',
-                    value: _readerPreferences.backgroundFit,
-                    options: const {BoxFit.cover: '填满', BoxFit.contain: '完整'},
-                    onChanged: (fit) => _preferences(
-                      _readerPreferences.copyWith(backgroundFit: fit),
-                    ),
-                  ),
-                ),
                 _adjustment(
                   ReaderValueSlider(
                     sliderKey: const ValueKey('reader-background-opacity'),
@@ -765,6 +822,21 @@ class _ReaderToolsState extends State<ReaderTools>
             }),
       );
     }
+  }
+
+  void _setBackground(bool night, String? image) {
+    final look = _readerPreferences.lookFor(night);
+    _preferences(
+      _readerPreferences.setLook(
+        night,
+        ReaderLook(
+          paper: look.paper,
+          theme: look.theme?.withoutImage,
+          backgroundImage: image,
+        ),
+        remember: false,
+      ),
+    );
   }
 
   Future<void> _changeStyleScope(bool book) async {
@@ -1112,7 +1184,7 @@ class _ReaderToolsState extends State<ReaderTools>
           ? '${p.titleScale.toStringAsFixed(1)} 倍 · ${p.titlePosition.label}'
           : '隐藏章节标题',
       'page': '页边距 · 状态栏 · 阅读信息',
-      'theme': p.theme?.name ?? p.paper.label,
+      'theme': _look.label,
       'replace': '替换净化 · 阅读页显示',
       'turn': p.mode.label,
       'screen': p.hideSystemStatus ? '隐藏状态栏' : '显示状态栏',
@@ -1261,34 +1333,6 @@ class _ReaderToolsState extends State<ReaderTools>
       children: children,
     );
   }
-
-  Widget _turnAdvancedToggle(BuildContext context) => GlassTextButton(
-    key: const ValueKey('reader-turn-advanced-toggle'),
-    onPressed: () =>
-        setState(() => _turnAdvancedExpanded = !_turnAdvancedExpanded),
-    child: Row(
-      children: [
-        const ArchiveIcon(CupertinoIcons.ellipsis_circle, size: 20),
-        const SizedBox(width: 12),
-        Expanded(
-          child: AppText(
-            _turnAdvancedExpanded
-                ? '收起更多设置'
-                : '更多设置 · 章节入场 / 点按翻页 / 音量键 / 自动翻页',
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
-          ),
-        ),
-        ArchiveIcon(
-          _turnAdvancedExpanded
-              ? CupertinoIcons.chevron_up
-              : CupertinoIcons.chevron_down,
-          size: 14,
-        ),
-      ],
-    ),
-  );
 
   Widget _layout(
     BuildContext context, {
@@ -1465,69 +1509,63 @@ class _ReaderToolsState extends State<ReaderTools>
                 ),
               ),
             if (category == 'theme')
-              ReaderChoicePicker<ReaderPaper>(
-                name: 'reader-paper',
-                label: '阅读配色',
-                value: _readerPreferences.paper,
+              ReaderChoicePicker<ReaderThemeMode>(
+                name: 'reader-theme-mode',
+                label: '日夜切换',
+                value: _readerPreferences.themeMode,
                 options: {
-                  for (final paper in ReaderPaper.values) paper: paper.label,
+                  for (final mode in ReaderThemeMode.values) mode: mode.label,
                 },
-                onChanged: (paper) =>
-                    _preferences(_readerPreferences.copyWith(paper: paper)),
+                onChanged: (mode) =>
+                    _preferences(_readerPreferences.copyWith(themeMode: mode)),
               ),
             if (category == 'theme')
               _adjustment(
-                GlassTextButton(
-                  key: const ValueKey('reader-legado-themes'),
-                  selected: _readerPreferences.theme != null,
-                  onPressed: _openLegadoThemes,
-                  child: Row(
-                    children: [
-                      const ArchiveIcon(CupertinoIcons.paintbrush, size: 20),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            const AppText(
-                              'Legado 内置主题',
-                              style: TextStyle(
-                                fontSize: 14,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                            const SizedBox(height: 2),
-                            AppText(
-                              _readerPreferences.theme == null
-                                  ? '1027 套 · 含远程背景图'
-                                  : '当前：${_readerPreferences.theme!.name}',
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                fontSize: 12,
-                                height: 1.4,
-                                color: Theme.of(
-                                  context,
-                                ).colorScheme.onSurfaceVariant,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      const ArchiveIcon(
-                        CupertinoIcons.chevron_forward,
-                        size: 14,
-                      ),
-                    ],
-                  ),
+                ArchiveSection(
+                  title: '${_night ? '夜间' : '日间'} · ${_look.label}',
+                  code: 'READER / CURRENT THEME',
+                ),
+              ),
+            if (category == 'theme' &&
+                _readerPreferences.recentFor(_night).isNotEmpty)
+              _adjustment(
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const ArchiveSection(
+                      title: '最近使用',
+                      code: 'READER / RECENT THEMES',
+                    ),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        for (final look in _readerPreferences.recentFor(_night))
+                          GlassTextButton(
+                            compact: true,
+                            onPressed: () => _applyLook(_night, look),
+                            child: AppText(look.label),
+                          ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            if (category == 'theme')
+              _adjustment(
+                ReaderThemeShelf(
+                  preferences: _readerPreferences,
+                  appDark: _appDark,
+                  store: widget.state.backgrounds,
+                  onChanged: _preferences,
+                  onAdd: _openLegadoThemes,
+                  reduceMotion: widget.state.reduceMotion,
                 ),
               ),
             if (category == 'theme')
               _adjustment(
                 AppText(
-                  '微信读书来自 Legado 内置阅读样式；只应用底色和文字色，不覆盖排版。Legado 主题库会应用主题底色和远程背景图，选择上方基础配色可退出主题库。',
+                  '日间和夜间分别保存主题。选择「跟随应用」可随应用外观自动切换。',
                   style: TextStyle(
                     fontSize: 12,
                     height: 1.6,
@@ -1616,10 +1654,9 @@ class _ReaderToolsState extends State<ReaderTools>
     if (category == 'theme')
       AnimatedOptionSection(
         expanded:
-            !_readerPreferences.usesThemeInk &&
-            _readerPreferences.darkPaper(
-              Theme.of(context).brightness == Brightness.dark,
-            ),
+            _look.theme == null &&
+            _look.paper.ink == null &&
+            _readerPreferences.darkPaper(_appDark),
         child: _adjustment(
           ReaderValueSlider(
             sliderKey: const ValueKey('reader-night-text-brightness'),
@@ -1927,9 +1964,7 @@ class _ReaderToolsState extends State<ReaderTools>
           ),
         ),
       ),
-    if (category == 'turn') _adjustment(_turnAdvancedToggle(context)),
-    if (category == 'turn' && _turnAdvancedExpanded)
-      ..._behaviorItems(context, 'turn'),
+    if (category == 'turn') ..._behaviorItems(context, 'turn'),
     if (category == 'page')
       const ArchiveSection(title: '阅读信息', code: 'SCREEN / STATUS'),
     if (category == 'page') ..._behaviorItems(context, 'screen'),
@@ -2535,9 +2570,11 @@ class ReaderChoicePicker<T extends Enum> extends StatelessWidget {
     required this.value,
     required this.options,
     required this.onChanged,
+    this.paperNight,
   });
   final String name, label;
-  final T value;
+  final T? value;
+  final bool? paperNight;
   final Map<T, String> options;
   final ValueChanged<T> onChanged;
   @override
@@ -2550,10 +2587,11 @@ class ReaderChoicePicker<T extends Enum> extends StatelessWidget {
     onChanged: onChanged,
     labelSize: 14,
     optionSize: 12,
-    leading: value is ReaderPaper
+    leading: T == ReaderPaper
         ? (option) {
             final paper = option as ReaderPaper;
-            final dark = Theme.of(context).brightness == Brightness.dark;
+            final dark =
+                paperNight ?? (Theme.of(context).brightness == Brightness.dark);
             return Container(
               width: 16,
               height: 16,

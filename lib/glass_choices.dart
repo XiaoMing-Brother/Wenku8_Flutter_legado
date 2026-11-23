@@ -18,7 +18,7 @@ class GlassChoiceGroup<T> extends StatelessWidget {
     this.columns,
   });
   final String name, label;
-  final T value;
+  final T? value;
   final Map<T, String> options;
   final ValueChanged<T> onChanged;
   final Widget Function(T)? leading;

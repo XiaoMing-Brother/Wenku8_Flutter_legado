@@ -21,13 +21,19 @@ ThemeData readerTheme(
   // Dim only the article's ink. Sliders, buttons and text selection retain
   // their readable control contrast while a user previews night text levels.
   final ink = preferences.controlForeground(appDark);
+  final look = preferences.lookFor(preferences.usesNight(appDark));
+  final accent = look.accent ?? ink;
   Color raised(double amount) => Color.lerp(paper, ink, amount)!;
   final scheme = base.colorScheme.copyWith(
     surface: paper,
     onSurface: ink,
     onSurfaceVariant: raised(.64),
-    primary: ink,
-    onPrimary: paper,
+    primary: accent,
+    onPrimary: look.accent == null
+        ? paper
+        : ThemeData.estimateBrightnessForColor(accent) == Brightness.dark
+        ? Colors.white
+        : Colors.black,
     surfaceDim: paper,
     surfaceBright: raised(.12),
     surfaceContainerLowest: paper,
@@ -42,6 +48,7 @@ ThemeData readerTheme(
     onInverseSurface: paper,
   );
   return base.copyWith(
+    highlightColor: look.highlight ?? ink.withValues(alpha: .14),
     colorScheme: scheme,
     scaffoldBackgroundColor: paper,
     iconTheme: base.iconTheme.copyWith(color: ink),
@@ -57,7 +64,7 @@ ThemeData readerTheme(
     ),
     cupertinoOverrideTheme: CupertinoThemeData(
       brightness: brightness,
-      primaryColor: ink,
+      primaryColor: accent,
       primaryContrastingColor: paper,
       scaffoldBackgroundColor: paper,
     ),
@@ -114,8 +121,18 @@ class _ReaderAppearanceState extends State<ReaderAppearance> {
   String? _family;
   ThemeData _resolve() {
     final preferences = widget.state.readerPreferencesFor(widget.bookId);
-    final paper = preferences.paper;
-    final themeSelection = preferences.theme;
+    final look = preferences.lookFor(
+      preferences.usesNight(widget.appTheme.brightness == Brightness.dark),
+    );
+    final paper = look.paper;
+    final themeSelection = (
+      look.theme,
+      preferences.themeMode,
+      look.baseColor,
+      look.textColor,
+      look.accent,
+      look.highlight,
+    );
     final family = widget.state.readerFontFamilyFor(widget.bookId);
     if (_base?.brightness != widget.appTheme.brightness ||
         _paper != paper ||

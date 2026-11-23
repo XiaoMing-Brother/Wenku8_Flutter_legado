@@ -1640,17 +1640,12 @@ class LibraryState extends ChangeNotifier {
       return barrier.future.then((_) => removeReaderBackground(image));
     }
     await _queuePositionWrite(() async {
-      final shared = _readerPreferences.backgroundImage == image
-          ? _readerPreferences.copyWith(clearBackground: true)
-          : _readerPreferences;
+      final shared = _readerPreferences.removeBackground(image);
       final styles = <int, ReaderBookStyle>{
         for (final entry in _bookReaderStyles.entries)
-          if (entry.value.preferences.backgroundImage == image)
-            entry.key: entry.value.copyWith(
-              preferences: entry.value.preferences.copyWith(
-                clearBackground: true,
-              ),
-            ),
+          if (entry.value.preferences.removeBackground(image) case final updated
+              when !identical(updated, entry.value.preferences))
+            entry.key: entry.value.copyWith(preferences: updated),
       };
       final records = <String, Object>{
         if (!identical(shared, _readerPreferences))

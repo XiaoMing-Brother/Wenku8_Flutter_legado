@@ -388,7 +388,6 @@ class DiscoveryRankingsPageState extends State<DiscoveryRankingsPage> {
         widget.state,
         widget.repository,
         coverHeroTag: CoverHeroTag(this, book.id),
-        showOpening: true,
         promptAddToShelfOnExit: true,
       );
       return;

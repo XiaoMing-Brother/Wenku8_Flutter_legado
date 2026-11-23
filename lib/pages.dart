@@ -1281,7 +1281,6 @@ Future<Novel?> matchPendingBook(
   bool openAfterMatch = true,
   Object? coverHeroTag,
   bool fromCache = false,
-  bool showOpening = false,
   bool promptAddToShelfOnExit = true,
   ReadingEntry entry = ReadingEntry.shelf,
 }) async {
@@ -1326,7 +1325,6 @@ Future<Novel?> matchPendingBook(
       coverHeroTag: coverHeroTag,
       fromCache: fromCache,
       entry: entry,
-      showOpening: showOpening,
       promptAddToShelfOnExit: promptAddToShelfOnExit,
     );
   }
@@ -1369,7 +1367,6 @@ Future<void> openInSourceSearch(
     state,
     repository,
     entry: ReadingEntry.discovery,
-    showOpening: true,
     promptAddToShelfOnExit: true,
   );
 }
@@ -1382,7 +1379,6 @@ void openDetail(
   Object? coverHeroTag,
   bool fromCache = false,
   bool forceDetails = false,
-  bool showOpening = false,
   bool promptAddToShelfOnExit = true,
   ReadingEntry entry = ReadingEntry.discovery,
 }) {
@@ -1396,7 +1392,6 @@ void openDetail(
         coverHeroTag: coverHeroTag,
         fromCache: fromCache,
         entry: entry,
-        showOpening: showOpening,
         promptAddToShelfOnExit: promptAddToShelfOnExit,
       ),
     );
@@ -1411,7 +1406,6 @@ void openDetail(
           state: state,
           repository: repository,
           fromCache: fromCache,
-          showOpening: showOpening,
           promptAddToShelfOnExit: promptAddToShelfOnExit,
         ),
         reduceMotion: state.reduceMotion,
@@ -1429,14 +1423,12 @@ void openDetail(
             state: state,
             repository: repository,
             fromCache: true,
-            showOpening: showOpening,
             promptAddToShelfOnExit: promptAddToShelfOnExit,
           )
         : DetailLoaderPage(
             novel: novel,
             state: state,
             repository: repository,
-            showOpening: showOpening,
             promptAddToShelfOnExit: promptAddToShelfOnExit,
           ),
   )) {
@@ -1452,7 +1444,6 @@ void openDetail(
               repository: repository,
               fromCache: true,
               coverHeroTag: coverHeroTag,
-              showOpening: showOpening,
               promptAddToShelfOnExit: promptAddToShelfOnExit,
             )
           : DetailLoaderPage(
@@ -1460,7 +1451,6 @@ void openDetail(
               state: state,
               repository: repository,
               coverHeroTag: coverHeroTag,
-              showOpening: showOpening,
               promptAddToShelfOnExit: promptAddToShelfOnExit,
             ),
       reduceMotion: state.reduceMotion,
@@ -1471,27 +1461,21 @@ void openDetail(
   );
 }
 
-/// 发现页开始阅读前的书籍扉页：先呈现作品信息，轻触后进入正文。
 class _BookOpeningPage extends StatelessWidget {
   const _BookOpeningPage({
     required this.novel,
+    required this.mode,
     required this.onOpen,
-    this.loading = false,
   });
 
   final Novel novel;
+  final ReaderMode mode;
   final VoidCallback onOpen;
-  final bool loading;
 
   int? get _wordCount => switch (novel.wordCount) {
     final value? when value > 0 => value,
     _ => null,
   };
-
-  String get _genre {
-    final value = novel.genre.trim();
-    return value.isEmpty ? '未分类' : value;
-  }
 
   String? get _updatedDate {
     final value = novel.lastUpdate?.trim() ?? '';
@@ -1505,9 +1489,7 @@ class _BookOpeningPage extends StatelessWidget {
         '${match.group(3)!.padLeft(2, '0')}';
   }
 
-  String get _wordValue {
-    final value = _wordCount;
-    if (value == null) return '—';
+  String _wordValue(int value) {
     if (value < 10000) return '$value';
     return (value / 10000)
         .toStringAsFixed(2)
@@ -1515,154 +1497,165 @@ class _BookOpeningPage extends StatelessWidget {
         .replaceFirst(RegExp(r'\.$'), '');
   }
 
-  String get _wordLabel {
-    final value = _wordCount;
-    if (value == null) return '字数';
+  String _wordLabel(int value) {
     final unit = value >= 10000 ? '万字' : '字';
-    if (loading) return unit;
     return '$unit / ${novel.isComplete ? '完本' : '连载'}';
-  }
-
-  String get _sourceName {
-    final source = novel.source?.sourceName.trim() ?? '';
-    return source.isEmpty ? '在线书库' : source;
-  }
-
-  String get _credit {
-    final author = novel.author.trim();
-    return author.isEmpty ? '— 本作品来自 $_sourceName —' : '— 本作品由 $author 创作 —';
   }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
-    final width = MediaQuery.sizeOf(context).width;
-    final coverWidth = math.min(158.0, math.max(104.0, width * .36));
-    return Scaffold(
-      backgroundColor: theme.scaffoldBackgroundColor,
-      body: Atmosphere(
-        archiveBackdrop: false,
-        child: SafeArea(
-          child: Semantics(
-            button: true,
-            label: '开始阅读《${novel.title}》',
-            hint: '轻触进入正文',
-            child: GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onTap: onOpen,
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(24, 24, 24, 24),
-                child: Column(
-                  children: [
-                    Expanded(
-                      child: Center(
-                        child: SingleChildScrollView(
-                          padding: const EdgeInsets.symmetric(vertical: 24),
-                          child: ConstrainedBox(
-                            constraints: const BoxConstraints(maxWidth: 560),
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Container(
-                                  padding: const EdgeInsets.all(5),
-                                  decoration: BoxDecoration(
-                                    color: scheme.surface,
-                                    boxShadow: [
-                                      BoxShadow(
-                                        color: Colors.black.withValues(
-                                          alpha:
-                                              theme.brightness ==
-                                                  Brightness.dark
-                                              ? .24
-                                              : .10,
-                                        ),
-                                        blurRadius: 24,
-                                        offset: const Offset(0, 10),
-                                      ),
-                                    ],
-                                  ),
-                                  child: NovelCover(
-                                    novel,
-                                    width: coverWidth,
-                                    height: coverWidth * 1.4,
-                                  ),
+    final size = MediaQuery.sizeOf(context);
+    final coverWidth = (size.width * .34).clamp(104.0, 158.0);
+    final author = novel.author.trim();
+    final genre = isLocalBook(novel.id)
+        ? novel.tags.join(' · ')
+        : novel.genre.trim();
+    final summary = novel.summary.trim();
+    final facts = [
+      if (genre.isNotEmpty) _BookOpeningFact(value: genre, label: '类型'),
+      if (_updatedDate case final date?)
+        _BookOpeningFact(value: date, label: '更新'),
+      if (_wordCount case final count?)
+        _BookOpeningFact(value: _wordValue(count), label: _wordLabel(count)),
+    ];
+    double dragDistance = 0;
+    double overscroll = 0;
+    return SafeArea(
+      key: const ValueKey('reader-book-opening'),
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onHorizontalDragStart: (_) => dragDistance = 0,
+        onHorizontalDragUpdate: (details) {
+          dragDistance += details.primaryDelta ?? 0;
+        },
+        onHorizontalDragEnd: (_) {
+          if ((mode == ReaderMode.vertical ? dragDistance : -dragDistance) >=
+              42) {
+            onOpen();
+          }
+        },
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(24, 24, 24, 24),
+          child: Column(
+            children: [
+              Expanded(
+                child: Center(
+                  child: NotificationListener<ScrollNotification>(
+                    onNotification: (event) {
+                      if (mode != ReaderMode.scroll || event.depth != 0) {
+                        return false;
+                      }
+                      if (event is ScrollStartNotification) overscroll = 0;
+                      if (event is OverscrollNotification &&
+                          event.dragDetails != null) {
+                        overscroll = event.overscroll > 0
+                            ? overscroll + event.overscroll
+                            : 0;
+                      }
+                      if (event is ScrollEndNotification && overscroll >= 42) {
+                        onOpen();
+                      }
+                      return false;
+                    },
+                    child: SingleChildScrollView(
+                      physics: const ClampingScrollPhysics(
+                        parent: AlwaysScrollableScrollPhysics(),
+                      ),
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 440),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.all(5),
+                              decoration: BoxDecoration(
+                                border: Border.all(
+                                  color: scheme.outlineVariant,
                                 ),
-                                const SizedBox(height: 24),
-                                AppText(
-                                  novel.title,
-                                  textAlign: TextAlign.center,
-                                  maxLines: 3,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(
-                                    fontSize: 27,
-                                    height: 1.28,
-                                    fontWeight: FontWeight.w700,
-                                    letterSpacing: -.4,
-                                  ),
-                                ),
-                                const SizedBox(height: 34),
-                                Row(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Expanded(
-                                      child: _BookOpeningFact(
-                                        value: _genre,
-                                        label: '类型',
-                                      ),
-                                    ),
-                                    Expanded(
-                                      child: _BookOpeningFact(
-                                        value: _updatedDate ?? '—',
-                                        label: '更新',
-                                      ),
-                                    ),
-                                    Expanded(
-                                      child: _BookOpeningFact(
-                                        value: _wordValue,
-                                        label: _wordLabel,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ],
+                              ),
+                              child: NovelCover(
+                                novel,
+                                width: coverWidth,
+                                height: coverWidth * 1.4,
+                              ),
                             ),
-                          ),
+                            const SizedBox(height: 24),
+                            AppText(
+                              novel.title,
+                              textAlign: TextAlign.center,
+                              maxLines: 3,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontSize: 27,
+                                height: 1.28,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            if (author.isNotEmpty) ...[
+                              const SizedBox(height: 8),
+                              AppText(
+                                author,
+                                textAlign: TextAlign.center,
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  color: scheme.onSurfaceVariant,
+                                ),
+                              ),
+                            ],
+                            if (facts.isNotEmpty) ...[
+                              const SizedBox(height: 24),
+                              Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  for (final fact in facts)
+                                    Expanded(child: fact),
+                                ],
+                              ),
+                            ],
+                            if (summary.isNotEmpty) ...[
+                              const SizedBox(height: 20),
+                              Divider(height: 1, color: scheme.outlineVariant),
+                              Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 12,
+                                ),
+                                child: Align(
+                                  alignment: AlignmentDirectional.centerStart,
+                                  child: AppText(
+                                    summary,
+                                    maxLines: 4,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                      fontSize: 15,
+                                      height: 1.7,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              Divider(height: 1, color: scheme.outlineVariant),
+                            ],
+                          ],
                         ),
                       ),
                     ),
-                    AppText(
-                      '轻触开始阅读',
-                      style: TextStyle(
-                        fontSize: 12,
-                        height: 1.4,
-                        color: scheme.onSurfaceVariant,
-                      ),
-                    ),
-                    const SizedBox(height: 22),
-                    AppText(
-                      _credit,
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        fontSize: 13,
-                        height: 1.5,
-                        color: scheme.onSurfaceVariant,
-                      ),
-                    ),
-                    const SizedBox(height: 5),
-                    AppText(
-                      '来源：$_sourceName',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        fontSize: 12,
-                        height: 1.5,
-                        color: scheme.onSurfaceVariant,
-                      ),
-                    ),
-                  ],
+                  ),
                 ),
               ),
-            ),
+              AppText(
+                '来源：${_searchSourceText(novel)}',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 12,
+                  height: 1.4,
+                  color: scheme.onSurfaceVariant,
+                ),
+              ),
+              const SizedBox(height: 12),
+              GlassTextButton(onPressed: onOpen, child: const AppText('开始阅读')),
+            ],
           ),
         ),
       ),
@@ -1722,22 +1715,18 @@ class ReaderLoaderPage extends StatefulWidget {
     required this.state,
     required this.repository,
     this.fromCache = false,
-    this.showOpening = false,
     this.promptAddToShelfOnExit = true,
   });
   final Novel novel;
   final LibraryState state;
   final NovelRepository repository;
   final bool fromCache;
-  final bool showOpening;
   final bool promptAddToShelfOnExit;
   @override
   State<ReaderLoaderPage> createState() => _ReaderLoaderPageState();
 }
 
 class _ReaderLoaderPageState extends State<ReaderLoaderPage> {
-  late bool _opening = widget.showOpening;
-
   ReaderPreferences get _readerPreferences =>
       widget.state.readerPreferencesFor(widget.novel.id);
   late Future<Novel> _book = _load();
@@ -1764,13 +1753,6 @@ class _ReaderLoaderPageState extends State<ReaderLoaderPage> {
   Widget build(BuildContext context) => FutureBuilder<Novel>(
     future: _book,
     builder: (context, snapshot) {
-      if (_opening) {
-        return _BookOpeningPage(
-          novel: snapshot.data ?? widget.novel,
-          loading: snapshot.connectionState != ConnectionState.done,
-          onOpen: _openReader,
-        );
-      }
       if (snapshot.data case final book?) {
         var chapter = widget.state.chapterForNovel(book);
         if (widget.repository case final OfflineNovelRepository offline) {
@@ -1795,7 +1777,6 @@ class _ReaderLoaderPageState extends State<ReaderLoaderPage> {
           repository: widget.repository,
           initialChapter: chapter,
           directEntry: true,
-          showOpening: false,
           promptAddToShelfOnExit: widget.promptAddToShelfOnExit,
         );
       }
@@ -1857,12 +1838,6 @@ class _ReaderLoaderPageState extends State<ReaderLoaderPage> {
       );
     },
   );
-
-  void _openReader() {
-    if (!_opening) return;
-    AppHaptics.play(context, HapticCue.action);
-    setState(() => _opening = false);
-  }
 }
 
 void openReadingHistory(
@@ -4737,14 +4712,12 @@ class DetailLoaderPage extends StatefulWidget {
     required this.state,
     required this.repository,
     this.coverHeroTag,
-    this.showOpening = false,
     this.promptAddToShelfOnExit = true,
   });
   final Novel novel;
   final LibraryState state;
   final NovelRepository repository;
   final Object? coverHeroTag;
-  final bool showOpening;
   final bool promptAddToShelfOnExit;
 
   @override
@@ -4802,7 +4775,6 @@ class _DetailLoaderPageState extends State<DetailLoaderPage> {
           _cached == null &&
           snapshot.connectionState != ConnectionState.done,
       loadError: _cached == null ? snapshot.error : null,
-      showOpening: widget.showOpening,
       promptAddToShelfOnExit: widget.promptAddToShelfOnExit,
       fromCache:
           (_cached != null && !snapshot.hasData) ||
@@ -4829,7 +4801,6 @@ class DetailPage extends StatefulWidget {
     this.loadError,
     this.onRetry,
     this.fromCache = false,
-    this.showOpening = false,
     this.promptAddToShelfOnExit = true,
     this.onRead,
     this.onReadTarget,
@@ -4844,7 +4815,6 @@ class DetailPage extends StatefulWidget {
   final Object? loadError;
   final VoidCallback? onRetry;
   final bool fromCache;
-  final bool showOpening;
   final bool promptAddToShelfOnExit;
   final ValueChanged<int>? onRead;
   final ValueChanged<BookReadingTarget>? onReadTarget;
@@ -6825,7 +6795,6 @@ class _DetailPageState extends State<DetailPage> with TickerProviderStateMixin {
           state: state,
           repository: repository,
           initialChapter: chapter,
-          showOpening: widget.showOpening,
           promptAddToShelfOnExit: widget.promptAddToShelfOnExit,
           initialPosition: target == null
               ? null
@@ -7805,7 +7774,6 @@ class ReaderPage extends StatefulWidget {
     required this.repository,
     required this.initialChapter,
     this.directEntry = false,
-    this.showOpening = false,
     this.promptAddToShelfOnExit = true,
     this.initialBookmark,
     this.initialPosition,
@@ -7818,7 +7786,6 @@ class ReaderPage extends StatefulWidget {
   final NovelRepository repository;
   final int initialChapter;
   final bool directEntry;
-  final bool showOpening;
   final bool promptAddToShelfOnExit;
   final ReaderBookmark? initialBookmark;
   final ReadingPosition? initialPosition;
@@ -7835,7 +7802,7 @@ class ReaderPage extends StatefulWidget {
 
 class _ReaderPageState extends State<ReaderPage>
     with TickerProviderStateMixin, WidgetsBindingObserver {
-  late bool _opening = widget.showOpening;
+  late bool _opening;
 
   ReaderPreferences get _readerPreferences =>
       widget.state.readerPreferencesFor(widget.novel.id);
@@ -8038,6 +8005,7 @@ class _ReaderPageState extends State<ReaderPage>
       _activityAttached &&
       _activityForeground &&
       _activityRouteCurrent &&
+      !_opening &&
       _ready &&
       _currentContent?.paragraphs.isNotEmpty == true &&
       !_restoring &&
@@ -8296,7 +8264,6 @@ class _ReaderPageState extends State<ReaderPage>
   Duration? _autoLast;
   bool _autoRunning = false;
   bool _autoPaused = false;
-  ReaderPaper? _dayPaper;
   int _nightIconActivation = 0;
   int? _chromeProgressFrame;
   double? _chromeProgressPending;
@@ -8564,6 +8531,12 @@ class _ReaderPageState extends State<ReaderPage>
   @override
   void initState() {
     super.initState();
+    _opening =
+        _sourceBook.chapters.isNotEmpty &&
+        widget.initialChapter == 0 &&
+        widget.initialBookmark == null &&
+        widget.initialPosition == null &&
+        !widget.state.hasRead(widget.novel.id);
     _paper = _readerPreferences.paper;
     _readingActivity = ReadingActivitySession(
       store: widget.state.readingActivity,
@@ -9094,6 +9067,9 @@ class _ReaderPageState extends State<ReaderPage>
     if (index < 0 || index >= _sourceBook.chapters.length) {
       return;
     }
+    if (_opening) {
+      setState(() => _opening = false);
+    }
     if (index != _chapter &&
         prepared == null &&
         (!_readerPreferences.chapterEntrance || turnDirection != 0) &&
@@ -9289,7 +9265,7 @@ class _ReaderPageState extends State<ReaderPage>
         ),
       );
       if (!mounted) return;
-      if (action is int && action != _chapter) {
+      if (action is int && (action != _chapter || _opening)) {
         _go(action);
       } else if (action is BookReadingTarget) {
         _openBookTarget(action);
@@ -9560,6 +9536,10 @@ class _ReaderPageState extends State<ReaderPage>
       return;
     }
     final target = _chapter + direction;
+    if (target == -1) {
+      _returnToOpening();
+      return;
+    }
     if (target < 0 || target >= _sourceBook.chapters.length) {
       if (direction > 0) unawaited(_completeReadingAtEnd());
       AppHaptics.play(context, HapticCue.boundary);
@@ -9740,7 +9720,7 @@ class _ReaderPageState extends State<ReaderPage>
   }
 
   void _toggleChrome() {
-    if (_ready && !_toolsOpen && !_catalogueOpen && !_findOpen) {
+    if ((_ready || _opening) && !_toolsOpen && !_catalogueOpen && !_findOpen) {
       AppHaptics.play(context, HapticCue.action);
       _showChrome(!_chromeTarget);
     }
@@ -9752,7 +9732,12 @@ class _ReaderPageState extends State<ReaderPage>
       _pendingChapter = null;
     }
     _cancelExitRequest();
-    if (!_ready || _toolsOpen || _catalogueOpen || _findOpen || _noteOpen) {
+    if (_toolsOpen || _catalogueOpen || _findOpen || _noteOpen) return;
+    if (_opening) {
+      if (direction > 0) _openReader();
+      return;
+    }
+    if (!_ready) {
       return;
     }
     if (_selection.value) {
@@ -9774,6 +9759,10 @@ class _ReaderPageState extends State<ReaderPage>
     }
     if (!_scroll.hasClients) return;
     final position = _scroll.position;
+    if (direction < 0 && _chapter == 0 && position.extentBefore < .5) {
+      _continueChapter(direction);
+      return;
+    }
     if (_readerPreferences.chapterEntrance &&
         (direction > 0
             ? position.pixels >= position.maxScrollExtent - .5
@@ -10154,6 +10143,7 @@ class _ReaderPageState extends State<ReaderPage>
     _idleSave = null;
     if (_detailsOpen ||
         _sourceChanged ||
+        _opening ||
         !_ready ||
         _restoring ||
         (_paginated ? !_paged.ready : !_scroll.hasClients) ||
@@ -10204,7 +10194,8 @@ class _ReaderPageState extends State<ReaderPage>
     bool includeParagraph = true,
     bool bookmark = false,
   }) {
-    if (!_ready ||
+    if (_opening ||
+        !_ready ||
         _restoring ||
         (_paginated ? !_paged.ready : !_scroll.hasClients) ||
         _sourceBook.chapters.isEmpty) {
@@ -11684,9 +11675,6 @@ class _ReaderPageState extends State<ReaderPage>
 
   @override
   Widget build(BuildContext context) {
-    if (_opening) {
-      return _BookOpeningPage(novel: _sourceBook, onOpen: _openReader);
-    }
     _lastDirectoryOrdinal = _directoryOrdinal;
     var chapter = _sourceBook.chapters.isEmpty
         ? const NovelChapter('目录为空', '')
@@ -11722,8 +11710,30 @@ class _ReaderPageState extends State<ReaderPage>
 
   void _openReader() {
     if (!_opening) return;
-    AppHaptics.play(context, HapticCue.action);
+    _cancelExitRequest();
+    AppHaptics.play(context, HapticCue.pageTurn);
     setState(() => _opening = false);
+  }
+
+  void _returnToOpening() {
+    if (_opening || _boundaryQueued) return;
+    _boundaryQueued = true;
+    final generation = _contentGeneration;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _boundaryQueued = false;
+      if (!mounted || generation != _contentGeneration || _chapter != 0) {
+        return;
+      }
+      _savePosition(notify: false);
+      _stopAutoScroll();
+      _suspendListeningFollow();
+      AppHaptics.play(context, HapticCue.pageTurn);
+      setState(() {
+        _ready = false;
+        _opening = true;
+      });
+    });
+    WidgetsBinding.instance.ensureVisualUpdate();
   }
 
   bool _canHandoff(BuildContext context) {
@@ -11993,8 +12003,8 @@ class _ReaderPageState extends State<ReaderPage>
           onPressed: _ready ? _findInChapter : null,
         );
       case 'night':
-        final dark = _readerPreferences.darkPaper(
-          Theme.of(context).brightness == Brightness.dark,
+        final dark = _readerPreferences.usesNight(
+          Theme.of(this.context).brightness == Brightness.dark,
         );
         return _readerAction(
           key: const ValueKey('reader-dock-night'),
@@ -12233,20 +12243,13 @@ class _ReaderPageState extends State<ReaderPage>
   void _toggleNightReading() {
     setState(() => _nightIconActivation++);
     final preferences = _readerPreferences;
-    if (preferences.theme case final theme?) {
-      _applyReaderPreferences(
-        preferences.copyWith(theme: theme.inverted),
-        true,
-      );
-      return;
-    }
-    final dark = preferences.darkPaper(
-      Theme.of(context).brightness == Brightness.dark,
-    );
-    if (!dark) _dayPaper = preferences.paper;
+    final appDark = Theme.of(context).brightness == Brightness.dark;
+    final nextNight = !preferences.usesNight(appDark);
     _applyReaderPreferences(
       preferences.copyWith(
-        paper: dark ? _dayPaper ?? ReaderPaper.milk : ReaderPaper.night,
+        themeMode: nextNight == appDark
+            ? ReaderThemeMode.follow
+            : nextNight ? ReaderThemeMode.night : ReaderThemeMode.day,
       ),
       true,
     );
@@ -12728,7 +12731,7 @@ class _ReaderPageState extends State<ReaderPage>
   }) => ActiveListenableBuilder(
     listenable: widget.state.readerSettingsChanges,
     builder: (context) {
-      if (_paginated) return const SizedBox.shrink();
+      if (_opening || _paginated) return const SizedBox.shrink();
       final preferences = _readerPreferences;
       final safe = MediaQuery.viewPaddingOf(context);
       final dark = Theme.of(context).brightness == Brightness.dark;
@@ -12883,7 +12886,20 @@ class _ReaderPageState extends State<ReaderPage>
                               controller: _contentTapSurface,
                               onTapUp: _contentTap,
                               onPreview: _previewContentTap,
-                              child: _article(context, chapter, appDark),
+                              child: _opening
+                                  ? ReaderBackground(
+                                      night: _readerPreferences.usesNight(appDark),
+                                      store: widget.state.backgrounds,
+                                      preferences: _readerPreferences,
+                                      paper: _readerPreferences.background(appDark),
+                                      reduceMotion: widget.state.reduceMotion,
+                                      child: _BookOpeningPage(
+                                        novel: _sourceBook,
+                                        mode: _readerMode,
+                                        onOpen: _openReader,
+                                      ),
+                                    )
+                                  : _article(context, chapter, appDark),
                             ),
                           ),
                         ),
@@ -13221,7 +13237,10 @@ class _ReaderPageState extends State<ReaderPage>
               ? _chapterOverscroll.sign.toInt()
               : 0;
           _chapterOverscroll = 0;
-          if (prefs.chapterEntrance && direction != 0) {
+          final atBookStart =
+              _chapter == 0 && notification.metrics.extentBefore < .5;
+          if ((direction < 0 && atBookStart) ||
+              (prefs.chapterEntrance && direction != 0)) {
             _continueChapter(direction);
           } else if (direction > 0 &&
               notification.metrics.extentAfter < 1 &&
@@ -13528,6 +13547,7 @@ class _ReaderPageState extends State<ReaderPage>
                 ThemeData.estimateBrightnessForColor(prefs.background(dark)),
               ),
               child: ReaderBackground(
+                night: prefs.usesNight(dark),
                 store: widget.state.backgrounds,
                 preferences: prefs,
                 paper: prefs.background(dark),
@@ -13598,6 +13618,7 @@ class _ReaderPageState extends State<ReaderPage>
                               ),
                               pageBuilderKey: rowSpec,
                               backgroundBuilder: (child) => ReaderBackground(
+                                night: prefs.usesNight(dark),
                                 store: widget.state.backgrounds,
                                 preferences: prefs,
                                 paper: prefs.background(dark),
@@ -13650,6 +13671,10 @@ class _ReaderPageState extends State<ReaderPage>
         maxHeight: math.min(760, MediaQuery.sizeOf(context).height * .86),
         surfaceWrapper: _readerSurface,
         builder: (context) => ReaderTools(
+          previewText: readerThemeExcerpt(
+            _currentContent,
+            position?.paragraphIndex ?? 0,
+          ),
           novel: _sourceBook,
           state: widget.state,
           position: position,

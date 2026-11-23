@@ -424,9 +424,7 @@ class ReaderHighlightText extends StatelessWidget {
                 [TextSpan(text: text.substring(start, end))],
             style: TextStyle(
               backgroundColor: highlighted
-                  ? Theme.of(
-                      context,
-                    ).colorScheme.onSurface.withValues(alpha: .14)
+                  ? Theme.of(context).highlightColor
                   : highlight == null
                   ? null
                   : readerMarkTint(highlight.color, ink, dark: dark),

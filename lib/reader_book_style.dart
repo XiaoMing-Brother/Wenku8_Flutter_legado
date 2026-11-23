@@ -66,6 +66,11 @@ class ReaderBookStyle {
   static const _layoutKeys = {
     'paper',
     'theme',
+    'nightLook',
+    'themeMode',
+    'recentLooks',
+    'dayShelf',
+    'nightShelf',
     'mode',
     'verticalLatinOrientation',
     'margin',

@@ -157,6 +157,7 @@ class BookSourcePlugin :
                         action = stringArg(arguments, "action"),
                         values = stringArgs(arguments, "values"),
                     )
+                    null
                 }
                 "logout" -> runAsync(worker, result) {
                     engine.logout(stringArg(arguments, "sourceKey"))

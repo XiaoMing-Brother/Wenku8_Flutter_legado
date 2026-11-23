@@ -761,13 +761,14 @@ class _BookSourcesPageState extends State<BookSourcesPage> {
                                 const SizedBox(height: 14),
                             itemBuilder: (context, index) {
                               final source = visible[index];
+                              final expanded =
+                                  !_selecting &&
+                                  identical(_expandedSource, source);
                               return Column(
                                 key: ValueKey(source.key),
                                 children: [
-                                  _sourcePanel(context, source),
-                                  if (!_selecting &&
-                                      identical(_expandedSource, source))
-                                    _sourceRankings(source),
+                                  _sourcePanel(context, source, expanded),
+                                  if (expanded) _sourceRankings(source),
                                 ],
                               );
                             },
@@ -1190,6 +1191,7 @@ class _BookSourcesPageState extends State<BookSourcesPage> {
                     children: [
                       for (final kind in entries)
                         GlassTextButton(
+                          compact: true,
                           onPressed: () => pushNovelPage<void>(
                             context,
                             _BookSourceRankingPage(
@@ -1202,7 +1204,11 @@ class _BookSourcesPageState extends State<BookSourcesPage> {
                               context,
                             ),
                           ),
-                          child: AppText(kind.label),
+                          child: AppText(
+                            kind.label,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                          ),
                         ),
                     ],
                   ),
@@ -1212,7 +1218,7 @@ class _BookSourcesPageState extends State<BookSourcesPage> {
     );
   }
 
-  Widget _sourcePanel(BuildContext context, BookSource source) {
+  Widget _sourcePanel(BuildContext context, BookSource source, bool expanded) {
     final selected = _selected.contains(source.key);
     final action = Theme.of(context).extension<AppTonalColors>()?.action;
     final muted = Theme.of(context).colorScheme.onSurfaceVariant;
@@ -1240,11 +1246,35 @@ class _BookSourcesPageState extends State<BookSourcesPage> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                AppText(
-                  source.name,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontWeight: FontWeight.w600),
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Flexible(
+                      child: AppText(
+                        source.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontWeight: FontWeight.w600),
+                      ),
+                    ),
+                    if (!_selecting &&
+                        source.supported &&
+                        source.exploreUrl.isNotEmpty) ...[
+                      const SizedBox(width: 6),
+                      Semantics(
+                        key: ValueKey('book-source-rankings-${source.key}'),
+                        expanded: expanded,
+                        child: ArchiveIcon(
+                          expanded
+                              ? CupertinoIcons.chevron_down
+                              : CupertinoIcons.chevron_right,
+                          size: 12,
+                          color: muted,
+                          animate: false,
+                        ),
+                      ),
+                    ],
+                  ],
                 ),
                 const SizedBox(height: 5),
                 Tooltip(
@@ -1332,6 +1362,7 @@ class _BookSourceRankingPage extends StatefulWidget {
 
 class _BookSourceRankingPageState extends State<_BookSourceRankingPage> {
   final _books = <int, Novel>{};
+  final _scrollController = ScrollController();
   int _page = 0;
   bool _hasMore = false;
   bool _loading = false;
@@ -1340,7 +1371,25 @@ class _BookSourceRankingPageState extends State<_BookSourceRankingPage> {
   @override
   void initState() {
     super.initState();
+    _scrollController.addListener(_onScroll);
     _load();
+  }
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  void _onScroll() {
+    if (!_hasMore ||
+        _loading ||
+        _error != null ||
+        !_scrollController.hasClients) {
+      return;
+    }
+    final position = _scrollController.position;
+    if (position.hasContentDimensions && position.extentAfter <= 240) _load();
   }
 
   Future<void> _load() async {
@@ -1395,6 +1444,7 @@ class _BookSourceRankingPageState extends State<_BookSourceRankingPage> {
                     ),
             )
           : ListView.separated(
+              controller: _scrollController,
               padding: featurePadding(context),
               itemCount: books.length + 1,
               separatorBuilder: (_, _) => const SizedBox(height: 14),
