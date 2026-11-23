@@ -1175,9 +1175,7 @@ internal class BookSourceEngine(
         }
         chapter = chapter.copy(url = rawUrl)
         chapter = chapter.copy(tag = read(rule.updateTime))
-        chapter = chapter.copy(isVolume = flag(rule.isVolume))
-        chapter = chapter.copy(isVip = flag(rule.isVip))
-        return chapter.copy(isPay = flag(rule.isPay))
+        return chapter.copy(isVolume = flag(rule.isVolume))
     }
 
     private fun analyzer(source: BookSource): BookSourceAnalyzer =

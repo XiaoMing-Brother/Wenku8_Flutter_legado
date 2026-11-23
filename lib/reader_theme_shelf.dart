@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'app_ui.dart';
 import 'app_interactions.dart';
 import 'book_documents.dart';
+import 'feature_pages.dart' show confirmNovelAction;
 import 'personal_images.dart';
 import 'reader_background.dart';
 import 'reader_preferences.dart';
@@ -33,7 +34,7 @@ class _ReaderThemeShelfState extends State<ReaderThemeShelf> {
   bool get activeNight => widget.preferences.usesNight(widget.appDark);
   bool get night => browsingNight ?? activeNight;
 
-  Widget sample(ReaderLook look, bool group) {
+  Widget sample(ReaderLook look, bool group, {Widget? overlay}) {
     final preview = ReaderPreferences(
       paper: look.paper,
       theme: look.theme,
@@ -54,34 +55,39 @@ class _ReaderThemeShelfState extends State<ReaderThemeShelf> {
         night: group,
         preview: true,
         reduceMotion: true,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
-          child: Align(
-            alignment: Alignment.centerLeft,
-            child: Text.rich(
-              TextSpan(
-                style: TextStyle(color: ink, fontSize: 13),
-                children: [
-                  TextSpan(text: '雨停了，'),
+        child:
+            overlay ??
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text.rich(
                   TextSpan(
-                    text: '长街',
-                    style: TextStyle(
-                      backgroundColor:
-                          look.highlight ?? ink.withValues(alpha: .14),
-                    ),
+                    style: TextStyle(color: ink, fontSize: 13),
+                    children: [
+                      TextSpan(text: '雨停了，'),
+                      TextSpan(
+                        text: '长街',
+                        style: TextStyle(
+                          backgroundColor:
+                              look.highlight ?? ink.withValues(alpha: .14),
+                        ),
+                      ),
+                      const TextSpan(text: '尽头亮起一盏灯。'),
+                      TextSpan(
+                        text: '  01',
+                        style: TextStyle(
+                          color: look.accent ?? ink,
+                          fontSize: 10,
+                        ),
+                      ),
+                    ],
                   ),
-                  const TextSpan(text: '尽头亮起一盏灯。'),
-                  TextSpan(
-                    text: '  01',
-                    style: TextStyle(color: look.accent ?? ink, fontSize: 10),
-                  ),
-                ],
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
               ),
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
             ),
-          ),
-        ),
       ),
     );
   }
@@ -239,126 +245,243 @@ class _ReaderThemeShelfState extends State<ReaderThemeShelf> {
     }
   }
 
+  Future<void> remove(ReaderLook look, bool group) async {
+    final cards = widget.preferences.shelf(group);
+    if (cards.length <= 1) {
+      showNovelFeedback(context, '每组至少保留一个主题，请先添加其他主题。');
+      return;
+    }
+    final fallback =
+        widget.preferences.lookFor(group).choiceKey == look.choiceKey
+        ? '本组将改用「${cards.firstWhere((card) => card.choiceKey != look.choiceKey).label}」。'
+        : '';
+    final confirmed = await confirmNovelAction(
+      context,
+      title: '删除主题？',
+      message:
+          '「${look.label}」将从本机${group ? '夜间' : '日间'}主题列表移除。${fallback}另一组主题、背景图片和阅读进度均保留。',
+      confirmLabel: '删除主题',
+      reduceMotion: widget.reduceMotion,
+    );
+    if (mounted && confirmed)
+      widget.onChanged(widget.preferences.removeCard(group, look));
+  }
+
   @override
   Widget build(BuildContext context) {
     final group = night;
     final cards = widget.preferences.shelf(group);
-    return ContentPanel(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Row(
-            children: [
-              for (final entry in [false, true])
-                GlassTextButton(
-                  compact: true,
+    final scheme = Theme.of(context).colorScheme;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Row(
+          children: [
+            for (final entry in [false, true])
+              Expanded(
+                child: Semantics(
                   selected: group == entry,
-                  onPressed: () => setState(() => browsingNight = entry),
-                  child: AppText(entry ? '夜间' : '日间'),
+                  button: true,
+                  child: JellyTapSurface(
+                    onTap: () => setState(() => browsingNight = entry),
+                    child: Column(
+                      children: [
+                        Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          child: AppText(
+                            entry ? '夜间主题' : '日间主题',
+                            style: TextStyle(
+                              color: group == entry
+                                  ? scheme.primary
+                                  : scheme.onSurfaceVariant,
+                            ),
+                          ),
+                        ),
+                        Container(
+                          width: 54,
+                          height: 3,
+                          decoration: BoxDecoration(
+                            color: group == entry
+                                ? scheme.primary
+                                : Colors.transparent,
+                            borderRadius: BorderRadius.circular(2),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                 ),
-              const Spacer(),
-              GlassTextButton(
-                compact: true,
-                key: const ValueKey('reader-legado-themes'),
-                onPressed: () => widget.onAdd(group),
-                child: const AppText('＋ 主题库'),
               ),
-            ],
+          ],
+        ),
+        const SizedBox(height: 10),
+        GridView.builder(
+          shrinkWrap: true,
+          primary: false,
+          physics: const NeverScrollableScrollPhysics(),
+          padding: EdgeInsets.zero,
+          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: 3,
+            crossAxisSpacing: 8,
+            mainAxisSpacing: 8,
+            childAspectRatio: .75,
           ),
-          const SizedBox(height: 4),
-          SizedBox(
-            height: 86,
-            child: ListView.separated(
-              scrollDirection: Axis.horizontal,
-              itemCount: cards.length,
-              separatorBuilder: (_, _) => const SizedBox(width: 8),
-              itemBuilder: (context, index) {
-                final look = cards[index];
-                final selected =
-                    activeNight == group &&
-                    widget.preferences.lookFor(group).choiceKey ==
-                        look.choiceKey;
-                return SizedBox(
-                  width: 134,
-                  child: Column(
-                    children: [
-                      Expanded(
-                        child: Semantics(
-                          button: true,
-                          selected: selected,
-                          label: '应用${look.label}',
-                          child: JellyTapSurface(
-                            onTap: () {
-                              var next = widget.preferences.setLook(
-                                group,
-                                look,
-                              );
-                              if (group != activeNight) {
-                                next = next.copyWith(
-                                  themeMode: group
-                                      ? ReaderThemeMode.night
-                                      : ReaderThemeMode.day,
-                                );
-                              }
-                              widget.onChanged(next);
-                            },
-                            child: sample(look, group),
+          itemCount: cards.length,
+          itemBuilder: (context, index) {
+            final look = cards[index];
+            final selected =
+                activeNight == group &&
+                widget.preferences.lookFor(group).choiceKey == look.choiceKey;
+            return DecoratedBox(
+              position: DecorationPosition.foreground,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(
+                  color: selected ? scheme.primary : scheme.outlineVariant,
+                  width: selected ? 2 : 1,
+                ),
+              ),
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  Semantics(
+                    button: true,
+                    selected: selected,
+                    label: '应用${look.label}',
+                    child: JellyTapSurface(
+                      onTap: () {
+                        var next = widget.preferences.setLook(group, look);
+                        if (group != activeNight) {
+                          next = next.copyWith(
+                            themeMode: group
+                                ? ReaderThemeMode.night
+                                : ReaderThemeMode.day,
+                          );
+                        }
+                        widget.onChanged(next);
+                      },
+                      child: sample(
+                        look,
+                        group,
+                        overlay: Align(
+                          alignment: Alignment.bottomCenter,
+                          child: Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.fromLTRB(7, 22, 5, 7),
+                            decoration: BoxDecoration(
+                              gradient: LinearGradient(
+                                begin: Alignment.topCenter,
+                                end: Alignment.bottomCenter,
+                                colors: [
+                                  scheme.surface.withValues(alpha: 0),
+                                  scheme.surface.withValues(alpha: .92),
+                                ],
+                              ),
+                            ),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                AppText(
+                                  look.label,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    color: scheme.onSurface,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                                AppText(
+                                  selected
+                                      ? '使用中'
+                                      : look.theme == null
+                                      ? '默认主题'
+                                      : '已添加',
+                                  style: TextStyle(
+                                    color: selected
+                                        ? scheme.primary
+                                        : scheme.onSurfaceVariant,
+                                    fontSize: 11,
+                                  ),
+                                ),
+                              ],
+                            ),
                           ),
                         ),
                       ),
-                      SizedBox(
-                        height: 34,
-                        child: Row(
-                          children: [
-                            Expanded(
-                              child: AppText(
-                                look.label,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(fontSize: 12),
-                              ),
-                            ),
-                            if (selected)
-                              const AppText(
-                                '✓ 使用中',
-                                style: TextStyle(
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                            GlassMenuAnchor(
-                              child: Builder(
-                                builder: (anchor) => CompactRowMenuButton(
-                                  label: '${look.label}操作',
-                                  onPressed: () async {
-                                    final picked = await showGlassMenu<bool>(
-                                      context: anchor,
-                                      reduceMotion: widget.reduceMotion,
-                                      builder: (menu) => GlassMenuItem(
-                                        label: '编辑主题',
-                                        icon: CupertinoIcons.pencil,
-                                        onPressed: () =>
-                                            Navigator.pop(menu, true),
-                                      ),
-                                    );
-                                    if (mounted && picked == true) {
-                                      await edit(look, group);
-                                    }
-                                  },
-                                ),
-                              ),
-                            ),
-                          ],
+                    ),
+                  ),
+                  if (selected)
+                    Positioned(
+                      top: 6,
+                      left: 6,
+                      child: IgnorePointer(
+                        child: CircleAvatar(
+                          radius: 10,
+                          backgroundColor: scheme.primary,
+                          child: Icon(
+                            Icons.check,
+                            size: 15,
+                            color: scheme.onPrimary,
+                          ),
                         ),
                       ),
-                    ],
+                    ),
+                  Positioned(
+                    top: 2,
+                    right: 2,
+                    child: GlassMenuAnchor(
+                      child: Builder(
+                        builder: (anchor) => GlassIconButton(
+                          icon: CupertinoIcons.ellipsis,
+                          label: '${look.label}操作',
+                          onPressed: () async {
+                            final picked = await showGlassMenu<String>(
+                              context: anchor,
+                              reduceMotion: widget.reduceMotion,
+                              builder: (menu) => Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  GlassMenuItem(
+                                    label: '编辑',
+                                    icon: CupertinoIcons.pencil,
+                                    onPressed: () =>
+                                        Navigator.pop(menu, 'edit'),
+                                  ),
+                                  GlassMenuItem(
+                                    label: '删除',
+                                    order: 1,
+                                    icon: CupertinoIcons.trash,
+                                    onPressed: () =>
+                                        Navigator.pop(menu, 'delete'),
+                                  ),
+                                ],
+                              ),
+                            );
+                            if (!mounted) return;
+                            if (picked == 'edit') {
+                              await edit(look, group);
+                            } else if (picked == 'delete') {
+                              await remove(look, group);
+                            }
+                          },
+                        ),
+                      ),
+                    ),
                   ),
-                );
-              },
-            ),
-          ),
-        ],
-      ),
+                ],
+              ),
+            );
+          },
+        ),
+        GlassTextButton(
+          compact: true,
+          key: const ValueKey('reader-legado-themes'),
+          onPressed: () => widget.onAdd(group),
+          child: const AppText('＋ 从主题库添加'),
+        ),
+      ],
     );
   }
 }

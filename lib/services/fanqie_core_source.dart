@@ -160,7 +160,7 @@ class FanqieCoreSource {
     );
     final text = _extractText(fallback);
     if (text.isEmpty) {
-      throw const FanqieContentUnavailable('正文为空或受访问限制（可能为付费/VIP章节）');
+      throw const FanqieContentUnavailable('番茄正文为空');
     }
     return text;
   }

@@ -279,22 +279,24 @@ class ReaderPreferences {
 
   List<ReaderLook> shelf(bool night) {
     final active = lookFor(night);
+    final saved = night ? nightShelf : dayShelf;
     return <String, ReaderLook>{
-      for (final paper
-          in (night
-              ? [
-                  ReaderPaper.system,
-                  ReaderPaper.night,
-                  ReaderPaper.legadoWechat,
-                ]
-              : [
-                  ReaderPaper.system,
-                  ReaderPaper.milk,
-                  ReaderPaper.parchment,
-                  ReaderPaper.sage,
-                  ReaderPaper.legadoWechat,
-                ]))
-        'paper:${paper.name}': ReaderLook(paper: paper),
+      if (saved.isEmpty)
+        for (final paper
+            in (night
+                ? [
+                    ReaderPaper.system,
+                    ReaderPaper.night,
+                    ReaderPaper.legadoWechat,
+                  ]
+                : [
+                    ReaderPaper.system,
+                    ReaderPaper.milk,
+                    ReaderPaper.parchment,
+                    ReaderPaper.sage,
+                    ReaderPaper.legadoWechat,
+                  ]))
+          'paper:${paper.name}': ReaderLook(paper: paper),
       for (final look in night ? nightShelf : dayShelf) look.choiceKey: look,
       active.choiceKey: active,
     }.values.toList();
@@ -311,6 +313,22 @@ class ReaderPreferences {
     return lookFor(night).choiceKey == look.choiceKey
         ? updated.setLook(night, look, remember: false)
         : updated;
+  }
+
+  ReaderPreferences removeCard(bool night, ReaderLook look) {
+    final cards = shelf(night);
+    if (cards.length <= 1 ||
+        !cards.any((card) => card.choiceKey == look.choiceKey))
+      return this;
+    final remaining = cards
+        .where((card) => card.choiceKey != look.choiceKey)
+        .toList();
+    final next = lookFor(night).choiceKey == look.choiceKey
+        ? setLook(night, remaining.first, remember: false)
+        : this;
+    return night
+        ? next.copyWith(nightShelf: remaining)
+        : next.copyWith(dayShelf: remaining);
   }
 
   Iterable<ReaderLook> recentFor(bool night) =>

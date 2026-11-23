@@ -468,15 +468,10 @@ class OfficialRankingPage {
 }
 
 class OfficialChapter {
-  const OfficialChapter({
-    required this.title,
-    required this.url,
-    this.isLocked = false,
-  });
+  const OfficialChapter({required this.title, required this.url});
 
   final String title;
   final String url;
-  final bool isLocked;
 }
 
 class OfficialBookData {
@@ -729,16 +724,15 @@ class OfficialBookService {
     }
   }
 
-  /// 核心正文：返回纯文本 / `[[FANQIE_LOCKED]]`；核心不可用返回 null（降级 web）。
+  /// 核心不可用时返回 null，沿用网页兜底。
   static Future<String?> _fanqieCoreContent(String chapterUrl) async {
     final itemId =
         RegExp(r'/reader/(\d+)').firstMatch(chapterUrl)?.group(1) ?? '';
     if (itemId.isEmpty) return null;
     try {
-      final text = await FanqieCoreSource.shared().chapterText(itemId);
-      return text.trim().isEmpty ? '[[FANQIE_LOCKED]]' : text;
+      return await FanqieCoreSource.shared().chapterText(itemId);
     } on FanqieContentUnavailable {
-      return '[[FANQIE_LOCKED]]';
+      return '';
     } on Object {
       // 核心未构建/初始化失败/瞬时错误：交给 web 抓取。
       return null;
@@ -1323,7 +1317,7 @@ class OfficialBookService {
     };
   }
 
-  /// 返回官网原始正文 HTML；VIP/锁定章节返回占位标记，由仓库层转成可见提示。
+  /// 返回官网提供的正文文本或 HTML。
   static Future<String> content(BookSourceRef ref, String chapterUrl) async {
     return switch (siteForKey(ref.sourceKey)) {
       OfficialSite.qidian => _qidianContent(chapterUrl),
@@ -1732,7 +1726,6 @@ class OfficialBookService {
         OfficialChapter(
           title: title,
           url: 'https://www.qimao.com/shuku/$bookId-$id/',
-          isLocked: _string(item['is_vip']) == '1',
         ),
       );
     }
@@ -1755,7 +1748,7 @@ class OfficialBookService {
       final text = node.text.trim();
       if (text.isNotEmpty) paragraphs.add('<p>$text</p>');
     }
-    if (paragraphs.isEmpty) return '[[QIMAO_VIP]]';
+    if (paragraphs.isEmpty) return article?.innerHtml ?? '';
     return paragraphs.join('\n');
   }
 
@@ -1844,9 +1837,7 @@ class OfficialBookService {
         final url = prefix.isNotEmpty && suffix.isNotEmpty
             ? '$prefix$suffix'
             : 'https://www.shuqi.com/reader?bid=$bookId&cid=$id';
-        chapters.add(
-          OfficialChapter(title: title, url: url, isLocked: !isFree),
-        );
+        chapters.add(OfficialChapter(title: title, url: url));
       }
     }
     if (chapters.isEmpty) throw const FormatException('书旗目录为空');
@@ -1854,19 +1845,10 @@ class OfficialBookService {
   }
 
   static Future<String> _shuqiContent(String chapterUrl) async {
-    if (chapterUrl.isEmpty ||
-        chapterUrl.contains('/contentcharge/') ||
-        !chapterUrl.contains('/content')) {
-      return '[[SHUQI_LOCKED]]';
-    }
     final json = await _getJson(Uri.parse(chapterUrl), headers: _shuqiHeaders);
-    final state = _int(json['state']) ?? _int(json['status']);
-    if (state != 200) return '[[SHUQI_LOCKED]]';
     final raw = _string(json['ChapterContent'] ?? json['chapterContent']);
-    if (raw.isEmpty) return '[[SHUQI_LOCKED]]';
-    final decoded = _shuqiDecodeCont(raw);
-    if (decoded.trim().isEmpty) return '[[SHUQI_LOCKED]]';
-    return decoded;
+    if (raw.isEmpty) return _string(json['message'] ?? json['msg']);
+    return _shuqiDecodeCont(raw);
   }
 
   /// 书旗正文：字母位移 → Base64 → UTF-8，移植自 reader.js 的 `_decodeCont`。
@@ -2147,9 +2129,7 @@ class OfficialBookService {
             final title = _string(row['t']);
             final url = _string(row['h']);
             if (title.isEmpty || url.isEmpty || !seen.add(url)) continue;
-            chapters.add(
-              OfficialChapter(title: title, url: url, isLocked: false),
-            );
+            chapters.add(OfficialChapter(title: title, url: url));
           }
           if (chapters.isNotEmpty) return chapters;
         }
@@ -2175,13 +2155,7 @@ class OfficialBookService {
       final href = anchor.attributes['href']?.trim() ?? '';
       final url = href.startsWith('//') ? 'https:$href' : href;
       if (title.isEmpty || url.isEmpty) continue;
-      chapters.add(
-        OfficialChapter(
-          title: title,
-          url: url,
-          isLocked: anchor.outerHtml.contains('_lockIcon_'),
-        ),
-      );
+      chapters.add(OfficialChapter(title: title, url: url));
     }
     if (chapters.isEmpty) throw const FormatException('起点目录为空');
     return chapters;
@@ -2228,9 +2202,6 @@ class OfficialBookService {
           OfficialChapter(
             title: title,
             url: 'https://fanqienovel.com/reader/$itemId',
-            isLocked:
-                _truthy(item['isChapterLock']) ||
-                (_int(item['needPay']) ?? 0) > 0,
           ),
         );
       }
@@ -2254,9 +2225,6 @@ class OfficialBookService {
           OfficialChapter(
             title: title,
             url: 'https://fanqienovel.com/reader/$itemId',
-            isLocked:
-                _truthy(item['isChapterLock']) ||
-                (_int(item['needPay']) ?? 0) > 0,
           ),
         );
       }
@@ -2271,17 +2239,8 @@ class OfficialBookService {
   }
 
   static Future<String> _qidianContent(String chapterUrl) async {
-    // 桌面章节页（由目录返回的 www.qidian.com/chapter/... ）走无头 WebView，
-    // 过 argus 后取正文；VIP/付费页无内容则返回锁定标记。
     if (chapterUrl.contains('www.qidian.com/chapter/')) {
-      try {
-        final html = await QidianSearchWebView.instance.fetchChapterContent(
-          chapterUrl,
-        );
-        return (html == null || html.trim().isEmpty) ? '[[QIDIAN_VIP]]' : html;
-      } on Object {
-        return '[[QIDIAN_VIP]]';
-      }
+      return await QidianSearchWebView.instance.fetchChapterContent(chapterUrl) ?? '';
     }
     final html = await _getText(
       Uri.parse(chapterUrl),
@@ -2292,7 +2251,6 @@ class OfficialBookService {
     );
     final data = _pageContext(html);
     final info = _map(data['chapterInfo']);
-    if (_string(info?['vipStatus']) != '0') return '[[QIDIAN_VIP]]';
     return _string(info?['content']);
   }
 
@@ -2301,11 +2259,6 @@ class OfficialBookService {
     final core = await _fanqieCoreContent(chapterUrl);
     if (core != null) return core;
     final html = await _getText(Uri.parse(chapterUrl), headers: _fanqieHeaders);
-    if (RegExp(
-      r'购买|登录后阅读|本章为付费|isChapterLock[\s\S]{0,40}true',
-    ).hasMatch(html)) {
-      return '[[FANQIE_LOCKED]]';
-    }
     final match = RegExp(
       r'<div class="muye-reader-content noselect">([\s\S]*?)</div></div>',
     ).firstMatch(html);

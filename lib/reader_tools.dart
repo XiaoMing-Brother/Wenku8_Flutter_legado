@@ -578,17 +578,6 @@ class _ReaderToolsState extends State<ReaderTools>
     showNovelFeedback(context, '已添加到${night ? '夜间' : '日间'}主题');
   }
 
-  void _applyLook(bool night, ReaderLook look) {
-    _preferences(_readerPreferences.setLook(night, look));
-    final selected = look.theme;
-    if (selected == null || selected.imageCandidates.isEmpty) return;
-    unawaited(
-      widget.state.backgrounds
-          .cacheThemeImage(selected.id, selected.imageCandidates)
-          .catchError((Object _) => null),
-    );
-  }
-
   Future<void> _importBackground() async {
     if (_backgroundBusy) return;
     final night = _night;
@@ -1509,6 +1498,15 @@ class _ReaderToolsState extends State<ReaderTools>
                 ),
               ),
             if (category == 'theme')
+              ReaderThemeShelf(
+                preferences: _readerPreferences,
+                appDark: _appDark,
+                store: widget.state.backgrounds,
+                onChanged: _preferences,
+                onAdd: _openLegadoThemes,
+                reduceMotion: widget.state.reduceMotion,
+              ),
+            if (category == 'theme')
               ReaderChoicePicker<ReaderThemeMode>(
                 name: 'reader-theme-mode',
                 label: '日夜切换',
@@ -1518,49 +1516,6 @@ class _ReaderToolsState extends State<ReaderTools>
                 },
                 onChanged: (mode) =>
                     _preferences(_readerPreferences.copyWith(themeMode: mode)),
-              ),
-            if (category == 'theme')
-              _adjustment(
-                ArchiveSection(
-                  title: '${_night ? '夜间' : '日间'} · ${_look.label}',
-                  code: 'READER / CURRENT THEME',
-                ),
-              ),
-            if (category == 'theme' &&
-                _readerPreferences.recentFor(_night).isNotEmpty)
-              _adjustment(
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const ArchiveSection(
-                      title: '最近使用',
-                      code: 'READER / RECENT THEMES',
-                    ),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: [
-                        for (final look in _readerPreferences.recentFor(_night))
-                          GlassTextButton(
-                            compact: true,
-                            onPressed: () => _applyLook(_night, look),
-                            child: AppText(look.label),
-                          ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            if (category == 'theme')
-              _adjustment(
-                ReaderThemeShelf(
-                  preferences: _readerPreferences,
-                  appDark: _appDark,
-                  store: widget.state.backgrounds,
-                  onChanged: _preferences,
-                  onAdd: _openLegadoThemes,
-                  reduceMotion: widget.state.reduceMotion,
-                ),
               ),
             if (category == 'theme')
               _adjustment(

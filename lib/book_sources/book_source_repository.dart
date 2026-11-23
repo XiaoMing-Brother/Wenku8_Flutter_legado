@@ -1074,7 +1074,6 @@ class BookSourceRepository extends NovelRepository
             sourceNextUrl: index + 1 < official.length
                 ? official[index + 1].url
                 : null,
-            isLocked: chapter.isLocked,
           ),
         );
       }
@@ -1129,7 +1128,6 @@ class BookSourceRepository extends NovelRepository
           volumeTitle: volumeTitle,
           sourceUrl: url.isEmpty ? null : url,
           sourceNextUrl: _nextChapterUrl(rows, index),
-          isLocked: row['isVip'] == true && row['isPay'] != true,
         ),
       );
     }
@@ -1180,18 +1178,6 @@ class BookSourceRepository extends NovelRepository
     String chapterUrl,
     String sourceKey,
   ) async {
-    if (raw.contains('[[QIDIAN_VIP]]')) {
-      throw const FormatException('起点本章为 VIP 章节，已提供免费章节试读，整本请换源阅读');
-    }
-    if (raw.contains('[[FANQIE_LOCKED]]')) {
-      throw const FormatException('番茄本章为锁定章节，已提供免费章节试读，整本请换源阅读');
-    }
-    if (raw.contains('[[QIMAO_VIP]]')) {
-      throw const FormatException('七猫本章为 VIP 章节，已提供免费章节试读，整本请换源阅读');
-    }
-    if (raw.contains('[[SHUQI_LOCKED]]')) {
-      throw const FormatException('书旗本章为付费章节，已提供免费章节试读，整本请换源阅读');
-    }
     var body = legadoContentToReader(
       raw,
       baseUrl: chapterUrl,

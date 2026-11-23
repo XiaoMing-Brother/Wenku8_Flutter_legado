@@ -46,15 +46,13 @@ class QidianSearchWebView {
 })()
 ''';
 
-  /// 阅读页：取 `.content`/`main` 的 innerHTML（保留段落）；付费页无内容则空串。
+  /// 阅读页：取 `.content`/`main` 的 innerHTML，保留段落。
   static const _contentJs = r'''
 (function(){
   var root=document.querySelector('.content')||document.querySelector('main');
   var html = root ? (root.innerHTML||'').replace(/<script[\s\S]*?<\/script>/gi,'').trim() : '';
-  var bodyText = document.body ? document.body.innerText : '';
-  var pay = /请先登录|登录后阅读|订阅|购买|VIP章节|本章为付费/.test(bodyText);
   var deny = (document.documentElement.outerHTML||'').indexOf('页面无法访问') >= 0;
-  var ok = !deny && (html.length > 50 || pay);
+  var ok = !deny && html.length > 0;
   return JSON.stringify({ok: ok, data: html});
 })()
 ''';
@@ -189,7 +187,7 @@ class QidianSearchWebView {
     });
   }
 
-  /// 起点正文：返回 `<p>` 段落 HTML；VIP/付费/失败返回 null 或空串，由调用方判定锁定。
+  /// 返回阅读页正文区域的 HTML。
   Future<String?> fetchChapterContent(String chapterUrl) {
     return _serialize(() async {
       final data = await _run(chapterUrl, _contentJs);

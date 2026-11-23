@@ -6308,9 +6308,6 @@ class _DetailPageState extends State<DetailPage> with TickerProviderStateMixin {
 
   Widget _chapterRow(BuildContext context, int index) {
     final entry = novel.directory[index];
-    final chapter = entry.chapter >= 0 && entry.chapter < novel.chapters.length
-        ? novel.chapters[entry.chapter]
-        : null;
     final current = _resumeDirectory == index;
     return _cacheReactive(
       () => JellyTapSurface(
@@ -6370,35 +6367,6 @@ class _DetailPageState extends State<DetailPage> with TickerProviderStateMixin {
                   ],
                 ),
               ),
-              if (chapter?.isLocked == true) ...[
-                const SizedBox(width: 8),
-                DecoratedBox(
-                  decoration: BoxDecoration(
-                    border: Border.all(
-                      color: Theme.of(
-                        context,
-                      ).colorScheme.outlineVariant.withValues(alpha: .8),
-                      width: .7,
-                    ),
-                    borderRadius: BorderRadius.circular(3),
-                  ),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 5,
-                      vertical: 2,
-                    ),
-                    child: AppText(
-                      'VIP',
-                      style: TextStyle(
-                        fontSize: 10,
-                        height: 1.2,
-                        fontWeight: FontWeight.w600,
-                        color: Theme.of(context).colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                  ),
-                ),
-              ],
               if (_isCached(entry.target.chapterId)) ...[
                 const SizedBox(width: 10),
                 ArchiveIcon(
