@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter/cupertino.dart';
@@ -24,13 +23,11 @@ import 'font_settings_page.dart';
 import 'reader_header_footer_page.dart';
 import 'glass_choices.dart';
 import 'setting_menu.dart';
-import 'book_documents.dart';
 import 'local_books.dart' show isLocalBook;
 import 'reader_languages.dart';
 import 'bookmark_categories.dart';
 import 'replace_rules/replace_rule_store.dart';
 import 'replace_rules/effective_replaces_sheet.dart';
-import 'feature_pages.dart' show confirmNovelAction;
 
 sealed class ReaderToolAction {
   const ReaderToolAction();
@@ -494,23 +491,10 @@ class _ReaderToolsState extends State<ReaderTools>
       widget.state.replaceRulesOverriddenFor(widget.novel.id);
   bool _changingScope = false;
   bool _changingLanguages = false;
-  bool _backgroundExpanded = false, _backgroundBusy = false;
-  Future<List<String>>? _backgrounds;
-  final _backgroundFiles = <String, Future<File?>>{};
   String? _category;
   bool _adding = false;
   String? _storageError;
   Key? _activeAdjustment;
-
-  void _toggleBackgrounds() {
-    setState(() {
-      _backgroundExpanded = !_backgroundExpanded;
-      // Opening settings must not scan a directory for a collapsed section.
-      // Keep the result while collapsing so the existing reverse animation
-      // still contains its thumbnails.
-      if (_backgroundExpanded) _backgrounds ??= widget.state.backgrounds.list();
-    });
-  }
 
   Future<void> _openLegadoThemes(bool night) async {
     final prefs = _readerPreferences;
@@ -520,6 +504,7 @@ class _ReaderToolsState extends State<ReaderTools>
       heightFactor: .92,
       maxWidth: 720,
       builder: (_) => ReaderThemePicker(
+        initialNight: night,
         actionLabel: '添加到${night ? '夜间' : '日间'}主题',
         selectedId: prefs.lookFor(_night).theme?.id,
         previewBuilder: (theme) {
@@ -578,223 +563,6 @@ class _ReaderToolsState extends State<ReaderTools>
     showNovelFeedback(context, '已添加到${night ? '夜间' : '日间'}主题');
   }
 
-  Future<void> _importBackground() async {
-    if (_backgroundBusy) return;
-    final night = _night;
-    setState(() => _backgroundBusy = true);
-    final documents = BookDocuments();
-    try {
-      final selected = await documents.pickImage();
-      if (selected == null) return;
-      try {
-        final id = await widget.state.backgrounds.import(selected.path!);
-        if (!mounted) return;
-        _setBackground(night, id);
-        setState(() {
-          _backgrounds = widget.state.backgrounds.list();
-        });
-      } finally {
-        await documents.releaseBooks([selected]);
-      }
-    } catch (e) {
-      if (mounted) {
-        showNovelFeedback(
-          context,
-          e is FormatException ? e.message : '背景导入未完成，请重试',
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _backgroundBusy = false);
-    }
-  }
-
-  Future<void> _removeBackground() async {
-    final id = _look.backgroundImage;
-    if (id == null || _backgroundBusy) return;
-    if (!await confirmNovelAction(
-      context,
-      title: '删除阅读背景？',
-      message: '使用它的书籍恢复纯色背景，原始图片不受影响。',
-      confirmLabel: '删除阅读背景',
-      reduceMotion: widget.state.reduceMotion,
-    )) {
-      return;
-    }
-    if (!mounted) return;
-    setState(() => _backgroundBusy = true);
-    try {
-      await widget.state.removeReaderBackground(id);
-      if (mounted) {
-        setState(() {
-          _backgrounds = widget.state.backgrounds.list();
-        });
-      }
-    } catch (_) {
-      if (mounted) showNovelFeedback(context, '背景删除未完成，请重试');
-    } finally {
-      if (mounted) setState(() => _backgroundBusy = false);
-    }
-  }
-
-  List<Widget> _backgroundOptions() => [
-    _adjustment(
-      GlassTextButton(
-        key: const ValueKey('reader-background-options'),
-        onPressed: _toggleBackgrounds,
-        child: Row(
-          children: [
-            const ArchiveIcon(CupertinoIcons.photo, size: 20),
-            const SizedBox(width: 12),
-            const Expanded(
-              child: AppText(
-                '阅读背景',
-                style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
-              ),
-            ),
-            ArchiveIcon(
-              _backgroundExpanded
-                  ? CupertinoIcons.chevron_up
-                  : CupertinoIcons.chevron_down,
-              size: 14,
-            ),
-          ],
-        ),
-      ),
-    ),
-    AnimatedOptionSection(
-      expanded: _backgroundExpanded,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          _adjustment(
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                const SizedBox(height: 8),
-                FutureBuilder<List<String>>(
-                  future: _backgrounds,
-                  builder: (context, snapshot) => SizedBox(
-                    height: 76,
-                    child: AppScrollHaptics(
-                      child: ListView.separated(
-                        scrollDirection: Axis.horizontal,
-                        itemCount: 1 + (snapshot.data?.length ?? 0),
-                        separatorBuilder: (_, _) => const SizedBox(width: 8),
-                        itemBuilder: (context, index) {
-                          final id = index == 0
-                              ? null
-                              : snapshot.data![index - 1];
-                          return SizedBox(
-                            width: 64,
-                            child: GlassTextButton(
-                              key: ValueKey(
-                                'reader-background-${id ?? 'plain'}',
-                              ),
-                              selected: id == null
-                                  ? _look.backgroundImage == null &&
-                                        _look.theme?.imageUrl == null
-                                  : _look.backgroundImage == id,
-                              onPressed: _backgroundBusy
-                                  ? null
-                                  : () => _setBackground(_night, id),
-                              child: id == null
-                                  ? const AppText(
-                                      '纯色',
-                                      style: TextStyle(fontSize: 12),
-                                    )
-                                  : FutureBuilder(
-                                      future: _backgroundFiles.putIfAbsent(
-                                        id,
-                                        () => widget.state.backgrounds.file(id),
-                                      ),
-                                      builder: (context, file) =>
-                                          file.data == null
-                                          ? const ArchiveIcon(
-                                              CupertinoIcons.photo,
-                                              size: 20,
-                                            )
-                                          : ClipRRect(
-                                              borderRadius:
-                                                  BorderRadius.circular(6),
-                                              child: Image.file(
-                                                file.data!,
-                                                width: 44,
-                                                height: 54,
-                                                fit: BoxFit.cover,
-                                                cacheWidth: 132,
-                                                errorBuilder: (_, _, _) =>
-                                                    const ArchiveIcon(
-                                                      CupertinoIcons.photo,
-                                                      size: 20,
-                                                    ),
-                                              ),
-                                            ),
-                                    ),
-                            ),
-                          );
-                        },
-                      ),
-                    ),
-                  ),
-                ),
-                Row(
-                  children: [
-                    Expanded(
-                      child: GlassTextButton(
-                        key: const ValueKey('reader-import-background'),
-                        onPressed: _backgroundBusy ? null : _importBackground,
-                        child: AppText(
-                          _backgroundBusy ? '正在处理图片' : '导入背景图片',
-                          style: const TextStyle(fontSize: 13),
-                        ),
-                      ),
-                    ),
-                    if (_look.backgroundImage != null)
-                      GlassIconButton(
-                        icon: CupertinoIcons.trash,
-                        label: '删除当前背景',
-                        onPressed: _backgroundBusy ? null : _removeBackground,
-                      ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-          AnimatedOptionSection(
-            expanded:
-                _look.backgroundImage != null || _look.theme?.imageUrl != null,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                _adjustment(
-                  ReaderValueSlider(
-                    sliderKey: const ValueKey('reader-background-opacity'),
-                    label: '背景浓度',
-                    value: _readerPreferences.backgroundOpacity,
-                    min: .05,
-                    max: 1,
-                    format: (v) => '${(v * 100).round()}%',
-                    onPreview: (v) => _preferences(
-                      _readerPreferences.copyWith(backgroundOpacity: v),
-                      persist: false,
-                    ),
-                    onCommitted: (v) => _preferences(
-                      _readerPreferences.copyWith(backgroundOpacity: v),
-                    ),
-                    onInteractionChanged: (v) => _preview(
-                      const ValueKey('reader-background-opacity'),
-                      v,
-                    ),
-                  ),
-                  const ValueKey('reader-background-opacity'),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    ),
-  ];
   void _preferences(ReaderPreferences value, {bool persist = true}) {
     if (widget.onPreferencesChanged != null) {
       widget.onPreferencesChanged!(value, persist);
@@ -811,21 +579,6 @@ class _ReaderToolsState extends State<ReaderTools>
             }),
       );
     }
-  }
-
-  void _setBackground(bool night, String? image) {
-    final look = _readerPreferences.lookFor(night);
-    _preferences(
-      _readerPreferences.setLook(
-        night,
-        ReaderLook(
-          paper: look.paper,
-          theme: look.theme?.withoutImage,
-          backgroundImage: image,
-        ),
-        remember: false,
-      ),
-    );
   }
 
   Future<void> _changeStyleScope(bool book) async {
@@ -1506,28 +1259,6 @@ class _ReaderToolsState extends State<ReaderTools>
                 onAdd: _openLegadoThemes,
                 reduceMotion: widget.state.reduceMotion,
               ),
-            if (category == 'theme')
-              ReaderChoicePicker<ReaderThemeMode>(
-                name: 'reader-theme-mode',
-                label: '日夜切换',
-                value: _readerPreferences.themeMode,
-                options: {
-                  for (final mode in ReaderThemeMode.values) mode: mode.label,
-                },
-                onChanged: (mode) =>
-                    _preferences(_readerPreferences.copyWith(themeMode: mode)),
-              ),
-            if (category == 'theme')
-              _adjustment(
-                AppText(
-                  '日间和夜间分别保存主题。选择「跟随应用」可随应用外观自动切换。',
-                  style: TextStyle(
-                    fontSize: 12,
-                    height: 1.6,
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  ),
-                ),
-              ),
           ],
         ),
       ),
@@ -1575,7 +1306,6 @@ class _ReaderToolsState extends State<ReaderTools>
       const ArchiveSection(title: '字体与语言', code: 'READER / FONT'),
     if (category == 'body' && widget.languages.length > 1)
       _adjustment(_languageOptions()),
-    if (category == 'theme') ..._backgroundOptions(),
     if (category == 'body')
       _adjustment(
         GlassTextButton(

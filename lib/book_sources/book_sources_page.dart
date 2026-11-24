@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
@@ -16,6 +17,7 @@ import '../dock_layout.dart';
 import '../feature_pages.dart';
 import 'book_source.dart';
 import 'book_source_downloader.dart';
+import 'book_source_explore_layout.dart';
 import 'book_source_library.dart';
 import 'book_source_store.dart';
 import 'batch_change_source_page.dart';
@@ -62,7 +64,17 @@ class _BookSourcesPageState extends State<BookSourcesPage> {
   String? _groupFilter;
   _SourceSort _sort = _SourceSort.importOrder;
   BookSource? _expandedSource;
-  Future<List<BookSourceExploreKind>>? _rankings;
+  List<BookSourceExploreKind>? _exploreKinds;
+  Object? _exploreError;
+  bool _exploreLoading = false;
+  BookSourceLoginState? _exploreLogin;
+  bool _exploreLoginLoading = false;
+  int _exploreRequest = 0;
+  int _exploreLoginRequest = 0;
+  final Map<String, Map<String, String>> _exploreValues = {};
+  final Map<String, TextEditingController> _exploreControllers = {};
+  final Map<String, FocusNode> _exploreFocusNodes = {};
+  final Map<String, Timer> _exploreTimers = {};
 
   BookSourceLibrary get _library => widget.library;
 
@@ -74,6 +86,15 @@ class _BookSourcesPageState extends State<BookSourcesPage> {
 
   @override
   void dispose() {
+    for (final timer in _exploreTimers.values) {
+      timer.cancel();
+    }
+    for (final controller in _exploreControllers.values) {
+      controller.dispose();
+    }
+    for (final focus in _exploreFocusNodes.values) {
+      focus.dispose();
+    }
     _text.dispose();
     _url.dispose();
     _query.dispose();
@@ -1123,9 +1144,16 @@ class _BookSourcesPageState extends State<BookSourcesPage> {
 
   void _toggleRankings(BookSource source) {
     if (identical(_expandedSource, source)) {
+      _cancelExploreTimers();
       setState(() {
         _expandedSource = null;
-        _rankings = null;
+        _exploreKinds = null;
+        _exploreError = null;
+        _exploreLoading = false;
+        _exploreLogin = null;
+        _exploreLoginLoading = false;
+        _exploreRequest++;
+        _exploreLoginRequest++;
       });
     } else {
       _loadRankings(source);
@@ -1133,100 +1161,541 @@ class _BookSourcesPageState extends State<BookSourcesPage> {
   }
 
   void _loadRankings(BookSource source) {
+    _cancelExploreTimers();
+    final request = ++_exploreRequest;
+    final loginRequest = ++_exploreLoginRequest;
+    final ready = source.supported && source.enabled && source.canExplore;
     setState(() {
       _expandedSource = source;
-      _rankings = source.supported && source.enabled && source.canExplore
-          ? Future.sync(() => _library.exploreKinds(source))
-          : null;
-      _rankings?.ignore();
+      _exploreKinds = null;
+      _exploreError = null;
+      _exploreLoading = ready;
+      _exploreLogin = null;
+      _exploreLoginLoading = source.needsLogin;
+    });
+    if (source.needsLogin) {
+      unawaited(_loadExploreLogin(source, loginRequest));
+    }
+    if (ready) unawaited(_fetchExploreKinds(source, request));
+  }
+
+  void _cancelExploreTimers() {
+    for (final timer in _exploreTimers.values) {
+      timer.cancel();
+    }
+    _exploreTimers.clear();
+  }
+
+  Future<void> _fetchExploreKinds(BookSource source, int request) async {
+    try {
+      final kinds = await _library.exploreKinds(
+        source,
+        values: _exploreValuesFor(source),
+      );
+      if (!mounted ||
+          request != _exploreRequest ||
+          !identical(source, _expandedSource)) {
+        return;
+      }
+      setState(() {
+        _exploreKinds = kinds;
+        _exploreError = null;
+        _exploreLoading = false;
+        _syncExploreValues(source, kinds);
+      });
+    } on Object catch (error) {
+      if (!mounted ||
+          request != _exploreRequest ||
+          !identical(source, _expandedSource)) {
+        return;
+      }
+      setState(() {
+        _exploreError = error;
+        _exploreLoading = false;
+      });
+    }
+  }
+
+  Future<void> _reloadExploreKinds(BookSource source) async {
+    if (!identical(source, _expandedSource)) return;
+    final request = ++_exploreRequest;
+    try {
+      final kinds = await _library.exploreKinds(
+        source,
+        values: _exploreValuesFor(source),
+      );
+      if (!mounted ||
+          request != _exploreRequest ||
+          !identical(source, _expandedSource)) {
+        return;
+      }
+      setState(() {
+        _exploreKinds = kinds;
+        _exploreError = null;
+        _exploreLoading = false;
+        _syncExploreValues(source, kinds);
+      });
+    } on Object catch (error) {
+      if (!mounted ||
+          request != _exploreRequest ||
+          !identical(source, _expandedSource)) {
+        return;
+      }
+      if (_exploreKinds == null) {
+        setState(() {
+          _exploreError = error;
+          _exploreLoading = false;
+        });
+      } else {
+        _feedback(_sourceErrorMessage(error), error: true);
+      }
+    }
+  }
+
+  Future<void> _loadExploreLogin(BookSource source, int request) async {
+    try {
+      final state = await _library
+          .loginInfo(source)
+          .timeout(const Duration(seconds: 3));
+      if (!mounted ||
+          request != _exploreLoginRequest ||
+          !identical(source, _expandedSource)) {
+        return;
+      }
+      setState(() => _exploreLogin = state);
+    } on Object {
+      // 登录状态读取失败时保留登录入口，具体错误在登录弹层中展示。
+    } finally {
+      if (mounted &&
+          request == _exploreLoginRequest &&
+          identical(source, _expandedSource)) {
+        setState(() => _exploreLoginLoading = false);
+      }
+    }
+  }
+
+  Future<void> _refreshExploreLogin(BookSource source) async {
+    if (!identical(source, _expandedSource)) return;
+    final request = ++_exploreLoginRequest;
+    setState(() => _exploreLoginLoading = true);
+    await _loadExploreLogin(source, request);
+  }
+
+  Future<void> _loginFromExplore(BookSource source) async {
+    await showBookSourceLoginSheet(
+      context,
+      library: _library,
+      source: source,
+      onFeedback: _feedback,
+    );
+    if (!mounted || !identical(source, _expandedSource)) return;
+    await _refreshExploreLogin(source);
+    await _reloadExploreKinds(source);
+  }
+
+  Map<String, String> _exploreValuesFor(BookSource source) =>
+      _exploreValues.putIfAbsent(source.key, () => {});
+
+  String _exploreKey(BookSource source, BookSourceExploreKind kind) =>
+      '${source.key}\u0000${kind.title}';
+
+  List<String> _exploreOptions(BookSourceExploreKind kind) => [
+    for (final value in kind.chars)
+      if (value.trim().isNotEmpty) value,
+  ];
+
+  TextEditingController _exploreController(
+    BookSource source,
+    BookSourceExploreKind kind,
+  ) {
+    final key = _exploreKey(source, kind);
+    return _exploreControllers.putIfAbsent(
+      key,
+      () => TextEditingController(
+        text: _exploreValuesFor(source)[kind.title] ?? kind.defaultValue,
+      ),
+    );
+  }
+
+  FocusNode _exploreFocus(BookSource source, BookSourceExploreKind kind) =>
+      _exploreFocusNodes.putIfAbsent(
+        _exploreKey(source, kind),
+        () => FocusNode(),
+      );
+
+  void _syncExploreValues(
+    BookSource source,
+    List<BookSourceExploreKind> kinds,
+  ) {
+    final values = _exploreValuesFor(source);
+    for (final kind in kinds) {
+      if (kind.isText) {
+        values.putIfAbsent(kind.title, () => kind.defaultValue);
+        final key = _exploreKey(source, kind);
+        final controller = _exploreControllers[key];
+        final focus = _exploreFocusNodes[key];
+        final value = values[kind.title] ?? '';
+        if (controller != null &&
+            focus?.hasFocus != true &&
+            controller.text != value) {
+          controller.value = TextEditingValue(
+            text: value,
+            selection: TextSelection.collapsed(offset: value.length),
+          );
+        }
+        continue;
+      }
+      if (!kind.isSelect && !kind.isToggle) continue;
+      final options = _exploreOptions(kind);
+      if (options.isEmpty) continue;
+      final current = values[kind.title];
+      if (current == null || !options.contains(current)) {
+        values[kind.title] = options.contains(kind.defaultValue)
+            ? kind.defaultValue
+            : options.first;
+      }
+    }
+  }
+
+  void _onExploreTextChanged(
+    BookSource source,
+    BookSourceExploreKind kind,
+    String value,
+  ) {
+    _exploreValuesFor(source)[kind.title] = value;
+    final key = _exploreKey(source, kind);
+    _exploreTimers.remove(key)?.cancel();
+    if (kind.action.trim().isEmpty) return;
+    _exploreTimers[key] = Timer(const Duration(milliseconds: 600), () {
+      _exploreTimers.remove(key);
+      unawaited(_runExploreAction(source, kind));
     });
   }
 
+  void _submitExploreText(BookSource source, BookSourceExploreKind kind) {
+    final key = _exploreKey(source, kind);
+    _exploreTimers.remove(key)?.cancel();
+    unawaited(_runExploreAction(source, kind));
+  }
+
+  void _setExploreValue(
+    BookSource source,
+    BookSourceExploreKind kind,
+    String value,
+  ) {
+    final values = _exploreValuesFor(source);
+    if (values[kind.title] == value) return;
+    setState(() => values[kind.title] = value);
+    unawaited(_runExploreAction(source, kind));
+  }
+
+  void _cycleExploreToggle(BookSource source, BookSourceExploreKind kind) {
+    final options = _exploreOptions(kind);
+    if (options.isEmpty) return;
+    final current = _exploreValuesFor(source)[kind.title];
+    final index = options.indexOf(current ?? kind.defaultValue);
+    final next = options[index < 0 ? 0 : (index + 1) % options.length];
+    _setExploreValue(source, kind, next);
+  }
+
+  Future<void> _chooseExploreValue(
+    BookSource source,
+    BookSourceExploreKind kind,
+  ) async {
+    final options = _exploreOptions(kind);
+    if (options.isEmpty) return;
+    final selected = await showJellySheet<String>(
+      context: context,
+      reduceMotion: MediaQuery.disableAnimationsOf(context),
+      heightFactor: .68,
+      maxWidth: 560,
+      builder: (_) => _OptionPickerSheet<String>(
+        title: kind.label,
+        code: 'SOURCE / FILTER',
+        selected: _exploreValuesFor(source)[kind.title] ?? kind.defaultValue,
+        options: [for (final option in options) (option, option)],
+      ),
+    );
+    if (!mounted || selected == null) return;
+    _setExploreValue(source, kind, selected);
+  }
+
+  Future<void> _runExploreAction(
+    BookSource source,
+    BookSourceExploreKind kind,
+  ) async {
+    final action = kind.action.trim();
+    if (action.isEmpty) return;
+    if (action.startsWith('http://') || action.startsWith('https://')) {
+      final uri = Uri.tryParse(action);
+      final opened =
+          uri != null &&
+          uri.host.isNotEmpty &&
+          await launchUrl(uri, mode: LaunchMode.externalApplication);
+      if (!opened && mounted) _feedback('无法打开操作链接', error: true);
+      return;
+    }
+    try {
+      final result = await _library.exploreAction(
+        source,
+        action,
+        values: _exploreValuesFor(source),
+      );
+      if (!mounted || !identical(source, _expandedSource)) return;
+      if (result.values.isNotEmpty) {
+        setState(() {
+          _exploreValuesFor(source).addAll(result.values);
+        });
+      }
+      await _reloadExploreKinds(source);
+    } on Object catch (error) {
+      if (mounted) _feedback(_sourceErrorMessage(error), error: true);
+    }
+  }
+
+  void _openRanking(BookSource source, BookSourceExploreKind kind) {
+    _cancelExploreTimers();
+    pushNovelPage<void>(
+      context,
+      _BookSourceRankingPage(
+        source: source,
+        kind: kind,
+        library: _library,
+        values: Map.of(_exploreValuesFor(source)),
+        onOpenBook: widget.onOpenBook,
+      ),
+      reduceMotion: MediaQuery.disableAnimationsOf(context),
+    );
+  }
+
   Widget _sourceRankings(BookSource source) {
-    final rankings = _rankings;
-    return Padding(
-      padding: const EdgeInsets.only(top: 10),
-      child: rankings == null
-          ? ContentNotice(
-              icon: CupertinoIcons.list_bullet,
-              title: !source.supported
-                  ? '暂不支持此类型的榜单'
-                  : !source.enabled
-                  ? '启用书源后可查看榜单'
-                  : source.exploreUrl.isEmpty
-                  ? '此书源未配置榜单'
-                  : '启用发现后可查看榜单',
-            )
-          : FutureBuilder<List<BookSourceExploreKind>>(
-              future: rankings,
-              builder: (context, snapshot) {
-                if (snapshot.connectionState != ConnectionState.done) {
-                  return const Padding(
-                    padding: EdgeInsets.all(12),
-                    child: CupertinoActivityIndicator(),
-                  );
-                }
-                if (snapshot.hasError) {
-                  return ContentNotice(
-                    icon: CupertinoIcons.exclamationmark_circle,
-                    title: '榜单加载失败',
-                    message: _sourceErrorMessage(snapshot.error!),
-                    onRetry: () => _loadRankings(source),
-                  );
-                }
-                final entries = snapshot.requireData.where(
-                  (kind) => kind.opensBooks,
-                );
-                if (entries.isEmpty) {
-                  return const ContentNotice(
-                    icon: CupertinoIcons.list_bullet,
-                    title: '此书源没有可直接打开的榜单',
-                  );
-                }
-                return Align(
-                  alignment: Alignment.centerLeft,
-                  child: Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: [
-                      for (final kind in entries)
-                        GlassTextButton(
-                          compact: true,
-                          onPressed: () => pushNovelPage<void>(
-                            context,
-                            _BookSourceRankingPage(
-                              source: source,
-                              kind: kind,
-                              library: _library,
-                              onOpenBook: widget.onOpenBook,
-                            ),
-                            reduceMotion: MediaQuery.disableAnimationsOf(
-                              context,
-                            ),
-                          ),
-                          child: AppText(
-                            kind.label,
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                    ],
-                  ),
-                );
-              },
+    if (!source.supported) {
+      return _exploreNotice(
+        icon: CupertinoIcons.list_bullet,
+        title: '暂不支持此类型的榜单',
+      );
+    }
+    if (!source.enabled) {
+      return _exploreNotice(
+        icon: CupertinoIcons.pause_circle,
+        title: '启用书源后可查看榜单',
+      );
+    }
+    if (source.exploreUrl.isEmpty) {
+      return _exploreNotice(
+        icon: CupertinoIcons.list_bullet,
+        title: '此书源未配置榜单',
+      );
+    }
+    if (!source.canExplore) {
+      return _exploreNotice(
+        icon: CupertinoIcons.eye_slash,
+        title: '启用发现后可查看榜单',
+      );
+    }
+    final error = _exploreError;
+    final kinds = _exploreKinds ?? const <BookSourceExploreKind>[];
+    final Widget content;
+    if (_exploreLoading) {
+      content = const Padding(
+        padding: EdgeInsets.symmetric(vertical: 18),
+        child: Center(child: CupertinoActivityIndicator()),
+      );
+    } else if (error != null) {
+      content = ContentNotice(
+        icon: CupertinoIcons.exclamationmark_circle,
+        title: '榜单加载失败',
+        message: _sourceErrorMessage(error),
+        onRetry: () => _loadRankings(source),
+      );
+    } else if (kinds.isEmpty) {
+      content = const ContentNotice(
+        icon: CupertinoIcons.list_bullet,
+        title: '此书源没有可用的榜单',
+      );
+    } else {
+      final rows = buildBookSourceExploreRows(kinds);
+      content = Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          for (final row in rows)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  for (final (index, cell) in row.indexed) ...[
+                    if (index > 0) const SizedBox(width: 8),
+                    Expanded(
+                      flex: cell.span,
+                      child: _exploreKindTile(source, cell.kind),
+                    ),
+                  ],
+                ],
+              ),
             ),
+        ],
+      );
+    }
+    return Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (source.needsLogin)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: _exploreLoginNotice(source),
+            ),
+          content,
+        ],
+      ),
+    );
+  }
+
+  Widget _exploreNotice({required IconData icon, required String title}) =>
+      Padding(
+        padding: const EdgeInsets.only(top: 10),
+        child: ContentNotice(icon: icon, title: title),
+      );
+
+  Widget _exploreLoginNotice(BookSource source) {
+    final scheme = Theme.of(context).colorScheme;
+    final action = Theme.of(context).extension<AppTonalColors>()?.action;
+    final muted = scheme.onSurfaceVariant;
+    final loggedIn = _exploreLogin?.loggedIn == true;
+    final loading = _exploreLoginLoading;
+    return ContentPanel(
+      key: ValueKey('book-source-explore-login-${source.key}'),
+      radius: 12,
+      padding: const EdgeInsets.fromLTRB(12, 9, 10, 9),
+      backgroundColor: scheme.surfaceContainer,
+      onTap: loading || loggedIn ? null : () => _loginFromExplore(source),
+      child: Row(
+        children: [
+          ArchiveIcon(
+            loggedIn
+                ? CupertinoIcons.checkmark_shield_fill
+                : CupertinoIcons.person_crop_circle,
+            size: 16,
+            color: loggedIn ? action : muted,
+            animate: false,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: AppText(
+              loggedIn ? '已登录，发现请求会携带登录信息' : '此书源支持登录，登录后可访问完整榜单',
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 12, height: 1.4, color: muted),
+            ),
+          ),
+          const SizedBox(width: 8),
+          if (loading)
+            const CupertinoActivityIndicator(radius: 6)
+          else if (!loggedIn)
+            ArchiveIcon(
+              CupertinoIcons.chevron_right,
+              size: 12,
+              color: muted,
+              animate: false,
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _exploreKindTile(BookSource source, BookSourceExploreKind kind) {
+    if (kind.isText) return _exploreTextTile(source, kind);
+    final value = _exploreValuesFor(source)[kind.title] ?? '';
+    var label = kind.label.trim();
+    IconData? trailing;
+    VoidCallback? onTap;
+    if (kind.isError) {
+      onTap = () => _feedback(
+        kind.url.isEmpty ? label : '$label\n${kind.url}',
+        error: true,
+      );
+    } else if (kind.isSelect) {
+      label = '$label $value'.trim();
+      trailing = CupertinoIcons.chevron_down;
+      onTap = () => _chooseExploreValue(source, kind);
+    } else if (kind.isToggle) {
+      label = '$value$label';
+      trailing = CupertinoIcons.arrow_2_circlepath;
+      onTap = () => _cycleExploreToggle(source, kind);
+    } else if (kind.isButton) {
+      if (kind.action.trim().isNotEmpty) {
+        trailing = CupertinoIcons.chevron_right;
+        onTap = () => unawaited(_runExploreAction(source, kind));
+      }
+    } else if ((kind.type.isEmpty || kind.type == 'url') &&
+        kind.url.isNotEmpty) {
+      onTap = () => _openRanking(source, kind);
+    }
+    return _ExploreKindTile(
+      label: label,
+      onTap: onTap,
+      trailing: trailing,
+      error: kind.isError,
+    );
+  }
+
+  Widget _exploreTextTile(BookSource source, BookSourceExploreKind kind) {
+    final scheme = Theme.of(context).colorScheme;
+    final controller = _exploreController(source, kind);
+    return ContentPanel(
+      radius: 12,
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      backgroundColor: scheme.surfaceContainer,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(minHeight: 34),
+        child: Center(
+          child: TextField(
+            key: ValueKey(
+              'book-source-explore-text-${source.key}-${kind.title}',
+            ),
+            controller: controller,
+            focusNode: _exploreFocus(source, kind),
+            textAlign: TextAlign.center,
+            maxLines: 1,
+            textInputAction: TextInputAction.search,
+            style: TextStyle(
+              fontSize: 12,
+              height: 1.3,
+              fontWeight: FontWeight.w600,
+              color: scheme.onSurface,
+            ),
+            decoration: InputDecoration(
+              isCollapsed: true,
+              border: InputBorder.none,
+              hintText: kind.label.trim(),
+              hintStyle: TextStyle(
+                fontSize: 12,
+                height: 1.3,
+                color: scheme.onSurfaceVariant,
+              ),
+              contentPadding: EdgeInsets.zero,
+            ),
+            onChanged: (value) => _onExploreTextChanged(source, kind, value),
+            onSubmitted: (_) => _submitExploreText(source, kind),
+          ),
+        ),
+      ),
     );
   }
 
   Widget _sourcePanel(BuildContext context, BookSource source, bool expanded) {
     final selected = _selected.contains(source.key);
     final action = Theme.of(context).extension<AppTonalColors>()?.action;
+    final scheme = Theme.of(context).colorScheme;
     final muted = Theme.of(context).colorScheme.onSurfaceVariant;
     final host = Uri.tryParse(source.key)?.host ?? '';
     final details = <String>[
       if (source.groups.isNotEmpty) source.groups.join(' / '),
       source.typeLabel,
       if (source.supported && source.canExplore) '有榜单',
+      if (source.needsLogin) '可登录',
       if (source.hasReviewRule) '支持段评',
       if (host.isNotEmpty) host,
       if (source.lastUpdateTime > 0) '更新 ${_dateLabel(source.lastUpdateTime)}',
@@ -1234,9 +1703,17 @@ class _BookSourcesPageState extends State<BookSourcesPage> {
     ].join(' · ');
     return ContentPanel(
       key: ValueKey('book-source-${source.key}'),
-      borderColor: selected ? action : null,
+      borderColor: selected
+          ? action
+          : expanded
+          ? action?.withValues(alpha: .55)
+          : null,
       borderWidth: selected ? 1.2 : .7,
-      backgroundColor: selected ? action?.withValues(alpha: .045) : null,
+      backgroundColor: selected
+          ? action?.withValues(alpha: .045)
+          : expanded
+          ? scheme.secondaryContainer.withValues(alpha: .42)
+          : null,
       onTap: _selecting
           ? () => _toggleSelected(source.key)
           : () => _toggleRankings(source),
@@ -1254,7 +1731,10 @@ class _BookSourcesPageState extends State<BookSourcesPage> {
                         source.name,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontWeight: FontWeight.w600),
+                        style: TextStyle(
+                          fontWeight: FontWeight.w600,
+                          color: expanded ? action : null,
+                        ),
                       ),
                     ),
                     if (!_selecting &&
@@ -1264,13 +1744,27 @@ class _BookSourcesPageState extends State<BookSourcesPage> {
                       Semantics(
                         key: ValueKey('book-source-rankings-${source.key}'),
                         expanded: expanded,
-                        child: ArchiveIcon(
-                          expanded
-                              ? CupertinoIcons.chevron_down
-                              : CupertinoIcons.chevron_right,
-                          size: 12,
-                          color: muted,
-                          animate: false,
+                        child: SizedBox(
+                          width: 14,
+                          height: 14,
+                          child: Center(
+                            child: expanded && _exploreLoading
+                                ? const CupertinoActivityIndicator(radius: 5)
+                                : AnimatedRotation(
+                                    turns: expanded ? .25 : 0,
+                                    duration:
+                                        MediaQuery.disableAnimationsOf(context)
+                                        ? Duration.zero
+                                        : const Duration(milliseconds: 180),
+                                    curve: Curves.easeOutCubic,
+                                    child: ArchiveIcon(
+                                      CupertinoIcons.chevron_right,
+                                      size: 12,
+                                      color: expanded ? action : muted,
+                                      animate: false,
+                                    ),
+                                  ),
+                          ),
                         ),
                       ),
                     ],
@@ -1343,17 +1837,84 @@ class _BookSourcesPageState extends State<BookSourcesPage> {
   }
 }
 
+/// 与 Legado 发现页的 GlassCard 条目一致：胶囊形玻璃底、居中标签和尾部图标。
+class _ExploreKindTile extends StatelessWidget {
+  const _ExploreKindTile({
+    required this.label,
+    required this.onTap,
+    required this.trailing,
+    required this.error,
+  });
+
+  final String label;
+  final VoidCallback? onTap;
+  final IconData? trailing;
+  final bool error;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final color = error ? scheme.error : scheme.onSurface;
+    return ContentPanel(
+      radius: 12,
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+      backgroundColor: scheme.surfaceContainer,
+      onTap: onTap,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(minHeight: 34),
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            Padding(
+              padding: EdgeInsets.symmetric(
+                horizontal: trailing == null ? 6 : 18,
+              ),
+              child: AppText(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 12,
+                  height: 1.3,
+                  fontWeight: FontWeight.w600,
+                  color: color,
+                ),
+              ),
+            ),
+            if (trailing != null)
+              Align(
+                alignment: Alignment.centerRight,
+                child: Padding(
+                  padding: const EdgeInsets.only(right: 4),
+                  child: ArchiveIcon(
+                    trailing!,
+                    size: 11,
+                    color: scheme.onSurfaceVariant,
+                    animate: false,
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _BookSourceRankingPage extends StatefulWidget {
   const _BookSourceRankingPage({
     required this.source,
     required this.kind,
     required this.library,
+    required this.values,
     required this.onOpenBook,
   });
 
   final BookSource source;
   final BookSourceExploreKind kind;
   final BookSourceLibrary library;
+  final Map<String, String> values;
   final void Function(BuildContext context, Novel book)? onOpenBook;
 
   @override
@@ -1404,6 +1965,7 @@ class _BookSourceRankingPageState extends State<_BookSourceRankingPage> {
         widget.source,
         widget.kind.url,
         page: page,
+        values: widget.values,
       );
       if (!mounted) return;
       setState(() {

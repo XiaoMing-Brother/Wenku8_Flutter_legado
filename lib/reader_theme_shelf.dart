@@ -329,6 +329,8 @@ class _ReaderThemeShelfState extends State<ReaderThemeShelf> {
           itemCount: cards.length,
           itemBuilder: (context, index) {
             final look = cards[index];
+            final paper = look.baseColor ?? ReaderPreferences(paper: look.paper, theme: look.theme).background(group);
+            final outline = readerCardOutline(paper, accent: look.accent);
             final selected =
                 activeNight == group &&
                 widget.preferences.lookFor(group).choiceKey == look.choiceKey;
@@ -337,7 +339,7 @@ class _ReaderThemeShelfState extends State<ReaderThemeShelf> {
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(10),
                 border: Border.all(
-                  color: selected ? scheme.primary : scheme.outlineVariant,
+                  color: outline,
                   width: selected ? 2 : 1,
                 ),
               ),
@@ -435,6 +437,8 @@ class _ReaderThemeShelfState extends State<ReaderThemeShelf> {
                       child: Builder(
                         builder: (anchor) => GlassIconButton(
                           icon: CupertinoIcons.ellipsis,
+                          liveGlass: false,
+                          transparent: true,
                           label: '${look.label}操作',
                           onPressed: () async {
                             final picked = await showGlassMenu<String>(

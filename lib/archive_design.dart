@@ -157,81 +157,93 @@ class ArchiveSection extends StatelessWidget {
     required this.title,
     required this.code,
     this.subtitle = '',
+    this.centeredTitle = false,
   });
   final String title;
   final String code;
   final String subtitle;
+  final bool centeredTitle;
 
   @override
-  Widget build(BuildContext context) => LibraryReflowPart(
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        LayoutBuilder(
-          builder: (context, constraints) => Row(
+  Widget build(BuildContext context) => centeredTitle
+      ? Center(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            child: AppText(
+              title,
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
+          ),
+        )
+      : LibraryReflowPart(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
             children: [
-              ConstrainedBox(
-                constraints: BoxConstraints(
-                  maxWidth: math.max(0, constraints.maxWidth - 17),
-                ),
-                child: ArchivePart(
-                  start: .1,
-                  end: .68,
-                  child: ArchiveCode(code),
+              LayoutBuilder(
+                builder: (context, constraints) => Row(
+                  children: [
+                    ConstrainedBox(
+                      constraints: BoxConstraints(
+                        maxWidth: math.max(0, constraints.maxWidth - 17),
+                      ),
+                      child: ArchivePart(
+                        start: .1,
+                        end: .68,
+                        child: ArchiveCode(code),
+                      ),
+                    ),
+                    const SizedBox(width: 9),
+                    Expanded(
+                      child: const ArchivePart(
+                        start: 0,
+                        end: .46,
+                        child: ExcludeSemantics(
+                          child: Divider(height: 1, thickness: .6),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 5),
+                    ExcludeSemantics(
+                      child: SizedBox(
+                        width: 3,
+                        height: 3,
+                        child: ColoredBox(
+                          color: Theme.of(context).colorScheme.onSurface,
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ),
-              const SizedBox(width: 9),
-              Expanded(
-                child: const ArchivePart(
-                  start: 0,
-                  end: .46,
-                  child: ExcludeSemantics(
-                    child: Divider(height: 1, thickness: .6),
+              const SizedBox(height: 7),
+              ArchivePart(
+                start: .16,
+                end: .82,
+                child: AppText(
+                  title,
+                  style: const TextStyle(
+                    fontSize: 18,
+                    height: 1.25,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: -.3,
                   ),
                 ),
               ),
-              const SizedBox(width: 5),
-              ExcludeSemantics(
-                child: SizedBox(
-                  width: 3,
-                  height: 3,
-                  child: ColoredBox(
-                    color: Theme.of(context).colorScheme.onSurface,
+              if (subtitle.isNotEmpty) ...[
+                const SizedBox(height: 5),
+                AppText(
+                  subtitle,
+                  style: TextStyle(
+                    fontSize: 12,
+                    height: 1.5,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
                   ),
                 ),
-              ),
+              ],
             ],
           ),
-        ),
-        const SizedBox(height: 7),
-        ArchivePart(
-          start: .16,
-          end: .82,
-          child: AppText(
-            title,
-            style: const TextStyle(
-              fontSize: 18,
-              height: 1.25,
-              fontWeight: FontWeight.w700,
-              letterSpacing: -.3,
-            ),
-          ),
-        ),
-        if (subtitle.isNotEmpty) ...[
-          const SizedBox(height: 5),
-          AppText(
-            subtitle,
-            style: TextStyle(
-              fontSize: 12,
-              height: 1.5,
-              color: Theme.of(context).colorScheme.onSurfaceVariant,
-            ),
-          ),
-        ],
-      ],
-    ),
-  );
+        );
 }
 
 /// Readable route title plus a restrained archive address below it.

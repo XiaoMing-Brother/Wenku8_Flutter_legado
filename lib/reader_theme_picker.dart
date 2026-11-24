@@ -1,15 +1,12 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 
-import 'app_search_field.dart';
 import 'app_ui.dart';
-import 'glass_choices.dart';
 import 'reader_theme_presets.dart';
 
 enum ReaderThemeFilter {
-  all('全部'),
-  day('日间'),
-  night('夜间');
+  day('日间主题'),
+  night('夜间主题');
 
   const ReaderThemeFilter(this.label);
   final String label;
@@ -22,11 +19,13 @@ class ReaderThemePicker extends StatefulWidget {
   const ReaderThemePicker({
     super.key,
     this.selectedId,
+    this.initialNight = false,
     this.actionLabel = '应用主题',
     required this.previewBuilder,
   });
 
   final int? selectedId;
+  final bool initialNight;
   final String actionLabel;
   final Widget Function(ReaderThemeSelection) previewBuilder;
 
@@ -35,16 +34,10 @@ class ReaderThemePicker extends StatefulWidget {
 }
 
 class _ReaderThemePickerState extends State<ReaderThemePicker> {
-  final _search = TextEditingController();
-  ReaderThemeFilter _filter = ReaderThemeFilter.all;
-  String _query = '';
+  late ReaderThemeFilter _filter = widget.initialNight
+      ? ReaderThemeFilter.night
+      : ReaderThemeFilter.day;
   int? _previewIndex;
-
-  @override
-  void dispose() {
-    _search.dispose();
-    super.dispose();
-  }
 
   @override
   Widget build(BuildContext context) => FutureBuilder(
@@ -68,7 +61,6 @@ class _ReaderThemePickerState extends State<ReaderThemePicker> {
           child: Center(child: CircularProgressIndicator()),
         );
       }
-      final query = _query.trim().toLowerCase();
       final visible = themes
           .where((theme) {
             if (_filter == ReaderThemeFilter.day && theme.isNightTheme) {
@@ -77,9 +69,7 @@ class _ReaderThemePickerState extends State<ReaderThemePicker> {
             if (_filter == ReaderThemeFilter.night && !theme.isNightTheme) {
               return false;
             }
-            if (query.isEmpty) return true;
-            return theme.name.toLowerCase().contains(query) ||
-                theme.author.toLowerCase().contains(query);
+            return true;
           })
           .toList(growable: false);
       final index = _previewIndex;
@@ -127,58 +117,57 @@ class _ReaderThemePickerState extends State<ReaderThemePicker> {
         );
       }
       return Padding(
-        padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             const ArchiveSection(
-              title: 'Legado 内置主题',
+              title: '内置主题',
               code: 'READER / LEGADO THEMES',
-            ),
-            AppSearchField(
-              inputKey: const ValueKey('reader-theme-search'),
-              controller: _search,
-              hint: '搜索主题名称或作者',
-              onChanged: (value) => setState(() => _query = value),
+              centeredTitle: true,
             ),
             const SizedBox(height: 8),
-            GlassChoiceGroup<ReaderThemeFilter>(
-              name: 'reader-theme-filter',
-              label: '主题类型',
-              value: _filter,
-              options: {
+            Row(
+              children: [
                 for (final filter in ReaderThemeFilter.values)
-                  filter: filter.label,
-              },
-              onChanged: (value) => setState(() => _filter = value),
-              labelSize: 13,
-              optionSize: 12,
-              columns: 3,
-            ),
-            const SizedBox(height: 8),
-            AppText(
-              '${visible.length} 套 · 点选主题试读正文',
-              style: TextStyle(
-                fontSize: 12,
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
-              ),
+                  Expanded(
+                    child: Semantics(
+                      selected: _filter == filter,
+                      button: true,
+                      child: JellyTapSurface(
+                        onTap: () => setState(() => _filter = filter),
+                        child: Column(
+                          children: [
+                            Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 12),
+                              child: AppText(filter.label),
+                            ),
+                            SizedBox(
+                              width: 68,
+                              height: 3,
+                              child: ColoredBox(
+                                color: _filter == filter
+                                    ? Theme.of(context).colorScheme.primary
+                                    : Colors.transparent,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
             ),
             const SizedBox(height: 8),
             Expanded(
               child: visible.isEmpty
                   ? ContentNotice(
                       icon: CupertinoIcons.paintbrush,
-                      title: '没有匹配主题',
-                      message: '换个名称，或清除筛选后再试。',
-                      actionLabel: '清除筛选',
-                      onRetry: () => setState(() {
-                        _search.clear();
-                        _query = '';
-                        _filter = ReaderThemeFilter.all;
-                      }),
+                      title: '没有可用主题',
+                      message: '当前分类暂时没有主题。',
                     )
                   : GridView.builder(
-                      key: const ValueKey('reader-legado-theme-grid'),
+                      key: ValueKey(('reader-legado-theme-grid', _filter)),
                       padding: const EdgeInsets.only(bottom: 24),
                       itemCount: visible.length,
                       gridDelegate:
@@ -186,7 +175,7 @@ class _ReaderThemePickerState extends State<ReaderThemePicker> {
                             crossAxisCount: 3,
                             crossAxisSpacing: 8,
                             mainAxisSpacing: 8,
-                            childAspectRatio: .78,
+                            childAspectRatio: .75,
                           ),
                       itemBuilder: (context, index) {
                         final theme = visible[index];
@@ -222,97 +211,138 @@ class _ThemeCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final hasImage = theme.thumbnailUrl != null;
-    final selection = theme.selection;
-    final foreground = hasImage ? Colors.white : selection.ink;
+    final scheme = Theme.of(context).colorScheme;
+    final paper = theme.background.a == 0
+        ? scheme.surfaceContainer
+        : theme.background;
+    final foreground = theme.content;
+    final control = theme.control ?? scheme.primary;
+    final primary = scheme.primary;
     return JellyTapSurface(
       tapKey: ValueKey('reader-theme-${theme.id}'),
       onTap: onTap,
       child: DecoratedBox(
+        position: DecorationPosition.foreground,
         decoration: BoxDecoration(
-          color: selection.background,
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.circular(12),
           border: Border.all(
-            color: selected
-                ? Theme.of(context).colorScheme.primary
-                : Theme.of(context).colorScheme.outlineVariant,
+            color: selected ? primary : foreground.withValues(alpha: .12),
             width: selected ? 2 : 1,
           ),
         ),
         child: ClipRRect(
-          borderRadius: BorderRadius.circular(13),
+          borderRadius: BorderRadius.circular(12),
           child: Stack(
             fit: StackFit.expand,
             children: [
+              ColoredBox(color: paper),
               if (hasImage) _ThemePreview(theme: theme),
-              if (hasImage)
-                const DecoratedBox(
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: [Colors.transparent, Colors.black54],
-                      stops: [.35, 1],
+              if (!hasImage)
+                Row(
+                  children: [
+                    for (final swatch in [
+                      foreground,
+                      control,
+                      theme.secondary ?? foreground,
+                      theme.directory ?? paper,
+                      paper,
+                    ])
+                      Expanded(
+                        child: ColoredBox(
+                          color: swatch,
+                          child: const SizedBox.expand(),
+                        ),
+                      ),
+                  ],
+                ),
+              Align(
+                alignment: Alignment.bottomCenter,
+                child: FractionallySizedBox(
+                  heightFactor: .44,
+                  widthFactor: 1,
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [
+                          Colors.transparent,
+                          paper.withValues(alpha: .82),
+                          paper.withValues(alpha: .97),
+                        ],
+                        stops: const [0, .45, 1],
+                      ),
                     ),
                   ),
                 ),
+              ),
               Padding(
-                padding: const EdgeInsets.all(9),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 9,
+                ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Align(
-                      alignment: Alignment.topRight,
-                      child: selected
-                          ? DecoratedBox(
-                              decoration: BoxDecoration(
-                                color: Theme.of(context).colorScheme.primary,
-                                borderRadius: BorderRadius.circular(20),
-                              ),
-                              child: Padding(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 6,
-                                  vertical: 2,
-                                ),
-                                child: AppText(
-                                  '✓ 使用中',
-                                  style: TextStyle(
-                                    color: Theme.of(context).colorScheme.onPrimary,
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                ),
-                              ),
-                            )
-                          : const SizedBox(height: 17),
-                    ),
                     const Spacer(),
+                    Row(
+                      children: [
+                        Container(
+                          width: 8,
+                          height: 8,
+                          decoration: BoxDecoration(
+                            color: control,
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        Expanded(
+                          child: AppText(
+                            theme.name,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 12,
+                              height: 1.25,
+                              fontWeight: FontWeight.w600,
+                              color: foreground,
+                            ),
+                          ),
+                        ),
+                        if (selected)
+                          AppText(
+                            '使用中',
+                            style: TextStyle(fontSize: 11, color: control),
+                          ),
+                      ],
+                    ),
                     AppText(
-                      theme.name,
-                      maxLines: 2,
+                      theme.author.trim().isNotEmpty
+                          ? theme.author
+                          : '${theme.downloadCount} 次下载',
+                      maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
-                        fontSize: 12,
-                        height: 1.25,
-                        fontWeight: FontWeight.w600,
-                        color: foreground,
+                        fontSize: 11,
+                        height: 16 / 11,
+                        color:
+                            theme.secondary ??
+                            foreground.withValues(alpha: .78),
                       ),
                     ),
-                    if (theme.author.isNotEmpty) ...[
-                      const SizedBox(height: 2),
-                      AppText(
-                        theme.author,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: 9,
-                          height: 1.2,
-                          color: foreground.withValues(alpha: .78),
-                        ),
-                      ),
-                    ],
                   ],
                 ),
               ),
+              if (selected)
+                Positioned(
+                  top: 6,
+                  right: 6,
+                  child: CircleAvatar(
+                    radius: 11,
+                    backgroundColor: primary,
+                    child: Icon(Icons.check, size: 14, color: scheme.onPrimary),
+                  ),
+                ),
             ],
           ),
         ),

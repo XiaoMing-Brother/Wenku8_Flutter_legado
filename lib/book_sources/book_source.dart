@@ -83,7 +83,14 @@ class BookSource {
   String get loginUrl => _string('loginUrl');
   String get loginUi => _string('loginUi');
   String get loginCheckJs => _string('loginCheckJs');
-  bool get needsLogin => loginUrl.isNotEmpty || loginUi.isNotEmpty;
+  bool get needsLogin {
+    if (loginUrl.isNotEmpty) return true;
+    final value = loginUi.trim();
+    return value.isNotEmpty &&
+        value != '[]' &&
+        value != '{}' &&
+        value.toLowerCase() != 'null';
+  }
   bool get hasLoginCheck => loginCheckJs.trim().isNotEmpty;
 
   bool get canSearch {
@@ -259,7 +266,24 @@ class BookSourceExploreKind {
   final double flexGrow;
   final bool wrapBefore;
 
-  String get label => viewName.isEmpty ? title : viewName;
+  String get label {
+    final value = viewName.trim();
+    if (value.isEmpty) return title;
+    if (value.length >= 3 &&
+        value.length <= 19 &&
+        value.startsWith("'") &&
+        value.endsWith("'")) {
+      return value.substring(1, value.length - 1);
+    }
+    // viewName 可以是 JS 表达式；Flutter 侧不执行脚本，退回标题比展示源码更可读。
+    if (value.contains('infoMap') || RegExp(r'[(){}\[\]=+;]').hasMatch(value)) {
+      return title;
+    }
+    return value;
+  }
+  bool get isError =>
+      title.toLowerCase().startsWith('error:') ||
+      url.toLowerCase().contains('exception');
   bool get opensBooks =>
       (type.isEmpty || type == 'url') && url.isNotEmpty && action.isEmpty;
   bool get isText => type == 'text';

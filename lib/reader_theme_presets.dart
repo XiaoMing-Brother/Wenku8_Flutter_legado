@@ -4,6 +4,16 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show rootBundle;
 
+Color readerCardOutline(Color paper, {Color? accent}) {
+  if (accent != null) return accent;
+  final tone = HSLColor.fromColor(paper);
+  return tone
+      .withLightness(
+        tone.lightness > .5 ? tone.lightness * .62 : tone.lightness + .32,
+      )
+      .toColor();
+}
+
 /// Legado 内置阅读主题（清墨 LightInk 主题商店快照）的选择结果。
 ///
 /// 主题数据来自 Legado 的 `assets/defaultData/readThemes.json`。这里保存
@@ -122,6 +132,9 @@ class LegadoReaderTheme {
     required this.name,
     required this.author,
     required this.downloadCount,
+    this.control,
+    this.secondary,
+    this.directory,
     required this.background,
     required this.content,
     required this.imageUrl,
@@ -130,6 +143,7 @@ class LegadoReaderTheme {
   final int id;
   final String name, author;
   final int downloadCount;
+  final Color? control, secondary, directory;
   final Color background, content;
   final String? imageUrl;
 
@@ -204,6 +218,9 @@ class LegadoReaderThemes {
               ? (json['downloadCount'] as num).toInt()
               : 0,
           background: _parseColor(json['background'], const Color(0xFFF1F3F4)),
+          control: _parseColor(json['control'], const Color(0xFF42704A)),
+          secondary: _parseColor(json['secondary'], const Color(0xFF777777)),
+          directory: _parseColor(json['foreground'], const Color(0xFFF1F3F4)),
           content: _parseColor(json['content'], const Color(0xFF2D2D33)),
           imageUrl:
               json['mipmap'] is String &&

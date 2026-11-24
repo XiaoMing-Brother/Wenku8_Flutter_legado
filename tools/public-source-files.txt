@@ -482,6 +482,7 @@ lib/book_sources/batch_change_source.dart
 lib/book_sources/batch_change_source_page.dart
 lib/book_sources/book_source.dart
 lib/book_sources/book_source_downloader.dart
+lib/book_sources/book_source_explore_layout.dart
 lib/book_sources/book_source_identity_store.dart
 lib/book_sources/book_source_images.dart
 lib/book_sources/book_source_library.dart
