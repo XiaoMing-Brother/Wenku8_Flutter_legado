@@ -326,11 +326,52 @@ class _ReaderThemeShelfState extends State<ReaderThemeShelf> {
             mainAxisSpacing: 8,
             childAspectRatio: .75,
           ),
-          itemCount: cards.length,
+          itemCount: cards.length + 1,
           itemBuilder: (context, index) {
+            if (index == cards.length) {
+              return Semantics(
+                button: true,
+                child: JellyTapSurface(
+                  tapKey: const ValueKey('reader-legado-themes'),
+                  onTap: () => widget.onAdd(group),
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      border: Border.all(color: scheme.outlineVariant),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          CupertinoIcons.plus,
+                          size: 22,
+                          color: scheme.onSurfaceVariant,
+                        ),
+                        const SizedBox(height: 6),
+                        AppText(
+                          '从主题库添加',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: scheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              );
+            }
             final look = cards[index];
-            final paper = look.baseColor ?? ReaderPreferences(paper: look.paper, theme: look.theme).background(group);
-            final outline = readerCardOutline(paper, accent: look.accent);
+            final paper =
+                look.baseColor ??
+                ReaderPreferences(
+                  paper: look.paper,
+                  theme: look.theme,
+                ).background(group);
+            final outline = readerCardOutline(
+              paper,
+              accent: look.accent ?? look.theme?.control,
+            );
             final selected =
                 activeNight == group &&
                 widget.preferences.lookFor(group).choiceKey == look.choiceKey;
@@ -338,10 +379,7 @@ class _ReaderThemeShelfState extends State<ReaderThemeShelf> {
               position: DecorationPosition.foreground,
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(10),
-                border: Border.all(
-                  color: outline,
-                  width: selected ? 2 : 1,
-                ),
+                border: Border.all(color: outline, width: selected ? 2 : 1),
               ),
               child: Stack(
                 fit: StackFit.expand,
@@ -384,26 +422,34 @@ class _ReaderThemeShelfState extends State<ReaderThemeShelf> {
                               mainAxisSize: MainAxisSize.min,
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                AppText(
-                                  look.label,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: TextStyle(
-                                    color: scheme.onSurface,
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w600,
-                                  ),
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: AppText(
+                                        look.label,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: TextStyle(
+                                          color: scheme.onSurface,
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                    ),
+                                    if (selected)
+                                      AppText(
+                                        '使用中',
+                                        style: TextStyle(
+                                          color: outline,
+                                          fontSize: 11,
+                                        ),
+                                      ),
+                                  ],
                                 ),
                                 AppText(
-                                  selected
-                                      ? '使用中'
-                                      : look.theme == null
-                                      ? '默认主题'
-                                      : '已添加',
+                                  look.theme == null ? '默认主题' : '已添加',
                                   style: TextStyle(
-                                    color: selected
-                                        ? scheme.primary
-                                        : scheme.onSurfaceVariant,
+                                    color: scheme.onSurfaceVariant,
                                     fontSize: 11,
                                   ),
                                 ),
@@ -417,22 +463,26 @@ class _ReaderThemeShelfState extends State<ReaderThemeShelf> {
                   if (selected)
                     Positioned(
                       top: 6,
-                      left: 6,
+                      right: 6,
                       child: IgnorePointer(
                         child: CircleAvatar(
                           radius: 10,
-                          backgroundColor: scheme.primary,
+                          backgroundColor: outline,
                           child: Icon(
                             Icons.check,
                             size: 15,
-                            color: scheme.onPrimary,
+                            color:
+                                ThemeData.estimateBrightnessForColor(outline) ==
+                                    Brightness.dark
+                                ? Colors.white
+                                : Colors.black,
                           ),
                         ),
                       ),
                     ),
                   Positioned(
                     top: 2,
-                    right: 2,
+                    left: 2,
                     child: GlassMenuAnchor(
                       child: Builder(
                         builder: (anchor) => GlassIconButton(
@@ -478,12 +528,6 @@ class _ReaderThemeShelfState extends State<ReaderThemeShelf> {
               ),
             );
           },
-        ),
-        GlassTextButton(
-          compact: true,
-          key: const ValueKey('reader-legado-themes'),
-          onPressed: () => widget.onAdd(group),
-          child: const AppText('＋ 从主题库添加'),
         ),
       ],
     );

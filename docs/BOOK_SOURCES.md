@@ -23,7 +23,7 @@ Flutter 不解析 `ruleSearch`、`ruleBookInfo`、`ruleToc` 或 `ruleContent`。
 - 换源在所选范围内的已启用来源中检索同名书，可开启/关闭作者校验；排除与当前书籍地址和来源都相同的候选，按书源自定义顺序、来源名称、书名排序。新目录成功加载且非空后才切换，保留书籍 ID 和原作者；自定义封面优先，否则采用新书源封面。
 - 文字书源校验：管理页右上角选「校验当前列表」，或多选后选「校验所选书源」。按源内 `ruleSearch.checkKeyWord`（无有效值时用输入词）搜索，检查首个结果的详情、目录和第一章正文。分别报告通过、未命中、跳过或具体失败阶段；不会写入书架、分组或启用状态。停止或关闭弹层后不再发起下一阶段，已发出的请求可能执行至返回或超时。校验不包含发现分支、域名探测、后台服务或自动失效分组。
 - 书源管理支持按名称、链接、分组搜索，按启用状态/分组筛选，按导入顺序/名称/最近更新/启用状态排序，以及多选批量启用、停用、删除、导出和加入/移出分组。
-- 点书源行可展开发现区，按 Legado 的 6 列弹性布局排列分类、榜单、筛选条件、文本输入、开关和脚本按钮；点分类查看书籍和翻页，筛选值会带入发现请求；一次展开一个书源。编辑、登录等操作仍在行尾「⋯」中，支持登录的书源会在展开区显示登录状态和入口，底部「发现」的官网榜单不受影响。
+- 点书源行可展开发现区，按 Legado 的 6 列弹性布局排列分类、榜单、筛选条件、文本输入、开关和脚本按钮；点分类查看书籍和翻页，筛选值会带入发现请求；一次展开一个书源。动作脚本可通过 `java.searchBook` 打开源内搜索结果，通过 `java.refreshExplore` / `source.refreshExplore` 刷新发现项，通过 `java.open('login')` 打开登录弹层。榜单和搜索结果都显示书源封面。编辑、登录等操作仍在行尾「⋯」中，支持登录的书源会在展开区显示当前登录状态和入口，底部「发现」的官网榜单不受影响。
 - 单个书源可编辑名称、分组、搜索地址、发现地址、启用状态和发现开关；源地址作为书源身份保持不变，其他未展示的 Legado 字段继续原样保留。
 - CSS/jsoup 选择器、`tag.` / `class.` / `id.` 写法，以及 `@text` / `@html` / 属性提取。普通元素规则先在每个父节点内匹配，再分别按从 0 开始的索引筛选：`tag.a.0:-1` 选首尾，`tag.a!0:-1` 排除首尾。旧式写法中的冒号分隔多个位置，不表示连续区间。
 - 方括号支持按指定顺序选取、排除和闭区间：`tag.a[2,0]` 先取第三个再取第一个，`tag.a[!0:2]` 排除前三个，`tag.a[-1:0]` 倒序，`tag.a[::2]` 隔一个取一个。省略选择器时（如 `tag.section@[0]`）按直接子元素筛选。普通属性选择器（如 `a[data-id=2]`）仍由 jsoup 处理；显式 `@css:` 和 XPath 不套用这套元素索引。
@@ -34,11 +34,11 @@ Flutter 不解析 `ruleSearch`、`ruleBookInfo`、`ruleToc` 或 `ruleContent`。
 - 请求头、POST 表单/JSON、Cookie、编码检测；搜索地址支持多行回退。
 - 书源封面和正文插图通过原生桥加载，复用书源请求头与 Cookie；正文插图可离线缓存。
 - `java.get` / `java.post` 返回带 `body()`、`statusCode`、`url`、`headers()` 的响应对象。
-- 表单登录：解析 `loginUi`（含 `@js:`、`<js>` 动态表单）和 `loginUrl`，支持 `text`、`password`、`select`、`toggle`、`button` 行。搜索、详情、目录、正文、封面和插图共用该书源的登录状态。原生 HTTP 请求按书源和目标来源（协议、主机、端口）隔离 Cookie，并匹配路径、有效期和 `Secure`；不会把书源登录头自动发给外站图片地址。
+- 表单登录：解析 `loginUi`（含 `@js:`、`<js>` 动态表单）和 `loginUrl`，支持 `text`、`password`、`select`、`toggle`、`button` 行，并按 Legado 的 `layout_flexBasisPercent`、`layout_flexGrow`、`layout_wrapBefore` 排列登录卡片。搜索、详情、目录、正文、封面和插图共用该书源的登录状态。原生 HTTP 请求按书源和目标来源（协议、主机、端口）隔离 Cookie，并匹配路径、有效期和 `Secure`；不会把书源登录头自动发给外站图片地址。
 - `enabledCookieJar: false` 关闭自动接收响应的 `Set-Cookie`，不禁用显式登录 Cookie；启用时也接收各跳重定向的 Cookie。单次 URL 选项中的 Cookie 覆盖同名值，不丢弃其他已保存的 Cookie。
 - 登录或退出后，当前书源的封面、插图和失败重试缓存失效，其他书源及已下载的离线文件不变。退出前已经发出的图片请求不能通过迟到的 `Set-Cookie` 恢复该会话。
 - 登录信息、登录 Header 和 Cookie 使用 Android Keystore 加密保存；书源管理页的更多菜单可登录或退出登录，书源展开的发现区会显示当前登录状态并提供登录入口。
-- 应用内 WebView 网页登录：当书源有 `loginUrl` 但没有可解析的 `loginUi` 时，可打开登录页完成账号密码、验证码和网页内跳转。支持读取 Cookie 属性的系统 WebView 会读取书源站点根路径、书源配置路径、同源登录地址及点击「完成」时的同源页面，保留 Cookie 的路径限制。例如 `Path=/reader` 的 Cookie 可用于 `/reader/chapter`，但不会发给 `/cover`。书源标识不是网址时以登录站点为准。
+- 应用内 WebView 网页登录：当书源有 `loginUrl` 但没有可解析的 `loginUi`，或表单按钮 / 发现动作的脚本通过 `java.open('login')`、`java.openUrl`、`java.startBrowserAwait`、`java.startBrowser` 打开登录页时，可打开网页完成账号密码、验证码和网页内跳转。`loginUrl` 为 `http(s)` 网页地址时直接交给 WebView；`@js:` / `<js>` 以及未加前缀的登录脚本按脚本执行，避免把网页地址误当成 JS。支持读取 Cookie 属性的系统 WebView 会读取书源站点根路径、书源配置路径、同源登录地址及点击「完成」时的同源页面，保留 Cookie 的路径限制。例如 `Path=/reader` 的 Cookie 可用于 `/reader/chapter`，但不会发给 `/cover`。书源标识不是网址时以登录站点为准。
 - 旧版 WebView 无法提供路径属性时，只从根路径回收 Cookie，不覆盖已有的非根路径 Cookie。不会遍历第三方登录站点或任意中间页面收集凭据，也不保存网页中输入的账号密码。只在其他路径或第三方域签发凭据、且不向书源站点回写的登录方式仍可能不可用。
 - `loginCheckJs` 会在搜索、发现、详情、目录和正文响应后执行，可读取 `result.body()`、`result.url`、`result.statusCode` 和 `source.getLoginHeader()`，并通过 `source.putLoginHeader()`、`java.connect()` 刷新登录 Header 或重新请求；书源更多菜单提供“运行登录检测”手动执行一次。
 

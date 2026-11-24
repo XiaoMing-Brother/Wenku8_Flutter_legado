@@ -293,7 +293,10 @@ internal class BookSourceJs(private val http: BookSourceHttp) {
         method("getHeaderMap", 0) {
             jsonObjectValue(cx, scope, env.source.rawMap()["header"]?.toString())
         }
-        method("refreshExplore", 0) { null }
+        method("refreshExplore", 0) {
+            env.onRefreshExplore?.invoke()
+            null
+        }
         variables["source"] = env.source.rawMap()
         ScriptableObject.putProperty(scope, "source", result)
     }
@@ -421,6 +424,27 @@ internal class BookSourceJs(private val http: BookSourceHttp) {
                 http.fetch(env.source, spec, allowUnsuccessful = true),
             )
         }
+        fn("getCookie", 2) { args ->
+            // Legado 的签名是 getCookie(tag) / getCookie(tag, key)，
+            // 第二个参数为 key 时只取对应 Cookie 值。
+            val tag = stringArg(args, 0)
+            val key = stringArg(args, 1)
+            if (key.isBlank()) {
+                http.cookie(env.source.key, tag)
+            } else {
+                http.cookieKey(env.source.key, tag, key)
+            }
+        }
+        fn("getKey", 3) { args ->
+            val first = stringArg(args, 0)
+            val second = stringArg(args, 1)
+            val third = stringArg(args, 2)
+            if (third.isNotBlank()) {
+                http.cookieKey(env.source.key, second, third)
+            } else {
+                http.cookieKey(env.source.key, first, second)
+            }
+        }
         fn("connect", 2) { args ->
             val request = http.requestSpec(env.source.key, stringArg(args, 0))
             val headers = headerMap(args.getOrNull(1))
@@ -488,7 +512,16 @@ internal class BookSourceJs(private val http: BookSourceHttp) {
             Log.d("BookSource", stringArg(args, 0))
             null
         }
-        fn("toast", 1) { _ -> null }
+        fn("toast", 1) { args ->
+            val text = stringArg(args, 0)
+            if (text.isNotBlank()) env.onToast?.invoke(text)
+            null
+        }
+        fn("longToast", 1) { args ->
+            val text = stringArg(args, 0)
+            if (text.isNotBlank()) env.onToast?.invoke(text)
+            null
+        }
         fn("t2s", 1) { args ->
             val text = stringArg(args, 0)
             runCatching {
@@ -517,8 +550,24 @@ internal class BookSourceJs(private val http: BookSourceHttp) {
                 else -> runCatching { fetch(env, url) }.getOrDefault("")
             }
         }
-        fn("startBrowserAwait", 2) { args ->
-            val url = stringArg(args, 0)
+        fn("startBrowserAwait", 3) { args ->
+            val url = if (env.onOpenUrl == null) {
+                stringArg(args, 0)
+            } else {
+                http.resolve(env.source.key, stringArg(args, 0))
+            }
+            if (env.onOpenUrl != null) {
+                if (url.isNotBlank()) env.onOpenUrl.invoke(url)
+                // Legado 的 startBrowserAwait 会阻塞到网页登录结束再返回。
+                // 应用内网页登录无法同步阻塞，继续执行只会用尚未写入的
+                // Cookie 检查登录状态，因此在这里中止脚本。
+                if (env.abortAfterOpenUrl) throw BookSourceOpenUrlSignal()
+                return@fn responseObject(
+                    cx,
+                    scope,
+                    BookSourceResponse("", "", 0, emptyMap()),
+                )
+            }
             val response = if (url.isBlank()) {
                 null
             } else {
@@ -532,11 +581,53 @@ internal class BookSourceJs(private val http: BookSourceHttp) {
                 response ?: BookSourceResponse("", "", 0, emptyMap()),
             )
         }
+        fn("startBrowser", 3) { args ->
+            val url = http.resolve(env.source.key, stringArg(args, 0))
+            if (url.isNotBlank()) env.onOpenUrl?.invoke(url)
+            if (env.abortAfterOpenUrl) throw BookSourceOpenUrlSignal()
+            null
+        }
+        fn("openUrl", 1) { args ->
+            val url = http.resolve(env.source.key, stringArg(args, 0))
+            if (url.isNotBlank()) env.onOpenUrl?.invoke(url)
+            if (env.abortAfterOpenUrl) throw BookSourceOpenUrlSignal()
+            null
+        }
         fn("searchBook", 2) { args ->
             env.onSearchBook?.invoke(stringArg(args, 0))
             true
         }
-        fn("open", 3) { _ -> null }
+        fn("refreshExplore", 0) {
+            env.onRefreshExplore?.invoke()
+            null
+        }
+        fn("open", 3) { args ->
+            val name = stringArg(args, 0)
+            val target = stringArg(args, 1)
+            when {
+                name.equals("login", ignoreCase = true) -> {
+                    if (target.startsWith("http://", ignoreCase = true) ||
+                        target.startsWith("https://", ignoreCase = true)
+                    ) {
+                        env.onOpenUrl?.invoke(target)
+                    }
+                    env.onOpenLogin?.invoke()
+                    if (env.abortAfterOpenUrl) throw BookSourceOpenUrlSignal()
+                }
+                target.startsWith("http://", ignoreCase = true) ||
+                    target.startsWith("https://", ignoreCase = true) ->
+                    run {
+                        env.onOpenUrl?.invoke(target)
+                        if (env.abortAfterOpenUrl) throw BookSourceOpenUrlSignal()
+                    }
+            }
+            null
+        }
+        fn("reLoginView", 0) {
+            env.onOpenLogin?.invoke()
+            if (env.abortAfterOpenUrl) throw BookSourceOpenUrlSignal()
+            null
+        }
         ScriptableObject.putProperty(scope, "java", javaObject)
     }
 
@@ -676,11 +767,13 @@ internal class BookSourceJs(private val http: BookSourceHttp) {
         }
         method("body") { response.text }
         method("html") { response.text }
-        property("url", response.url)
+        // Legado 的 StrResponse 把 url/code/message/isSuccessful 暴露为方法，
+        // 书源普遍使用 response.code()、response.url() 这种写法。
+        method("url") { response.url }
+        method("code") { response.statusCode }
+        method("message") { "" }
+        method("isSuccessful") { response.statusCode in 200..299 }
         property("statusCode", response.statusCode)
-        property("code", response.statusCode)
-        property("message", "")
-        property("isSuccessful", response.statusCode in 200..299)
         method("errorBody") { null }
         method("headers") { toJs(cx, scope, response.headers) }
         return result
@@ -701,6 +794,9 @@ internal class BookSourceJs(private val http: BookSourceHttp) {
 
     private fun toJs(cx: Context, scope: Scriptable, value: Any?): Any? = when (value) {
         null -> null
+        // Rhino 的 NativeObject 同时实现 java.util.Map，必须优先原样返回，
+        // 否则会被按 Map 复制并覆盖 get/put 等方法（cache.get 会变成按属性取值）。
+        is Scriptable -> value
         is BookSourceResponse -> responseObject(cx, scope, value)
         is Map<*, *> -> cx.newObject(scope).also { objectValue ->
             for ((key, item) in value) {
@@ -839,6 +935,16 @@ internal class BookSourceJs(private val http: BookSourceHttp) {
     }
 }
 
+/**
+ * 网页登录在执行脚本中途打开后用于中止剩余脚本。
+ *
+ * Legado 的 `java.startBrowserAwait()` 会阻塞到网页关闭，脚本随后才能读取
+ * 新 Cookie。应用内网页登录无法阻塞，如果不中止，脚本会立即用旧 Cookie
+ * 检查登录状态并弹出“暂时无法检查账号”这类误导提示。
+ */
+internal class BookSourceOpenUrlSignal :
+    RuntimeException(null, null, false, false)
+
 internal data class JsEnv(
     val source: BookSource,
     val analyzer: BookSourceAnalyzer,
@@ -851,6 +957,11 @@ internal data class JsEnv(
     val infoMap: MutableMap<String, String>? = null,
     val variables: BookSourceVariables? = null,
     val onSearchBook: ((String) -> Unit)? = null,
+    val onOpenUrl: ((String) -> Unit)? = null,
+    val onToast: ((String) -> Unit)? = null,
+    val onRefreshExplore: (() -> Unit)? = null,
+    val onOpenLogin: (() -> Unit)? = null,
+    val abortAfterOpenUrl: Boolean = false,
     val isLongClick: Boolean = false,
     val response: BookSourceResponse? = null,
     val redirectUrl: String = "",

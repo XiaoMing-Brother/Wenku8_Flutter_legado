@@ -20,14 +20,12 @@ class ReaderThemePicker extends StatefulWidget {
     super.key,
     this.selectedId,
     this.initialNight = false,
-    this.actionLabel = '应用主题',
-    required this.previewBuilder,
+    this.selectedAccent,
   });
 
   final int? selectedId;
   final bool initialNight;
-  final String actionLabel;
-  final Widget Function(ReaderThemeSelection) previewBuilder;
+  final Color? selectedAccent;
 
   @override
   State<ReaderThemePicker> createState() => _ReaderThemePickerState();
@@ -37,7 +35,6 @@ class _ReaderThemePickerState extends State<ReaderThemePicker> {
   late ReaderThemeFilter _filter = widget.initialNight
       ? ReaderThemeFilter.night
       : ReaderThemeFilter.day;
-  int? _previewIndex;
 
   @override
   Widget build(BuildContext context) => FutureBuilder(
@@ -72,50 +69,6 @@ class _ReaderThemePickerState extends State<ReaderThemePicker> {
             return true;
           })
           .toList(growable: false);
-      final index = _previewIndex;
-      if (index != null) {
-        final theme = visible[index];
-        return ListView(
-          padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
-          children: [
-            ArchiveSection(title: theme.name, code: 'READER / THEME PREVIEW'),
-            widget.previewBuilder(theme.selection),
-            const SizedBox(height: 14),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                GlassTextButton(
-                  onPressed: index > 0
-                      ? () => setState(() => _previewIndex = index - 1)
-                      : null,
-                  child: const AppText('上一套'),
-                ),
-                GlassTextButton(
-                  onPressed: index + 1 < visible.length
-                      ? () => setState(() => _previewIndex = index + 1)
-                      : null,
-                  child: const AppText('下一套'),
-                ),
-                GlassTextButton(
-                  onPressed: () => setState(() => _previewIndex = null),
-                  child: const AppText('返回主题库'),
-                ),
-              ],
-            ),
-            const SizedBox(height: 14),
-            GlassTextButton(
-              selected: true,
-              onPressed: () => Navigator.of(context).pop(theme.selection),
-              child: AppText(widget.actionLabel),
-            ),
-            GlassTextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const AppText('取消'),
-            ),
-          ],
-        );
-      }
       return Padding(
         padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
         child: Column(
@@ -182,10 +135,10 @@ class _ReaderThemePickerState extends State<ReaderThemePicker> {
                         return _ThemeCard(
                           theme: theme,
                           selected: theme.id == widget.selectedId,
-                          onTap: () {
-                            FocusManager.instance.primaryFocus?.unfocus();
-                            setState(() => _previewIndex = index);
-                          },
+                          accent: theme.id == widget.selectedId
+                              ? widget.selectedAccent
+                              : null,
+                          onTap: () => Navigator.pop(context, theme.selection),
                         );
                       },
                     ),
@@ -201,11 +154,13 @@ class _ThemeCard extends StatelessWidget {
   const _ThemeCard({
     required this.theme,
     required this.selected,
+    this.accent,
     required this.onTap,
   });
 
   final LegadoReaderTheme theme;
   final bool selected;
+  final Color? accent;
   final VoidCallback onTap;
 
   @override
@@ -216,8 +171,7 @@ class _ThemeCard extends StatelessWidget {
         ? scheme.surfaceContainer
         : theme.background;
     final foreground = theme.content;
-    final control = theme.control ?? scheme.primary;
-    final primary = scheme.primary;
+    final control = accent ?? theme.control ?? readerCardOutline(paper);
     return JellyTapSurface(
       tapKey: ValueKey('reader-theme-${theme.id}'),
       onTap: onTap,
@@ -226,7 +180,7 @@ class _ThemeCard extends StatelessWidget {
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(12),
           border: Border.all(
-            color: selected ? primary : foreground.withValues(alpha: .12),
+            color: selected ? control : foreground.withValues(alpha: .12),
             width: selected ? 2 : 1,
           ),
         ),
@@ -339,8 +293,13 @@ class _ThemeCard extends StatelessWidget {
                   right: 6,
                   child: CircleAvatar(
                     radius: 11,
-                    backgroundColor: primary,
-                    child: Icon(Icons.check, size: 14, color: scheme.onPrimary),
+                    backgroundColor: control,
+                    foregroundColor:
+                        ThemeData.estimateBrightnessForColor(control) ==
+                            Brightness.dark
+                        ? Colors.white
+                        : Colors.black,
+                    child: const Icon(Icons.check, size: 14),
                   ),
                 ),
             ],

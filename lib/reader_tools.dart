@@ -14,8 +14,6 @@ import 'reader_bookmark_excerpt.dart';
 import 'local_platform.dart';
 import 'reader_preferences.dart';
 import 'reader_appearance.dart';
-import 'reader_background.dart';
-import 'reader_content.dart';
 import 'reader_theme_picker.dart';
 import 'reader_theme_shelf.dart';
 import 'reader_theme_presets.dart';
@@ -325,21 +323,6 @@ class _ReaderChapterProgressState extends State<ReaderChapterProgress> {
 /// preferences are committed once, when the gesture ends.
 enum ReaderToolsScope { all, appearance, listening, operations, bookmarks }
 
-String readerThemeExcerpt(ReaderContent? content, int paragraph) {
-  String? first;
-  if (content != null) {
-    for (final index in content.order) {
-      final text = content.paragraphs[index].trim();
-      if (text.isEmpty || text == '[插图]' || readerIllustrationUrl(text) != null) {
-        continue;
-      }
-      first ??= text;
-      if (index >= paragraph) return text;
-    }
-  }
-  return first ?? '窗外的风翻过书页，阳光落在字里行间。她把书往前挪了挪，接着读了下去。';
-}
-
 class ReaderTools extends StatefulWidget {
   const ReaderTools({
     super.key,
@@ -365,10 +348,8 @@ class ReaderTools extends StatefulWidget {
     this.languages = const {},
     this.onHiddenLanguagesChanged,
     this.rangeContextResolver,
-    this.previewText = '',
   });
   final Novel novel;
-  final String previewText;
   final LibraryState state;
   final ReadingPosition? position;
   final Future<ReaderBookmark?> Function() onAddBookmark;
@@ -505,52 +486,8 @@ class _ReaderToolsState extends State<ReaderTools>
       maxWidth: 720,
       builder: (_) => ReaderThemePicker(
         initialNight: night,
-        actionLabel: '添加到${night ? '夜间' : '日间'}主题',
         selectedId: prefs.lookFor(_night).theme?.id,
-        previewBuilder: (theme) {
-          final sample = prefs.copyWith(themeMode: night ? ReaderThemeMode.night : ReaderThemeMode.day).setLook(
-            night,
-            ReaderLook(theme: theme),
-            remember: false,
-          );
-          return SizedBox(
-            height: 220,
-            child: ReaderBackground(
-              key: ValueKey(theme.id),
-              preview: true,
-              night: night,
-              store: widget.state.backgrounds,
-              preferences: sample,
-              paper: sample.background(night),
-              reduceMotion: widget.state.reduceMotion,
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: ClipRect(
-                  child: Text(
-                    widget.previewText,
-                    overflow: TextOverflow.clip,
-                    textAlign: prefs.justify
-                        ? TextAlign.justify
-                        : TextAlign.start,
-                    style: TextStyle(
-                      fontFamily:
-                          widget.state.readerFontFamilyFor(widget.novel.id) ??
-                          'Roboto',
-                      fontSize: _fontSize,
-                      height: _lineHeight,
-                      letterSpacing: prefs.letterSpacing,
-                      fontWeight: prefs.textWeight.weight,
-                      fontStyle: prefs.italic
-                          ? FontStyle.italic
-                          : FontStyle.normal,
-                      color: sample.foreground(night),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          );
-        },
+        selectedAccent: prefs.lookFor(_night).accent,
       ),
     );
     if (!mounted || selected == null) return;
@@ -1653,10 +1590,7 @@ class _ReaderToolsState extends State<ReaderTools>
     if (category == 'page')
       const ArchiveSection(title: '阅读信息', code: 'SCREEN / STATUS'),
     if (category == 'page') ..._behaviorItems(context, 'screen'),
-    if (category == 'body' ||
-        category == 'title' ||
-        category == 'page' ||
-        category == 'theme')
+    if (category == 'body' || category == 'title' || category == 'page')
       _adjustment(
         Align(
           alignment: Alignment.centerRight,

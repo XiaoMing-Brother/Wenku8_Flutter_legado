@@ -355,11 +355,15 @@ class BookSourceRepository extends NovelRepository
   }
 
   @override
-  Future<BookSourceLoginState?> webLogin(BookSource source) async {
+  Future<BookSourceLoginState?> webLogin(
+    BookSource source, {
+    String url = '',
+  }) async {
     await prepare();
     _requireEngine();
     final state = await transport.webLogin(
       source.key,
+      url: url,
     ).timeout(const Duration(minutes: 10));
     if (state != null) await BookSourceImages.invalidateSource(source.key);
     return state;
@@ -375,17 +379,18 @@ class BookSourceRepository extends NovelRepository
   }
 
   @override
-  Future<void> loginAction(
+  Future<BookSourceLoginAction> loginAction(
     BookSource source,
     String action, {
     Map<String, String> values = const {},
   }) async {
     await prepare();
     _requireEngine();
-    await transport
+    final result = await transport
         .loginAction(sourceKey: source.key, action: action, values: values)
         .timeout(_loginTimeout);
     await BookSourceImages.invalidateSource(source.key);
+    return result;
   }
 
   Duration get _loginTimeout => requestTimeout * 2;
@@ -1312,7 +1317,7 @@ class BookSourceRepository extends NovelRepository
     throw FormatException(
       error is BookSourceEngineUnavailable
           ? '当前构建未接入 Android 书源引擎'
-          : '书源引擎暂不可用，请稍后重试',
+          : '书源初始化失败，请稍后重试',
     );
   }
 

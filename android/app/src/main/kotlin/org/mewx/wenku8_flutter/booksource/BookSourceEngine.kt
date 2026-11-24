@@ -67,7 +67,7 @@ internal class BookSourceEngine(
         } else {
             variables?.put(loginInfoKey(sourceKey), toJsonObject(info).toString())
         }
-        val script = extractJs(source.loginUrl)
+        val script = extractLoginJs(source.loginUrl)
         if (script.isNotBlank()) {
             val result = js.eval(
                 script,
@@ -87,20 +87,38 @@ internal class BookSourceEngine(
         sourceKey: String,
         action: String,
         values: Map<String, String>?,
-    ) {
+    ): Map<String, Any?> {
         val source = requireSource(sourceKey)
-        if (action.isBlank()) return
+        if (action.isBlank()) return mapOf("openUrl" to null)
         val info = linkedMapOf<String, String>()
         values?.forEach { (key, value) -> info[key] = value }
         val script = buildString {
-            val loginJs = extractJs(source.loginUrl)
+            val loginJs = extractLoginJs(source.loginUrl)
             if (loginJs.isNotBlank()) {
                 append(loginJs)
                 append('\n')
             }
             append(action)
         }
-        js.eval(script, loginEnv(source, info))
+        var openUrl: String? = null
+        var toast: String? = null
+        val env = loginEnv(source, info).copy(
+            onOpenUrl = { openUrl = it },
+            onToast = { toast = it },
+            // 登录按钮脚本常用 java.open('login') 重新进入书源登录页。
+            // 只有 loginUrl 能解析出真正的网页地址时才交给 WebView；
+            // function login(){} 这类登录脚本不能被当成 URL 打开。
+            onOpenLogin = {
+                if (openUrl.isNullOrBlank()) openUrl = webLoginAddress(source)
+            },
+            abortAfterOpenUrl = true,
+        )
+        try {
+            js.eval(script, env)
+        } catch (_: BookSourceOpenUrlSignal) {
+            // 网页登录已经在应用内打开，剩余脚本需要等登录完成后再执行。
+        }
+        return mapOf("openUrl" to openUrl, "toast" to toast)
     }
 
     fun logout(sourceKey: String): Map<String, Any?> {
@@ -110,13 +128,16 @@ internal class BookSourceEngine(
         return loginState(sourceKey)
     }
 
-    fun webLoginConfig(sourceKey: String): WebLoginConfig {
+    fun webLoginConfig(sourceKey: String, urlOverride: String? = null): WebLoginConfig {
         val source = requireSource(sourceKey)
-        val raw = source.loginUrl?.trim().orEmpty()
+        val raw = urlOverride?.trim().orEmpty().ifEmpty {
+            source.loginUrl?.trim().orEmpty()
+        }
         if (raw.isEmpty()) throw IllegalArgumentException("书源没有配置登录地址")
         val jar = http.cookieStore(sourceKey)
         val url = resolveWebLoginUrl(source, raw).toHttpUrl()
-        val targets = (sourceKey.toHttpUrlOrNull() ?: url).webCookieTargets(listOf(sourceKey, url.toString()))
+        val roots = listOfNotNull(sourceKey.toHttpUrlOrNull(), url).distinctBy { it.origin() }
+        val targets = webCookieTargets(roots, listOf(sourceKey, url.toString()))
         val headers = http.sourceHeaders(source, url, jar)
         val explicit = http.parseCookie(headers.remove("cookie").orEmpty())
         return WebLoginConfig(url.toString(), source.name, headers, targets, jar.webLoginCookies(targets, explicit), jar)
@@ -128,9 +149,10 @@ internal class BookSourceEngine(
         cookies: List<String>,
         scoped: Boolean = false,
         completedUrl: String? = null,
+        cookieUrls: List<String>? = null,
     ): Map<String, Any?> {
-        val targets = if (scoped) config.cookieTargets else listOf(config.cookieUrl)
-        config.jar.importWebCookies(targets, completedUrl.takeIf { scoped }, cookies)
+        val targets = config.cookieTargets
+        config.jar.importWebCookies(targets, completedUrl.takeIf { scoped }, cookies, cookieUrls)
         return loginState(sourceKey)
     }
 
@@ -402,6 +424,11 @@ internal class BookSourceEngine(
         val analyzer = analyzer(source)
         val infoMap = infoMap(sourceKey, values)
         var search: String? = null
+        var searchRequested = false
+        var openUrl: String? = null
+        var refresh = false
+        var login = false
+        var toast: String? = null
         js.eval(
             script,
             JsEnv(
@@ -413,12 +440,24 @@ internal class BookSourceEngine(
                 page = 1,
                 infoMap = infoMap,
                 variables = variables,
-                onSearchBook = { search = it },
+                onSearchBook = {
+                    searchRequested = true
+                    search = it
+                },
+                onOpenUrl = { openUrl = it },
+                onToast = { toast = it },
+                onRefreshExplore = { refresh = true },
+                onOpenLogin = { login = true },
             ),
         )
         return mapOf(
             "values" to infoMap.toMap(),
             "search" to search,
+            "searchRequested" to searchRequested,
+            "openUrl" to openUrl,
+            "refresh" to refresh,
+            "login" to login,
+            "toast" to toast,
         )
     }
 
@@ -1051,6 +1090,22 @@ internal class BookSourceEngine(
         return url
     }
 
+    private fun webLoginAddress(source: BookSource): String? {
+        val raw = source.loginUrl?.trim().orEmpty()
+        if (raw.isEmpty()) return null
+        if (raw.startsWith("http://", ignoreCase = true) ||
+            raw.startsWith("https://", ignoreCase = true)
+        ) {
+            return raw
+        }
+        if (!raw.startsWith("@js:", ignoreCase = true) &&
+            !raw.startsWith("<js>", ignoreCase = true)
+        ) {
+            return null
+        }
+        return runCatching { resolveWebLoginUrl(source, raw) }.getOrNull()
+    }
+
     private fun applyLoginCheck(
         source: BookSource,
         response: BookSourceResponse,
@@ -1119,6 +1174,9 @@ internal class BookSourceEngine(
         baseUrl = source.key,
         key = "",
         page = 1,
+        // 登录表单脚本（含 loginUi 的按钮 action）会读写 infoMap，
+        // 例如 java.open('login', ...); saveKeys(infoMap)。
+        infoMap = linkedMapOf<String, String>().apply { putAll(info) },
         variables = variables,
     )
 
@@ -1132,6 +1190,19 @@ internal class BookSourceEngine(
                 if (end > 4) text.substring(4, end) else text.substring(4)
             }
             else -> text
+        }
+    }
+
+    /** http(s) 网页地址交给 WebView 登录；其余（含 @js:/未加前缀的脚本）按登录脚本执行。 */
+    private fun extractLoginJs(rule: String?): String {
+        val text = rule?.trim().orEmpty()
+        return if (
+            text.startsWith("http://", ignoreCase = true) ||
+            text.startsWith("https://", ignoreCase = true)
+        ) {
+            ""
+        } else {
+            extractJs(text)
         }
     }
 
@@ -1211,20 +1282,18 @@ internal class BookSourceEngine(
     ): RequestSpec {
         val script = spec.option.js?.trim().orEmpty()
         if (script.isEmpty()) return spec
-        val value = js.eval(
-            script,
-            JsEnv(
-                source = source,
-                analyzer = analyzer(source),
-                content = spec.url,
-                baseUrl = source.key,
-                key = key,
-                page = page,
-                book = book,
-                chapter = chapter,
-                variables = variables,
-            ),
+        val env = JsEnv(
+            source = source,
+            analyzer = analyzer(source),
+            content = spec.url,
+            baseUrl = source.key,
+            key = key,
+            page = page,
+            book = book,
+            chapter = chapter,
+            variables = variables,
         )
+        val value = js.eval(script, env)
         val option = spec.option.copy(js = null)
         val url = value?.toString()?.trim().orEmpty()
         if (value == null) return spec.copy(option = option)

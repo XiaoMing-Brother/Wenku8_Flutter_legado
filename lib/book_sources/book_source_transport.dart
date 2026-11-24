@@ -126,9 +126,16 @@ class BookSourceTransport {
       'values': values,
     });
     final rawValues = value?['values'];
+    final searchKeyword = '${value?['search'] ?? ''}'.trim();
     return BookSourceExploreAction(
       values: rawValues is Map ? _stringValues(rawValues) : const {},
-      searchKeyword: '${value?['search'] ?? ''}'.trim(),
+      searchKeyword: searchKeyword,
+      searchRequested:
+          value?['searchRequested'] == true || searchKeyword.isNotEmpty,
+      refreshRequested: value?['refresh'] == true,
+      loginRequested: value?['login'] == true,
+      openUrl: '${value?['openUrl'] ?? ''}'.trim(),
+      message: '${value?['toast'] ?? ''}'.trim(),
     );
   }
 
@@ -240,9 +247,13 @@ class BookSourceTransport {
     return _loginState(value);
   }
 
-  Future<BookSourceLoginState?> webLogin(String sourceKey) async {
+  Future<BookSourceLoginState?> webLogin(
+    String sourceKey, {
+    String url = '',
+  }) async {
     final value = await _invoke<Map<Object?, Object?>>('webLogin', {
       'sourceKey': sourceKey,
+      if (url.isNotEmpty) 'url': url,
     });
     if (value == null) return null;
     return _loginState(value);
@@ -255,15 +266,21 @@ class BookSourceTransport {
     return _loginState(value);
   }
 
-  Future<void> loginAction({
+  Future<BookSourceLoginAction> loginAction({
     required String sourceKey,
     required String action,
     Map<String, String> values = const {},
-  }) => _invoke<void>('loginAction', {
-    'sourceKey': sourceKey,
-    'action': action,
-    'values': values,
-  });
+  }) async {
+    final value = await _invoke<Map<Object?, Object?>>('loginAction', {
+      'sourceKey': sourceKey,
+      'action': action,
+      'values': values,
+    });
+    return BookSourceLoginAction(
+      openUrl: '${value?['openUrl'] ?? ''}'.trim(),
+      message: '${value?['toast'] ?? ''}'.trim(),
+    );
+  }
 
   Future<T?> _invoke<T>(String method, Map<String, Object?> arguments) async {
     try {

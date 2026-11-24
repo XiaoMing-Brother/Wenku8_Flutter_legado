@@ -13639,10 +13639,6 @@ class _ReaderPageState extends State<ReaderPage>
         maxHeight: math.min(760, MediaQuery.sizeOf(context).height * .86),
         surfaceWrapper: _readerSurface,
         builder: (context) => ReaderTools(
-          previewText: readerThemeExcerpt(
-            _currentContent,
-            position?.paragraphIndex ?? 0,
-          ),
           novel: _sourceBook,
           state: widget.state,
           position: position,

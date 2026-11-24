@@ -1,5 +1,19 @@
 # 版本说明
 
+## 0.5.18.261124.1734 · 2026-11-24
+
+- 书源动作脚本新增 `java.searchBook`、`java.refreshExplore` / `source.refreshExplore`、`java.open('login')`、`java.openUrl`、`java.startBrowserAwait` 和 `java.toast`，可在发现区直接打开源内搜索、刷新发现项或进入登录流程。
+- 发现榜单和搜索结果会显示书源封面；`loginCheckJs`、表单登录按钮和发现动作共用同一套脚本环境，并支持 `java.getCookie` / `java.getKey` 读取登录 Cookie。
+- 表单登录卡片按 Legado 的 `layout_flexBasisPercent`、`layout_flexGrow`、`layout_wrapBefore` 排列；`loginUrl` 为 `http(s)` 地址时直接交给 WebView，`@js:`、`<js>` 和未加前缀的登录脚本按脚本执行。
+- 阅读主题选择器移除单独预览页，点击主题卡直接应用；主题卡和主题货架使用主题的 `control` 色生成强调边框与勾选徽标。
+- 主题货架把「从主题库添加」改为网格末尾的入口卡片，使用中的主题在名称右侧显示「使用中」。
+- 书源可用性判断区分文字正文和下载资源，只有存在下载地址的资源书源才按下载来源处理。
+
+### 安装说明
+
+- 本版为 `arm64-v8a` 正式构建，包名仍为 `legado.wenku`，可直接覆盖同包名的旧版并保留数据。
+- 本构建沿用当前开发签名；后续发布必须继续使用同一签名。
+
 ## 0.5.10.261124.1030 · 2026-11-24
 
 - 书源展开的发现区按 Legado 的 6 列弹性规则排列分类、榜单、筛选、输入、开关和脚本按钮，筛选值会带入发现请求；文本输入停顿后自动执行，也支持手动提交、外部链接和脚本操作。

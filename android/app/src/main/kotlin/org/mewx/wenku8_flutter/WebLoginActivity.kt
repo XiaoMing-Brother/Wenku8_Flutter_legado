@@ -25,12 +25,17 @@ import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.TextView
 import android.widget.Toast
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.webkit.CookieManagerCompat
 import androidx.webkit.WebViewFeature
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
-import org.mewx.wenku8_flutter.booksource.readWebCookieLines
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
+import org.mewx.wenku8_flutter.booksource.origin
+import org.mewx.wenku8_flutter.booksource.readWebCookieDetails
 import org.mewx.wenku8_flutter.booksource.webCookieTargets
+import org.mewx.wenku8_flutter.booksource.WebCookieLine
 
 /**
  * 独立的网页登录页。登录完成后只回传 Cookie，账号密码不离开网页本身。
@@ -41,6 +46,8 @@ class WebLoginActivity : Activity() {
     private var progress: ProgressBar? = null
     private var titleView: TextView? = null
     private lateinit var cookieTargets: List<HttpUrl>
+    private val visitedUrls = linkedSetOf<String>()
+    private val capturedCookies = linkedSetOf<WebCookieLine>()
     private var cookiesReady = false
     private var finished = false
 
@@ -55,7 +62,12 @@ class WebLoginActivity : Activity() {
             .ifEmpty { "网页登录" }
         val headers = readHeaders()
         val targets = checkNotNull(intent.getStringArrayListExtra(EXTRA_COOKIE_TARGETS))
-        cookieTargets = targets.first().toHttpUrl().webCookieTargets(targets)
+        cookieTargets = webCookieTargets(
+            targets.mapNotNull { it.toHttpUrlOrNull() },
+            targets,
+        ).ifEmpty {
+            listOf(targets.first().toHttpUrl().origin().toHttpUrl())
+        }
         val initialCookies = intent.getStringArrayListExtra(EXTRA_COOKIES).orEmpty()
         val userAgent = intent.getStringExtra(EXTRA_USER_AGENT).orEmpty().trim()
         val dark = (resources.configuration.uiMode and
@@ -186,6 +198,15 @@ class WebLoginActivity : Activity() {
             ),
         )
         setContentView(root)
+        ViewCompat.setOnApplyWindowInsetsListener(root) { view, insets ->
+            val bars = insets.getInsets(
+                WindowInsetsCompat.Type.systemBars() or
+                    WindowInsetsCompat.Type.displayCutout(),
+            )
+            view.setPadding(0, bars.top, 0, bars.bottom)
+            insets
+        }
+        ViewCompat.requestApplyInsets(root)
 
         configureWebView(web, userAgent)
         prepareCookies(initialCookies) {
@@ -225,12 +246,18 @@ class WebLoginActivity : Activity() {
             }
         }
         web.webViewClient = object : WebViewClient() {
+            override fun onPageStarted(view: WebView, url: String?, favicon: android.graphics.Bitmap?) {
+                rememberUrl(url)
+            }
+
             override fun shouldOverrideUrlLoading(
                 view: WebView,
                 request: WebResourceRequest,
             ): Boolean = handleUrl(request.url)
 
             override fun onPageFinished(view: WebView, url: String?) {
+                rememberUrl(url)
+                capturedCookies.addAll(captureCookies())
                 progress?.visibility = View.GONE
                 view.evaluateJavascript("document.title") { value ->
                     val pageTitle = value
@@ -300,6 +327,55 @@ class WebLoginActivity : Activity() {
         return true
     }
 
+    /** 登录页常会跳到 passport、会员等子域名，记录页面地址用于补读 Cookie。 */
+    private fun rememberUrl(url: String?) {
+        val value = url?.trim().orEmpty()
+        if (!value.startsWith("http://", ignoreCase = true) &&
+            !value.startsWith("https://", ignoreCase = true)
+        ) {
+            return
+        }
+        if (visitedUrls.size >= 16) return
+        visitedUrls.add(value)
+    }
+
+    private fun observedTargets(): List<HttpUrl> = webCookieTargets(
+        cookieTargets,
+        cookieTargets.map { it.toString() } +
+            visitedUrls +
+            listOfNotNull(webView?.url),
+    )
+
+    /** 与 Legado 一样在页面结束时就读取一次，避免登录成功后跳转又清掉中间态 Cookie。 */
+    private fun captureCookies(): List<WebCookieLine> {
+        if (!cookiesReady) return emptyList()
+        val manager = CookieManager.getInstance()
+        val targets = observedTargets()
+        val scoped = WebViewFeature.isFeatureSupported(WebViewFeature.GET_COOKIE_INFO)
+        return runCatching {
+            if (scoped) {
+                readWebCookieDetails(targets) { target ->
+                    CookieManagerCompat.getCookieInfo(manager, target.toString())
+                }
+            } else {
+                buildList {
+                    for (target in targets) {
+                        manager.getCookie(target.toString()).orEmpty().split(';').map { it.trim() }
+                            .filter { it.indexOf('=') > 0 }
+                            .forEach {
+                                add(
+                                    WebCookieLine(
+                                        target,
+                                        "$it; Path=/; HttpOnly" + if (target.isHttps) "; Secure" else "",
+                                    ),
+                                )
+                            }
+                    }
+                }
+            }
+        }.getOrDefault(emptyList())
+    }
+
     private fun prepareCookies(
         initialCookies: List<String>,
         action: () -> Unit,
@@ -308,37 +384,41 @@ class WebLoginActivity : Activity() {
         manager.setAcceptCookie(true)
         manager.removeAllCookies {
             if (finished || isDestroyed) return@removeAllCookies
-            var remaining = initialCookies.size
-            if (remaining == 0) action()
-            for (cookie in initialCookies) manager.setCookie(cookieTargets.first().toString(), cookie) {
-                if (--remaining == 0) action()
+            val writes = initialCookies.sumOf { cookie -> cookieTargets.size }
+            if (writes == 0) {
+                action()
+                return@removeAllCookies
+            }
+            var remaining = writes
+            for (cookie in initialCookies) {
+                for (target in cookieTargets) {
+                    manager.setCookie(target.toString(), cookie) {
+                        if (--remaining == 0 && !finished && !isDestroyed) action()
+                    }
+                }
             }
         }
     }
 
     private fun finishWithCookies() {
         if (finished || !cookiesReady) return
-        val manager = CookieManager.getInstance()
-        val root = cookieTargets.first()
+        val targets = observedTargets()
+        val root = targets.first()
         val scoped = WebViewFeature.isFeatureSupported(WebViewFeature.GET_COOKIE_INFO)
-        val completed = if (scoped) root.webCookieTargets(listOf(webView?.url)).last() else root
-        val cookies = try {
-            if (scoped) {
-                readWebCookieLines((cookieTargets + completed).distinct()) { target ->
-                    CookieManagerCompat.getCookieInfo(manager, target.toString())
-                }
-            } else {
-                manager.getCookie(root.toString()).orEmpty().split(';').map { it.trim() }
-                    .filter { it.indexOf('=') > 0 }.map { "$it; Path=/; HttpOnly" + if (root.isHttps) "; Secure" else "" }
-            }
-        } catch (_: RuntimeException) {
+        val completed = webView?.url?.let { it.toHttpUrlOrNull() } ?: root
+        capturedCookies.addAll(captureCookies())
+        val lines = capturedCookies.toList()
+        if (lines.isEmpty()) {
             Toast.makeText(this, "无法读取网页登录状态，请重试", Toast.LENGTH_SHORT).show()
             return
         }
+        val cookies = lines.map { it.value }
+        val cookieUrls = lines.map { it.target.toString() }
         finished = true
         setResult(
             RESULT_OK,
             Intent().putStringArrayListExtra(EXTRA_COOKIES_RESULT, ArrayList(cookies))
+                .putStringArrayListExtra(EXTRA_COOKIE_TARGETS_RESULT, ArrayList(cookieUrls))
                 .putExtra(EXTRA_SCOPED, scoped).putExtra(EXTRA_COMPLETED_URL, completed.toString()),
         )
         clearCookiesAndFinish()
@@ -409,5 +489,6 @@ class WebLoginActivity : Activity() {
         const val EXTRA_COOKIES = "webLoginCookieList"
         const val EXTRA_USER_AGENT = "webLoginUserAgent"
         const val EXTRA_COOKIES_RESULT = "webLoginCookies"
+        const val EXTRA_COOKIE_TARGETS_RESULT = "webLoginCookieOrigins"
     }
 }

@@ -89,9 +89,9 @@ abstract interface class BookSourceLibrary {
     Map<String, String> values,
   );
   Future<BookSourceLoginState> logout(BookSource source);
-  Future<BookSourceLoginState?> webLogin(BookSource source);
+  Future<BookSourceLoginState?> webLogin(BookSource source, {String url = ''});
   Future<BookSourceLoginState> checkLogin(BookSource source);
-  Future<void> loginAction(
+  Future<BookSourceLoginAction> loginAction(
     BookSource source,
     String action, {
     Map<String, String> values = const {},

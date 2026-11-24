@@ -157,7 +157,6 @@ class BookSourcePlugin :
                         action = stringArg(arguments, "action"),
                         values = stringArgs(arguments, "values"),
                     )
-                    null
                 }
                 "logout" -> runAsync(worker, result) {
                     engine.logout(stringArg(arguments, "sourceKey"))
@@ -209,7 +208,10 @@ class BookSourcePlugin :
         // loginUrl 可能是 @js:，脚本里可能发网络请求，不能在主线程解析。
         worker.execute {
             val config = try {
-                engine.webLoginConfig(sourceKey)
+                engine.webLoginConfig(
+                    sourceKey,
+                    stringArg(arguments, "url").ifBlank { null },
+                )
             } catch (error: Throwable) {
                 main.post {
                     if (pendingWebLogin === request) {
@@ -268,7 +270,11 @@ class BookSourcePlugin :
                 engine.importWebLoginCookie(pending.sourceKey, checkNotNull(pending.config),
                     checkNotNull(data?.getStringArrayListExtra(WebLoginActivity.EXTRA_COOKIES_RESULT)),
                     scoped = data.getBooleanExtra(WebLoginActivity.EXTRA_SCOPED, false),
-                    completedUrl = data.getStringExtra(WebLoginActivity.EXTRA_COMPLETED_URL)),
+                    completedUrl = data.getStringExtra(WebLoginActivity.EXTRA_COMPLETED_URL),
+                    cookieUrls = data.getStringArrayListExtra(
+                        WebLoginActivity.EXTRA_COOKIE_TARGETS_RESULT,
+                    ),
+                ),
             )
         } catch (error: Throwable) {
             pending.result.error("BOOK_SOURCE_ERROR", message(error), null)

@@ -26,12 +26,14 @@ class ReaderThemeSelection {
     required this.nightBackground,
     required this.ink,
     required this.nightInk,
+    this.control,
     this.imageUrl,
   });
 
   final int id;
   final String name;
   final Color background, nightBackground, ink, nightInk;
+  final Color? control;
   final String? imageUrl;
 
   ReaderThemeSelection get inverted => ReaderThemeSelection(
@@ -40,6 +42,7 @@ class ReaderThemeSelection {
     background: nightBackground,
     nightBackground: background,
     ink: nightInk,
+    control: control,
     nightInk: ink,
     imageUrl: imageUrl,
   );
@@ -51,6 +54,7 @@ class ReaderThemeSelection {
     nightBackground: nightBackground,
     ink: ink,
     nightInk: nightInk,
+    control: control,
   );
 
   List<String> get imageCandidates {
@@ -73,6 +77,7 @@ class ReaderThemeSelection {
     'nightBackground': _argb(nightBackground),
     'ink': _argb(ink),
     'nightInk': _argb(nightInk),
+    if (control != null) 'control': _argb(control!),
     if (imageUrl != null) 'imageUrl': imageUrl,
   };
 
@@ -98,6 +103,7 @@ class ReaderThemeSelection {
       nightBackground: Color(nightBackground.toInt()),
       ink: Color(ink.toInt()),
       nightInk: Color(nightInk.toInt()),
+      control: json['control'] is int ? Color(json['control'] as int) : null,
       imageUrl: json['imageUrl'] is String ? json['imageUrl'] as String : null,
     );
   }
@@ -111,6 +117,7 @@ class ReaderThemeSelection {
       nightBackground == other.nightBackground &&
       ink == other.ink &&
       nightInk == other.nightInk &&
+      control == other.control &&
       imageUrl == other.imageUrl;
 
   @override
@@ -121,6 +128,7 @@ class ReaderThemeSelection {
     nightBackground,
     ink,
     nightInk,
+    control,
     imageUrl,
   );
 }
@@ -175,6 +183,7 @@ class LegadoReaderTheme {
       nightBackground: nightBackground,
       ink: _readableInk(background, content),
       nightInk: _readableInk(nightBackground, content),
+      control: control,
       imageUrl: thumbnailUrl,
     );
   }

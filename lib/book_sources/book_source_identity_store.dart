@@ -14,6 +14,9 @@ class BookSourceIdentityStore {
 
   static const version = 1;
   static const maxBooks = 200000;
+  // 200000 条书源坐标的 JSON 约 50 MB，16 MB 的上限会让索引稍大就直接
+  // 无法启动书源，因此按 maxBooks 的规模留出余量。
+  static const maxBytes = 64 * 1024 * 1024;
   final Directory directory;
   final Map<String, BookSourceRef> _byKey = {};
   final Map<int, BookSourceRef> _byId = {};
@@ -86,8 +89,8 @@ class BookSourceIdentityStore {
   Future<void> _load() async {
     final file = _file;
     if (!await file.exists()) return;
-    if (await file.length() > 16 * 1024 * 1024) {
-      throw const FormatException('书源书籍索引超过 16 MB');
+    if (await file.length() > maxBytes) {
+      throw const FormatException('书源书籍索引超过 64 MB');
     }
     final Object? decoded;
     try {

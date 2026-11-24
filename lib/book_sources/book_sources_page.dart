@@ -501,12 +501,13 @@ class _BookSourcesPageState extends State<BookSourcesPage> {
     }
   }
 
-  Future<void> _openValidation(List<BookSource> sources) => showJellySheet<void>(
-    context: context,
-    reduceMotion: MediaQuery.disableAnimationsOf(context),
-    heightFactor: .82,
-    builder: (_) => _SourceCheckSheet(library: _library, sources: sources),
-  );
+  Future<void> _openValidation(List<BookSource> sources) =>
+      showJellySheet<void>(
+        context: context,
+        reduceMotion: MediaQuery.disableAnimationsOf(context),
+        heightFactor: .82,
+        builder: (_) => _SourceCheckSheet(library: _library, sources: sources),
+      );
 
   Future<void> _openBatch() async {
     final repository = widget.repository;
@@ -835,12 +836,15 @@ class _BookSourcesPageState extends State<BookSourcesPage> {
     final action = Theme.of(context).extension<AppTonalColors>()?.action;
     final muted = Theme.of(context).colorScheme.onSurfaceVariant;
     final unavailable = !_preparing && !_library.engineAvailable;
+    final failed = unavailable && _library.prepareError != null;
     final status = _importing
         ? '正在导入书源'
         : _selecting
         ? '已选 ${_selectedKeys.length}'
         : _preparing
         ? '正在准备书源引擎'
+        : failed
+        ? '书源初始化失败'
         : unavailable
         ? '书源引擎不可用'
         : '${_library.enabledCount} 个已启用';
@@ -916,7 +920,7 @@ class _BookSourcesPageState extends State<BookSourcesPage> {
       final error = _library.prepareError;
       return error == null
           ? '当前构建未接入 Android 书源引擎，书源只能导入和管理。'
-          : '引擎初始化失败：$error';
+          : '书源初始化失败：$error';
     }
     return '已启用 ${_library.enabledCount} 个可解析书源，'
         '搜索范围：${_library.searchScopeLabel}。';
@@ -1447,10 +1451,53 @@ class _BookSourcesPageState extends State<BookSourcesPage> {
           _exploreValuesFor(source).addAll(result.values);
         });
       }
+      final message = result.message;
+      if (result.loginRequested) {
+        if (message.isNotEmpty) _feedback(message);
+        await _loginFromExplore(source);
+        return;
+      }
+      if (result.openUrl.isNotEmpty) {
+        if (message.isNotEmpty) _feedback(message);
+        final uri = Uri.tryParse(result.openUrl);
+        final opened =
+            uri != null &&
+            await launchUrl(uri, mode: LaunchMode.externalApplication);
+        if (!opened && mounted) _feedback('无法打开操作链接', error: true);
+        return;
+      }
+      if (result.searchRequested) {
+        if (message.isNotEmpty) _feedback(message);
+        if (result.searchKeyword.isEmpty) {
+          _feedback('请先在关键词输入框填写书名或作者');
+        } else {
+          _openSourceSearch(source, result.searchKeyword);
+        }
+        return;
+      }
       await _reloadExploreKinds(source);
+      if (message.isNotEmpty) {
+        _feedback(message);
+      } else if (result.refreshRequested) {
+        _feedback('已刷新发现页');
+      }
     } on Object catch (error) {
       if (mounted) _feedback(_sourceErrorMessage(error), error: true);
     }
+  }
+
+  void _openSourceSearch(BookSource source, String keyword) {
+    _cancelExploreTimers();
+    pushNovelPage<void>(
+      context,
+      _BookSourceSearchPage(
+        source: source,
+        keyword: keyword,
+        library: _library,
+        onOpenBook: widget.onOpenBook,
+      ),
+      reduceMotion: MediaQuery.disableAnimationsOf(context),
+    );
   }
 
   void _openRanking(BookSource source, BookSourceExploreKind kind) {
@@ -1668,6 +1715,8 @@ class _BookSourcesPageState extends State<BookSourcesPage> {
             ),
             decoration: InputDecoration(
               isCollapsed: true,
+              filled: false,
+              fillColor: Colors.transparent,
               border: InputBorder.none,
               hintText: kind.label.trim(),
               hintStyle: TextStyle(
@@ -1840,16 +1889,21 @@ class _BookSourcesPageState extends State<BookSourcesPage> {
 /// 与 Legado 发现页的 GlassCard 条目一致：胶囊形玻璃底、居中标签和尾部图标。
 class _ExploreKindTile extends StatelessWidget {
   const _ExploreKindTile({
+    super.key,
     required this.label,
     required this.onTap,
     required this.trailing,
-    required this.error,
+    this.error = false,
+    this.minHeight = 34,
+    this.maxLines = 1,
   });
 
   final String label;
   final VoidCallback? onTap;
   final IconData? trailing;
   final bool error;
+  final double minHeight;
+  final int maxLines;
 
   @override
   Widget build(BuildContext context) {
@@ -1861,7 +1915,7 @@ class _ExploreKindTile extends StatelessWidget {
       backgroundColor: scheme.surfaceContainer,
       onTap: onTap,
       child: ConstrainedBox(
-        constraints: const BoxConstraints(minHeight: 34),
+        constraints: BoxConstraints(minHeight: minHeight),
         child: Stack(
           alignment: Alignment.center,
           children: [
@@ -1871,7 +1925,7 @@ class _ExploreKindTile extends StatelessWidget {
               ),
               child: AppText(
                 label,
-                maxLines: 1,
+                maxLines: maxLines,
                 overflow: TextOverflow.ellipsis,
                 textAlign: TextAlign.center,
                 style: TextStyle(
@@ -2001,7 +2055,9 @@ class _BookSourceRankingPageState extends State<_BookSourceRankingPage> {
                   : ContentNotice(
                       icon: CupertinoIcons.book,
                       title: error == null ? '榜单暂无书籍' : '榜单加载失败',
-                      message: error == null ? null : _sourceErrorMessage(error),
+                      message: error == null
+                          ? null
+                          : _sourceErrorMessage(error),
                       onRetry: error == null ? null : _load,
                     ),
             )
@@ -2035,28 +2091,244 @@ class _BookSourceRankingPageState extends State<_BookSourceRankingPage> {
                 final book = books[index];
                 final openBook = widget.onOpenBook;
                 return ContentPanel(
-                  onTap: openBook == null ? null : () => openBook(context, book),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                  onTap: openBook == null
+                      ? null
+                      : () => openBook(context, book),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      AppText(
-                        book.title,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontWeight: FontWeight.w600),
+                      Semantics(
+                        image: true,
+                        label: book.title,
+                        child: NovelCover(
+                          book,
+                          key: ValueKey('book-source-ranking-cover-${book.id}'),
+                          width: 56,
+                          height: 76,
+                        ),
                       ),
-                      const SizedBox(height: 5),
-                      AppText(
-                        [
-                          if (book.author.isNotEmpty) book.author,
-                          widget.source.name,
-                        ].join(' · '),
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: 12,
-                          height: 1.4,
-                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      const SizedBox(width: 14),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            AppText(
+                              book.title,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            const SizedBox(height: 5),
+                            AppText(
+                              [
+                                if (book.author.isNotEmpty) book.author,
+                                widget.source.name,
+                              ].join(' · '),
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: 12,
+                                height: 1.4,
+                                color: Theme.of(
+                                  context,
+                                ).colorScheme.onSurfaceVariant,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
+    );
+  }
+}
+
+class _BookSourceSearchPage extends StatefulWidget {
+  const _BookSourceSearchPage({
+    required this.source,
+    required this.keyword,
+    required this.library,
+    required this.onOpenBook,
+  });
+
+  final BookSource source;
+  final String keyword;
+  final BookSourceLibrary library;
+  final void Function(BuildContext context, Novel book)? onOpenBook;
+
+  @override
+  State<_BookSourceSearchPage> createState() => _BookSourceSearchPageState();
+}
+
+class _BookSourceSearchPageState extends State<_BookSourceSearchPage> {
+  final _books = <int, Novel>{};
+  final _scrollController = ScrollController();
+  int _page = 0;
+  bool _hasMore = false;
+  bool _loading = false;
+  Object? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _scrollController.addListener(_onScroll);
+    _load();
+  }
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  void _onScroll() {
+    if (!_hasMore ||
+        _loading ||
+        _error != null ||
+        !_scrollController.hasClients) {
+      return;
+    }
+    final position = _scrollController.position;
+    if (position.hasContentDimensions && position.extentAfter <= 240) _load();
+  }
+
+  Future<void> _load() async {
+    if (_loading) return;
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      final page = _page + 1;
+      final result = await widget.library.searchInSource(
+        widget.source,
+        widget.keyword,
+        page: page,
+      );
+      if (!mounted) return;
+      setState(() {
+        final previousCount = _books.length;
+        for (final book in result.items) {
+          _books.putIfAbsent(book.id, () => book);
+        }
+        _page = page;
+        _hasMore =
+            result.items.isNotEmpty &&
+            result.hasMore &&
+            _books.length > previousCount;
+        _loading = false;
+      });
+    } on Object catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _error = error;
+        _loading = false;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final books = _books.values.toList();
+    final error = _error;
+    return ArchiveFeaturePage(
+      title: '搜索「${widget.keyword}」',
+      code: 'SOURCE / SEARCH',
+      child: books.isEmpty
+          ? Padding(
+              padding: featurePadding(context),
+              child: _loading
+                  ? const Center(child: CupertinoActivityIndicator())
+                  : ContentNotice(
+                      icon: CupertinoIcons.search,
+                      title: error == null ? '没有搜索到书籍' : '搜索失败',
+                      message: error == null
+                          ? null
+                          : _sourceErrorMessage(error),
+                      onRetry: error == null ? null : _load,
+                    ),
+            )
+          : ListView.separated(
+              controller: _scrollController,
+              padding: featurePadding(context),
+              itemCount: books.length + 1,
+              separatorBuilder: (_, _) => const SizedBox(height: 14),
+              itemBuilder: (context, index) {
+                if (index == books.length) {
+                  if (_loading) {
+                    return const Center(child: CupertinoActivityIndicator());
+                  }
+                  if (error != null) {
+                    return ContentNotice(
+                      icon: CupertinoIcons.exclamationmark_circle,
+                      title: '下一页加载失败',
+                      message: _sourceErrorMessage(error),
+                      onRetry: _load,
+                    );
+                  }
+                  return _hasMore
+                      ? Center(
+                          child: GlassTextButton(
+                            onPressed: _load,
+                            child: const AppText('加载更多'),
+                          ),
+                        )
+                      : const SizedBox.shrink();
+                }
+                final book = books[index];
+                final openBook = widget.onOpenBook;
+                return ContentPanel(
+                  onTap: openBook == null
+                      ? null
+                      : () => openBook(context, book),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Semantics(
+                        image: true,
+                        label: book.title,
+                        child: NovelCover(
+                          book,
+                          key: ValueKey('book-source-search-cover-${book.id}'),
+                          width: 56,
+                          height: 76,
+                        ),
+                      ),
+                      const SizedBox(width: 14),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            AppText(
+                              book.title,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            const SizedBox(height: 5),
+                            AppText(
+                              [
+                                if (book.author.isNotEmpty) book.author,
+                                widget.source.name,
+                              ].join(' · '),
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: 12,
+                                height: 1.4,
+                                color: Theme.of(
+                                  context,
+                                ).colorScheme.onSurfaceVariant,
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                     ],
@@ -2074,9 +2346,25 @@ String _sourceErrorMessage(Object error) {
     return error.message.toString();
   }
   if (error is PlatformException && error.message != null) {
-    return error.message!;
+    return _trimSourceError(error.message!);
   }
   return '书源操作失败，请检查 JSON 或稍后重试';
+}
+
+String? _absoluteHttpUrl(String value) {
+  final uri = Uri.tryParse(value.trim());
+  if (uri == null || uri.host.isEmpty) return null;
+  final scheme = uri.scheme.toLowerCase();
+  if (scheme != 'http' && scheme != 'https') return null;
+  return uri.toString();
+}
+
+String _trimSourceError(String value) {
+  final text = value.replaceAll(RegExp(r'\s+'), ' ').trim();
+  if (text.contains('No Activity found to handle intent')) {
+    return '登录按钮返回的地址无法打开，请检查书源登录配置';
+  }
+  return text.length > 240 ? '${text.substring(0, 240)}…' : text;
 }
 
 class _SourceEditorSheet extends StatefulWidget {
@@ -2167,7 +2455,9 @@ class _SourceCheckSheetState extends State<_SourceCheckSheet> {
             AppText('已校验 ${_results.length}/${widget.sources.length}　$_status'),
             const SizedBox(height: 8),
             GlassTextButton(
-              onPressed: _run != null ? _stop : (_query.text.trim().isEmpty ? null : _start),
+              onPressed: _run != null
+                  ? _stop
+                  : (_query.text.trim().isEmpty ? null : _start),
               child: AppText(_run != null ? '停止校验' : '开始校验'),
             ),
           ],
@@ -2177,12 +2467,21 @@ class _SourceCheckSheetState extends State<_SourceCheckSheet> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            AppText(widget.sources[index - 1].name,
-                style: const TextStyle(fontWeight: FontWeight.w600)),
+            AppText(
+              widget.sources[index - 1].name,
+              style: const TextStyle(fontWeight: FontWeight.w600),
+            ),
             const SizedBox(height: 4),
-            AppText(_results[index - 1], maxLines: 2, overflow: TextOverflow.ellipsis,
-                style: TextStyle(fontSize: 12, height: 1.4,
-                    color: Theme.of(context).colorScheme.onSurfaceVariant)),
+            AppText(
+              _results[index - 1],
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 12,
+                height: 1.4,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+            ),
           ],
         ),
       );
@@ -2213,9 +2512,13 @@ class _SourceDebugSheetState extends State<_SourceDebugSheet> {
   Future<void> _run() async {
     final term = _query.text.trim();
     if (_busy || term.isEmpty) return;
-    setState(() { _busy = true; _lines.clear(); });
+    setState(() {
+      _busy = true;
+      _lines.clear();
+    });
     var stage = '搜索';
-    void report(String message) => setState(() => _lines.add('$stage：$message'));
+    void report(String message) =>
+        setState(() => _lines.add('$stage：$message'));
     try {
       final library = widget.library;
       final page = await library.searchInSource(widget.source, term);
@@ -2254,11 +2557,18 @@ class _SourceDebugSheetState extends State<_SourceDebugSheet> {
       const SizedBox(height: 12),
       AppText('仅请求「${widget.source.name}」。将读取第一本搜索结果的详情、目录和首章；不会加入书架。'),
       const SizedBox(height: 14),
-      TextField(controller: _query, enabled: !_busy, onChanged: (_) => setState(() {}),
-        decoration: const InputDecoration(labelText: '测试关键词'), onSubmitted: (_) => _run()),
+      TextField(
+        controller: _query,
+        enabled: !_busy,
+        onChanged: (_) => setState(() {}),
+        decoration: const InputDecoration(labelText: '测试关键词'),
+        onSubmitted: (_) => _run(),
+      ),
       const SizedBox(height: 14),
-      GlassTextButton(onPressed: _busy || _query.text.trim().isEmpty ? null : _run,
-        child: AppText(_busy ? '正在调试…' : '开始调试')),
+      GlassTextButton(
+        onPressed: _busy || _query.text.trim().isEmpty ? null : _run,
+        child: AppText(_busy ? '正在调试…' : '开始调试'),
+      ),
       if (_lines.isNotEmpty) ...[
         const SizedBox(height: 14),
         ContentPanel(child: AppText(_lines.join('\n'))),
@@ -2551,7 +2861,7 @@ Future<void> showBookSourceLoginSheet(
     );
     return;
   }
-  if (state.fields.isEmpty) {
+  if (state.fields.isEmpty && state.loginUrl.trim().isEmpty) {
     onFeedback('该书源没有可用的登录表单', error: true);
     return;
   }
@@ -2591,14 +2901,27 @@ class _BookSourceLoginSheetState extends State<BookSourceLoginSheet> {
   final _fields = <BookSourceLoginField>[];
   final _selectOptions = <String, List<String>>{};
   bool _busy = false;
+  bool _loggedIn = false;
   String? _error;
+  String? _notice;
 
   @override
   void initState() {
     super.initState();
-    _values.addAll(widget.initial.values);
+    _resetFields(widget.initial);
+  }
+
+  void _resetFields(BookSourceLoginState state) {
+    _loggedIn = state.loggedIn;
+    for (final controller in _controllers.values) {
+      controller.dispose();
+    }
+    _controllers.clear();
+    _fields.clear();
+    _selectOptions.clear();
+    _values.addAll(state.values);
     final inputs = <String>{};
-    for (final field in widget.initial.fields) {
+    for (final field in state.fields) {
       if (!field.isButton && !inputs.add(field.name)) continue;
       _fields.add(field);
       if (field.isButton) continue;
@@ -2642,16 +2965,67 @@ class _BookSourceLoginSheetState extends State<BookSourceLoginSheet> {
     setState(() {
       _busy = true;
       _error = null;
+      _notice = null;
     });
     try {
+      String openUrl;
+      var message = '';
       if (action.startsWith('http://') || action.startsWith('https://')) {
         final uri = Uri.tryParse(action);
-        final opened = uri != null &&
-            uri.host.isNotEmpty &&
-            await launchUrl(uri, mode: LaunchMode.externalApplication);
-        if (!opened && mounted) setState(() => _error = '无法打开登录操作链接');
+        if (uri == null || uri.host.isEmpty) {
+          if (mounted) setState(() => _error = '登录操作链接无效');
+          return;
+        }
+        openUrl = action;
       } else {
-        await widget.library.loginAction(widget.source, action, values: _values);
+        final result = await widget.library.loginAction(
+          widget.source,
+          action,
+          values: _values,
+        );
+        openUrl = result.openUrl;
+        message = result.message;
+      }
+      if (!mounted) return;
+      if (openUrl.isEmpty) {
+        if (message.isNotEmpty) setState(() => _notice = message);
+        // 登录按钮脚本通常直接请求接口并写入登录 Header，
+        // 此时没有可打开地址，需要重新读取登录状态确认结果。
+        final state = await widget.library.loginInfo(widget.source);
+        if (!mounted || ModalRoute.of(context)?.isCurrent == false) return;
+        setState(() {
+          _resetFields(state);
+          if (message.isEmpty) _notice = '登录状态已更新';
+        });
+        return;
+      }
+      final webUrl = _absoluteHttpUrl(openUrl);
+      if (webUrl != null) {
+        final state = await widget.library.webLogin(widget.source, url: webUrl);
+        if (!mounted || ModalRoute.of(context)?.isCurrent == false) return;
+        if (state == null) {
+          setState(() => _error = '未完成网页登录');
+          return;
+        }
+        setState(() {
+          _resetFields(state);
+          _notice = state.loggedIn
+              ? '网页登录完成，已保存登录信息'
+              : '网页登录完成，但未获取到 Cookie';
+        });
+        return;
+      }
+      final uri = Uri.tryParse(openUrl.trim());
+      if (uri == null ||
+          uri.scheme.isEmpty ||
+          uri.scheme == 'http' ||
+          uri.scheme == 'https') {
+        setState(() => _error = '登录按钮返回的网页地址无效');
+        return;
+      }
+      final opened = await launchUrl(uri, mode: LaunchMode.externalApplication);
+      if (!opened && mounted) {
+        setState(() => _error = '没有可打开该链接的应用');
       }
     } on Object catch (error) {
       if (mounted) setState(() => _error = _sourceErrorMessage(error));
@@ -2660,49 +3034,37 @@ class _BookSourceLoginSheetState extends State<BookSourceLoginSheet> {
     }
   }
 
-  Future<void> _submit() async {
-    if (_busy) return;
-    for (final entry in _controllers.entries) {
-      _values[entry.key] = entry.value.text;
-    }
-    setState(() {
-      _busy = true;
-      _error = null;
-    });
-    try {
-      final state = await widget.library.login(widget.source, _values);
-      if (!mounted || ModalRoute.of(context)?.isCurrent == false) return;
-      Navigator.pop(context, state);
-    } on Object catch (error) {
-      if (!mounted) return;
-      setState(() {
-        _busy = false;
-        _error = _sourceErrorMessage(error);
-      });
-    }
-  }
-
-  Widget _textField(BookSourceLoginField field) => TextField(
-    key: ValueKey('book-source-login-${field.name}'),
-    controller: _controllers[field.name],
-    enabled: !_busy,
-    obscureText: field.isPassword,
-    autocorrect: false,
-    enableSuggestions: !field.isPassword,
-    textInputAction: TextInputAction.next,
-    decoration: InputDecoration(
-      labelText: field.title,
-      border: const OutlineInputBorder(),
+  Widget _textField(BookSourceLoginField field) => ContentPanel(
+    radius: 12,
+    padding: const EdgeInsets.fromLTRB(12, 5, 12, 5),
+    backgroundColor: Theme.of(context).colorScheme.surfaceContainer,
+    child: TextField(
+      key: ValueKey('book-source-login-${field.name}'),
+      controller: _controllers[field.name],
+      enabled: !_busy,
+      obscureText: field.isPassword,
+      autocorrect: false,
+      enableSuggestions: !field.isPassword,
+      textInputAction: TextInputAction.next,
+      decoration: InputDecoration(
+        labelText: field.title,
+        isDense: true,
+        border: InputBorder.none,
+        contentPadding: const EdgeInsets.symmetric(vertical: 8),
+      ),
+      onChanged: (value) => _values[field.name] = value,
     ),
-    onChanged: (value) => _values[field.name] = value,
   );
 
   Widget _selectField(BookSourceLoginField field) {
     final options = _selectOptions[field.name];
     if (options == null) return _textField(field);
-    return GlassTextButton(
+    return _ExploreKindTile(
       key: ValueKey('book-source-login-${field.name}'),
-      onPressed: _busy
+      label: '${field.title} ${_values[field.name] ?? ''}'.trim(),
+      trailing: CupertinoIcons.chevron_down,
+      minHeight: 44,
+      onTap: _busy
           ? null
           : () async {
               final value = await showJellySheet<String>(
@@ -2719,13 +3081,11 @@ class _BookSourceLoginSheetState extends State<BookSourceLoginSheet> {
               );
               if (mounted && value != null) {
                 setState(() => _values[field.name] = value);
+                if (field.action.isNotEmpty) {
+                  unawaited(_runAction(field));
+                }
               }
             },
-      child: AppText(
-        '${field.title}：${_values[field.name]}',
-        maxLines: 2,
-        overflow: TextOverflow.ellipsis,
-      ),
     );
   }
 
@@ -2747,32 +3107,34 @@ class _BookSourceLoginSheetState extends State<BookSourceLoginSheet> {
 
   Widget _toggleField(BookSourceLoginField field) {
     final (onValue, offValue) = _toggleValues(field);
-    final value = (_values[field.name] ?? onValue) != offValue;
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(
-        children: [
-          Expanded(child: AppText(field.title)),
-          AppControls.toggle(
-            context,
-            value: value,
-            onChanged: _busy
-                ? null
-                : (next) => setState(
-                    () => _values[field.name] = next ? onValue : offValue,
-                  ),
-          ),
-        ],
-      ),
+    final options = field.chars
+        .where((value) => value.isNotEmpty)
+        .toSet()
+        .toList();
+    final current = _values[field.name] ?? onValue;
+    final index = options.indexOf(current);
+    final next = options.isEmpty
+        ? (current == offValue ? onValue : offValue)
+        : options[index < 0 ? 0 : (index + 1) % options.length];
+    return _ExploreKindTile(
+      label: '$current${field.title}',
+      trailing: CupertinoIcons.arrow_2_circlepath,
+      minHeight: 44,
+      onTap: _busy
+          ? null
+          : () {
+              setState(() => _values[field.name] = next);
+              if (field.action.isNotEmpty) unawaited(_runAction(field));
+            },
     );
   }
 
-  Widget _buttonField(BookSourceLoginField field) => Align(
-    alignment: Alignment.centerLeft,
-    child: GlassTextButton(
-      onPressed: _busy || field.action.isEmpty ? null : () => _runAction(field),
-      child: AppText(field.title),
-    ),
+  Widget _buttonField(BookSourceLoginField field) => _ExploreKindTile(
+    label: field.title,
+    trailing: field.action.isEmpty ? null : CupertinoIcons.chevron_right,
+    minHeight: 44,
+    maxLines: 2,
+    onTap: _busy || field.action.isEmpty ? null : () => _runAction(field),
   );
 
   Widget _field(BookSourceLoginField field) {
@@ -2807,7 +3169,7 @@ class _BookSourceLoginSheetState extends State<BookSourceLoginSheet> {
           ),
           const SizedBox(height: 12),
           AppText(
-            widget.initial.loggedIn
+            _loggedIn
                 ? '当前已保存登录信息。可重新填写并登录，或关闭后在书源菜单退出登录。'
                 : '登录信息只保存在本机，并使用系统密钥加密；登录后的请求会自动携带登录 Header 与 Cookie。',
             style: TextStyle(
@@ -2816,22 +3178,46 @@ class _BookSourceLoginSheetState extends State<BookSourceLoginSheet> {
               color: Theme.of(context).colorScheme.onSurfaceVariant,
             ),
           ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              ArchiveIcon(
+                _loggedIn
+                    ? CupertinoIcons.check_mark_circled_solid
+                    : CupertinoIcons.exclamationmark_circle,
+                size: 15,
+              ),
+              const SizedBox(width: 6),
+              AppText(
+                _loggedIn ? '登录状态 · 已登录' : '登录状态 · 未登录',
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: _loggedIn
+                      ? Theme.of(context).colorScheme.primary
+                      : Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ],
+          ),
           const SizedBox(height: 14),
           Expanded(
             child: ListView(
               key: const ValueKey('book-source-login-form'),
               children: [
-                ContentPanel(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      for (final (index, field) in _fields.indexed) ...[
-                        if (index > 0) const SizedBox(height: 12),
-                        _field(field),
+                for (final row in buildBookSourceLoginRows(_fields))
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        for (final (index, cell) in row.indexed) ...[
+                          if (index > 0) const SizedBox(width: 8),
+                          Expanded(flex: cell.span, child: _field(cell.field)),
+                        ],
                       ],
-                    ],
+                    ),
                   ),
-                ),
               ],
             ),
           ),
@@ -2839,6 +3225,8 @@ class _BookSourceLoginSheetState extends State<BookSourceLoginSheet> {
             const SizedBox(height: 10),
             AppText(
               _error!,
+              maxLines: 4,
+              overflow: TextOverflow.ellipsis,
               style: TextStyle(
                 fontSize: 12,
                 height: 1.5,
@@ -2846,25 +3234,17 @@ class _BookSourceLoginSheetState extends State<BookSourceLoginSheet> {
               ),
             ),
           ],
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              Expanded(
-                child: GlassTextButton(
-                  onPressed: _busy ? null : () => Navigator.pop(context),
-                  child: const AppText('取消'),
-                ),
+          if (_notice != null) ...[
+            const SizedBox(height: 10),
+            AppText(
+              _notice!,
+              style: TextStyle(
+                fontSize: 12,
+                height: 1.5,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
               ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: GlassTextButton(
-                  key: const ValueKey('book-source-login-submit'),
-                  onPressed: _busy ? null : _submit,
-                  child: AppText(_busy ? '正在登录…' : '登录'),
-                ),
-              ),
-            ],
-          ),
+            ),
+          ],
         ],
       ),
     ),
@@ -2901,6 +3281,13 @@ class _BookSourceWebLoginSheetState extends State<BookSourceWebLoginSheet> {
     try {
       final state = await widget.library.webLogin(widget.source);
       if (!mounted) return;
+      if (state == null) {
+        setState(() {
+          _busy = false;
+          _error = '未完成网页登录';
+        });
+        return;
+      }
       Navigator.pop(context, state);
     } on Object catch (error) {
       if (!mounted) return;

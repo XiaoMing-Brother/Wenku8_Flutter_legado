@@ -323,14 +323,28 @@ internal class BookSourceHttp(
     }
 
     fun cookie(sourceKey: String, url: String = ""): String {
-        val target = url.ifEmpty { sourceKey }.toHttpUrlOrNull() ?: return ""
-        val values = cookieStore(sourceKey).values(target)
+        val jar = cookieStore(sourceKey)
+        val values = cookieUrl(sourceKey, url)?.let { jar.values(it) }.orEmpty()
+            .ifEmpty { jar.anyValues() }
         return values.entries.joinToString("; ") { "${it.key}=${it.value}" }
     }
 
     fun cookieKey(sourceKey: String, url: String, key: String): String {
-        val target = url.ifEmpty { sourceKey }.toHttpUrlOrNull() ?: return ""
-        return cookieStore(sourceKey).values(target)[key].orEmpty()
+        val jar = cookieStore(sourceKey)
+        val values = cookieUrl(sourceKey, url)?.let { jar.values(it) }.orEmpty()
+        return values[key].orEmpty().ifEmpty { jar.anyValues()[key].orEmpty() }
+    }
+
+    /**
+     * 书源里的 java.getCookie 常直接传二级域名（如 "snssdk.com"），
+     * 这里补全协议后再按域名读取，读不到时回退到该书源的全部 Cookie。
+     */
+    private fun cookieUrl(sourceKey: String, url: String): HttpUrl? {
+        val raw = url.trim().ifEmpty { sourceKey.trim() }
+        raw.toHttpUrlOrNull()?.let { return it }
+        if (raw.isEmpty() || raw.contains(' ')) return null
+        val host = raw.substringBefore('/').substringBefore('?').substringBefore('#')
+        return "https://$host/".toHttpUrlOrNull()
     }
 
     fun replaceCookie(sourceKey: String, url: String, cookie: String) {
