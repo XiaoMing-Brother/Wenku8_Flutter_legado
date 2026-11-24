@@ -44,15 +44,9 @@ $releaseReadingNotice
 
 ### 本次更新
 
-- $_bookSourceRules
-- $_cookies
-- $_validation
-- $_discovery
-- $_fanqie
-- $_covers
-- $_reviews
-- $_replaceRules
-- $_details
+- $_exploreLayout
+- $_exploreLogin
+- $_themePicker
 
 ### 后续维护
 
