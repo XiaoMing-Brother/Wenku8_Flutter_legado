@@ -141,6 +141,7 @@ class LocalBookImporter extends ChangeNotifier {
   Future<void> showMenu(
     BuildContext context, {
     bool management = false,
+    VoidCallback? onSearch,
     VoidCallback? onManage,
     VoidCallback? onBatch,
     VoidCallback? onImportBookList,
@@ -154,25 +155,33 @@ class LocalBookImporter extends ChangeNotifier {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          if (onSearch != null)
+            GlassMenuItem(
+              label: '搜索图书',
+              icon: CupertinoIcons.search,
+              order: 0,
+              onPressed: () => Navigator.pop(menu, 'search'),
+            ),
           GlassMenuItem(
             label: '导入本地书籍',
+            order: 1,
             onPressed: () => Navigator.pop(menu, 'local'),
           ),
           if (onImportBookList != null)
             GlassMenuItem(
-              order: 1,
+              order: 2,
               label: '导入书籍列表',
               onPressed: () => Navigator.pop(menu, 'bookList'),
             ),
           if (onBatch != null)
             GlassMenuItem(
-              order: 2,
+              order: 3,
               label: '批量整理',
               onPressed: () => Navigator.pop(menu, 'batch'),
             ),
           if (management)
             GlassMenuItem(
-              order: 3,
+              order: 4,
               label: '本地分类与同步',
               onPressed: () => Navigator.pop(menu, 'manage'),
             ),
@@ -180,6 +189,10 @@ class LocalBookImporter extends ChangeNotifier {
       ),
     );
     if (!context.mounted || action == null || _disposed) return;
+    if (action == 'search') {
+      onSearch?.call();
+      return;
+    }
     if (action == 'manage') {
       onManage?.call();
       return;
@@ -736,11 +749,13 @@ class LocalBookImportButton extends StatefulWidget {
     super.key,
     required this.books,
     required this.library,
+    this.onSearch,
     this.onManage,
     this.onImportBookList,
   });
   final LocalBookStore books;
   final LibraryState library;
+  final VoidCallback? onSearch;
   final VoidCallback? onManage;
   final VoidCallback? onImportBookList;
   @override
@@ -805,6 +820,7 @@ class _LocalBookImportButtonState extends State<LocalBookImportButton>
               : () => importer.showMenu(
                   anchor,
                   management: widget.onManage != null,
+                  onSearch: widget.onSearch,
                   onManage: widget.onManage,
                   onImportBookList: widget.onImportBookList,
                 ),

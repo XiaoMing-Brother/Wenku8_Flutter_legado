@@ -81,9 +81,9 @@ class _LegacyImportPageState extends State<LegacyImportPage> {
         child: ListView(
           padding: featurePadding(context),
           children: [
-            const AppText(
-              '让原来的收藏接着读',
-              style: TextStyle(fontSize: 22, fontWeight: FontWeight.w600),
+            const ArchiveSection(
+              title: '让原来的收藏接着读',
+              code: 'MIGRATION / INTRODUCTION',
             ),
             const SizedBox(height: 12),
             const AppText(
@@ -121,7 +121,12 @@ class _LegacyImportPageState extends State<LegacyImportPage> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      sectionHeader(context, '导入预览', ''),
+                      sectionHeader(
+                        context,
+                        '导入预览',
+                        '',
+                        code: 'MIGRATION / LOCAL ARCHIVE',
+                      ),
                       const SizedBox(height: 14),
                       AppText(
                         '${preview.backup.shelfCount} 本收藏 · ${preview.backup.positionCount} 条阅读进度',

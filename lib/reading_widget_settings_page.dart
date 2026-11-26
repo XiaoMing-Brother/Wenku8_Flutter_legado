@@ -78,10 +78,7 @@ class _WidgetCardsPageState extends State<ReadingWidgetSettingsPage> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const ArchiveSection(
-              title: '选择桌面内容',
-              code: 'READING / WIDGET',
-            ),
+            const ArchiveSection(title: '选择桌面内容', code: 'WIDGET / CONTENT'),
             const SizedBox(height: 12),
             for (final design in ReadingWidgetCards.designs)
               GlassMenuItem(
@@ -318,7 +315,7 @@ class _ReadingWidgetSettingsPageState extends State<ReadingWidgetCardEditor> {
             key: const ValueKey('reading-widget-settings-list'),
             padding: featurePadding(context),
             children: [
-              const ArchiveSection(title: '画面风格', code: '01 / APPEARANCE'),
+              const ArchiveSection(title: '画面风格', code: 'WIDGET / APPEARANCE'),
               const SizedBox(height: 14),
               AppControls.segments<ReadingDesktopSize>(
                 context,
@@ -355,7 +352,7 @@ class _ReadingWidgetSettingsPageState extends State<ReadingWidgetCardEditor> {
                 onChanged: _saving ? null : (skin) => _configure(skin: skin),
               ),
               const SizedBox(height: 28),
-              const ArchiveSection(title: '显示模式', code: '02 / MODE'),
+              const ArchiveSection(title: '显示模式', code: 'WIDGET / MODE'),
               const SizedBox(height: 14),
               AppControls.segments<ReadingWidgetAppearance>(
                 context,
@@ -370,7 +367,7 @@ class _ReadingWidgetSettingsPageState extends State<ReadingWidgetCardEditor> {
                 },
               ),
               const SizedBox(height: 28),
-              const ArchiveSection(title: '阅读目标', code: '03 / GOAL'),
+              const ArchiveSection(title: '阅读目标', code: 'WIDGET / GOAL'),
               const SizedBox(height: 14),
               ContentPanel(
                 child: Column(
@@ -429,7 +426,7 @@ class _ReadingWidgetSettingsPageState extends State<ReadingWidgetCardEditor> {
                 ),
               ),
               const SizedBox(height: 28),
-              const ArchiveSection(title: '显示与更新', code: '04 / DISPLAY'),
+              const ArchiveSection(title: '显示与更新', code: 'WIDGET / DISPLAY'),
               const SizedBox(height: 14),
               ContentPanel(
                 child: Row(
@@ -537,10 +534,7 @@ class _ReadingGoalEditorState extends State<_ReadingGoalEditor> {
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const ArchiveSection(
-          title: '每日阅读目标',
-          code: 'READING / GOAL',
-        ),
+        const ArchiveSection(title: '每日阅读目标', code: 'READING / GOAL'),
         const SizedBox(height: 20),
         TextField(
           key: const ValueKey('reading-goal-input'),

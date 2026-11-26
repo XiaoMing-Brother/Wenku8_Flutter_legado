@@ -116,9 +116,13 @@ class _LanSendBookSheetState extends State<LanSendBookSheet> {
                 },
               )
             else if (sync.peers.isEmpty)
-              const Padding(
-                padding: EdgeInsets.symmetric(vertical: 16),
-                child: AppText('还没有配对设备', style: TextStyle(fontSize: 14)),
+              const SizedBox(
+                height: 170,
+                child: ContentNotice(
+                  icon: CupertinoIcons.link,
+                  title: '还没有配对设备',
+                  message: '在两台设备上开启局域网续读并完成配对后即可发送。',
+                ),
               ),
             for (final peer in sync.peers) ...[
               Builder(

@@ -18,6 +18,7 @@ import 'book_sync.dart';
 import 'catalog.dart';
 import 'cloud_sources.dart';
 import 'dock_layout.dart';
+import 'feature_pages.dart';
 import 'glass_choices.dart';
 import 'library_state.dart';
 import 'library_toolbar.dart';
@@ -42,15 +43,8 @@ Widget _localToolbarPaint(Widget child) =>
     ? RepaintBoundary(child: child)
     : child;
 
-// Dense rows use a painted action: tablet profiling found that per-row live
-// refraction dominates scrolling. Keep the old surface as a diagnostic baseline.
-const _localRowGlassAction = bool.fromEnvironment(
-  'LOCAL_ROW_GLASS_ACTION',
-  defaultValue: false,
-);
-
 class LocalLibraryController extends ChangeNotifier {
-  void Function(BuildContext)? importMenu;
+  void Function(BuildContext)? importMenu, pageMenu;
   VoidCallback? search, refresh;
   bool importing = false;
   void changed() => notifyListeners();
@@ -75,20 +69,14 @@ Widget _localLibraryHeader(
       GlassMenuAnchor(
         child: Builder(
           builder: (anchor) => GlassIconButton(
-            key: const ValueKey('local-import-book'),
-            icon: CupertinoIcons.arrow_down_doc,
+            key: const ValueKey('local-library-actions'),
+            icon: CupertinoIcons.ellipsis,
             label: '本地书籍操作',
-            onPressed: controller?.importMenu == null
+            onPressed: controller?.pageMenu == null
                 ? null
-                : () => controller!.importMenu!(anchor),
+                : () => controller!.pageMenu!(anchor),
           ),
         ),
-      ),
-      GlassIconButton(
-        key: const ValueKey('local-search'),
-        icon: CupertinoIcons.search,
-        label: '搜索本地书籍',
-        onPressed: controller?.search,
       ),
     ],
   );
@@ -300,6 +288,7 @@ class _LocalLibraryPageState extends State<LocalLibraryPage>
     _controller.refresh = _reload;
     _controller.search = widget.onSearch ?? _toggleSearch;
     _controller.importMenu = _importMenu;
+    _controller.pageMenu = (anchor) => unawaited(_openPageMenu(anchor));
     _importer.addListener(_importChanged);
     // Keep data invalidation cheap even while this retained tab is offstage.
     // Import progress, keyboard and viewport changes reuse the ordered books.
@@ -350,6 +339,51 @@ class _LocalLibraryPageState extends State<LocalLibraryPage>
           _searchFocus.requestFocus();
         }
       });
+    }
+  }
+
+  Future<void> _openPageMenu(BuildContext anchor) async {
+    _searchFocus.unfocus();
+    final action = await showGlassMenu<String>(
+      context: anchor,
+      reduceMotion: widget.state.reduceMotion,
+      builder: (menu) => Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (!_importing)
+            GlassMenuItem(
+              label: '导入书籍',
+              icon: CupertinoIcons.arrow_down_doc,
+              order: 0,
+              onPressed: () => Navigator.pop(menu, 'import'),
+            ),
+          GlassMenuItem(
+            label: '搜索书籍',
+            icon: CupertinoIcons.search,
+            order: 1,
+            onPressed: () => Navigator.pop(menu, 'search'),
+          ),
+          GlassMenuItem(
+            label: '刷新书库',
+            icon: CupertinoIcons.arrow_clockwise,
+            order: 2,
+            onPressed: () => Navigator.pop(menu, 'refresh'),
+          ),
+        ],
+      ),
+    );
+    if (!anchor.mounted || !mounted || action == null) return;
+    switch (action) {
+      case 'import':
+        await _importMenu(anchor);
+        break;
+      case 'search':
+        _toggleSearch();
+        break;
+      case 'refresh':
+        _reload();
+        break;
     }
   }
 
@@ -419,6 +453,13 @@ class _LocalLibraryPageState extends State<LocalLibraryPage>
     }
   }
 
+  void _clearCollectionFilters(LocalLibraryPreferences organization) {
+    _search.clear();
+    setState(() {});
+    unawaited(organization.select(LocalLibraryPreferences.all));
+    unawaited(organization.setReadingFilter('all'));
+  }
+
   Future<void> _save(Future<void> Function() action) async {
     try {
       await action();
@@ -464,111 +505,105 @@ class _LocalLibraryPageState extends State<LocalLibraryPage>
     });
   }
 
-  Future<void> _bookMenu(Novel book) async {
+  Future<void> _bookMenu(BuildContext anchor, Novel book) async {
     final organization = _organization!;
-    final currentCategory = organization.groupOf(book.id);
     final seriesLabel = widget.books.seriesFor(book.id) == null
         ? '合并分卷'
         : '管理分卷';
-    final value = await showJellySheet<String>(
-      context: context,
+    final value = await showGlassMenu<String>(
+      context: anchor,
       reduceMotion: widget.state.reduceMotion,
-      builder: (sheet) {
-        Widget action(
-          String value,
-          String label,
-          IconData icon, {
-          bool destructive = false,
-        }) {
-          final color = destructive ? Theme.of(sheet).colorScheme.error : null;
-          return GlassTextButton(
-            key: ValueKey('local-book-action-$value'),
-            onPressed: () => Navigator.pop(sheet, value),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                ArchiveIcon(icon, size: 18, color: color),
-                const SizedBox(width: 8),
-                Flexible(
-                  child: AppText(label, style: TextStyle(color: color)),
-                ),
-              ],
-            ),
-          );
-        }
-
-        return SingleChildScrollView(
-          padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              ArchiveSection(title: book.title, code: 'LOCAL / ORGANIZE'),
-              GlassChoiceGroup<String>(
-                name: 'local-book-category',
-                label: '移至分类',
-                value: currentCategory,
-                options: {
-                  LocalLibraryPreferences.unfiled: '未分类',
-                  ...organization.groups,
-                },
-                leading: (category) => ArchiveIcon(
-                  category == currentCategory
-                      ? CupertinoIcons.check_mark
-                      : CupertinoIcons.folder,
-                  size: 16,
-                ),
-                onChanged: (category) => Navigator.pop(sheet, category),
-              ),
-              const SizedBox(height: 20),
-              Divider(height: 1, color: Theme.of(sheet).dividerColor),
-              const SizedBox(height: 12),
-              Row(
-                children: [
-                  Expanded(
-                    child: action(
-                      '_series',
-                      seriesLabel,
-                      CupertinoIcons.rectangle_stack,
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: action(
-                      '_batch',
-                      '批量选择',
-                      CupertinoIcons.checkmark_circle,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              action(
-                '_delete',
-                '移除书籍',
-                CupertinoIcons.trash,
-                destructive: true,
-              ),
-            ],
+      builder: (menu) => Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          GlassMenuItem(
+            key: const ValueKey('local-book-action-category'),
+            label: '移至分类',
+            icon: CupertinoIcons.folder,
+            onPressed: () => Navigator.pop(menu, 'category'),
           ),
-        );
-      },
+          GlassMenuItem(
+            key: const ValueKey('local-book-action-series'),
+            order: 1,
+            label: seriesLabel,
+            icon: CupertinoIcons.rectangle_stack,
+            onPressed: () => Navigator.pop(menu, 'series'),
+          ),
+          GlassMenuItem(
+            key: const ValueKey('local-book-action-batch'),
+            order: 2,
+            label: '批量选择',
+            icon: CupertinoIcons.checkmark_circle,
+            onPressed: () => Navigator.pop(menu, 'batch'),
+          ),
+          GlassMenuItem(
+            key: const ValueKey('local-book-action-delete'),
+            order: 3,
+            label: '移除书籍',
+            icon: CupertinoIcons.trash,
+            onPressed: () => Navigator.pop(menu, 'delete'),
+          ),
+        ],
+      ),
     );
     if (!mounted || value == null) return;
-    if (value == '_series') {
+    if (value == 'category') {
+      await _chooseBookCategory(book, organization);
+    } else if (value == 'series') {
       await _volumes(book);
-    } else if (value == '_delete') {
+    } else if (value == 'delete') {
       await _remove(book);
-    } else if (value == '_batch') {
+    } else if (value == 'batch') {
       await openLocalBookBatch(
         context,
         books: widget.books,
         library: widget.state,
         selected: {book.id},
       );
-    } else {
-      await _save(() => organization.assign(book.id, value));
     }
+  }
+
+  Future<void> _chooseBookCategory(
+    Novel book,
+    LocalLibraryPreferences organization,
+  ) async {
+    final currentCategory = organization.groupOf(book.id);
+    final category = await showJellySheet<String>(
+      context: context,
+      reduceMotion: widget.state.reduceMotion,
+      builder: (sheet) => SingleChildScrollView(
+        padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            ArchiveSection(
+              title: book.title,
+              subtitle: '选择要移入的分类',
+              code: 'LOCAL / CATEGORY',
+            ),
+            GlassChoiceGroup<String>(
+              name: 'local-book-category',
+              label: '移至分类',
+              value: currentCategory,
+              options: {
+                LocalLibraryPreferences.unfiled: '未分类',
+                ...organization.groups,
+              },
+              leading: (value) => ArchiveIcon(
+                value == currentCategory
+                    ? CupertinoIcons.check_mark
+                    : CupertinoIcons.folder,
+                size: 16,
+              ),
+              onChanged: (value) => Navigator.pop(sheet, value),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (!mounted || category == null) return;
+    await _save(() => organization.assign(book.id, category));
   }
 
   Future<void> _categories() => showBookCategories(
@@ -786,6 +821,7 @@ class _LocalLibraryPageState extends State<LocalLibraryPage>
     WidgetsBinding.instance.removeObserver(this);
     _controller
       ..importMenu = null
+      ..pageMenu = null
       ..search = null
       ..refresh = null;
     if (widget.controller == null) _controller.dispose();
@@ -801,278 +837,338 @@ class _LocalLibraryPageState extends State<LocalLibraryPage>
     super.dispose();
   }
 
-  Widget _header(BuildContext context) =>
-      _localLibraryHeader(context, _controller, back: true);
+  Widget _pageActions(BuildContext context) => AnimatedBuilder(
+    animation: _controller,
+    builder: (context, _) => GlassMenuAnchor(
+      child: Builder(
+        builder: (anchor) => GlassIconButton(
+          key: const ValueKey('local-library-actions'),
+          icon: CupertinoIcons.ellipsis,
+          label: '本地书籍操作',
+          onPressed: () => _openPageMenu(anchor),
+        ),
+      ),
+    ),
+  );
+
   @override
   Widget build(BuildContext context) {
     final organization = _organization;
-    final body = GlassHeaderLayout(
-      showHeader: widget.showHeader,
-      header: _header(context),
-      body: CompactMainPageControls(
-        enabled: widget.compactMainPageControls,
-        child: ActiveListenableBuilder(
-          listenable: _viewChanges ?? _bookChanges,
-          builder: (context) {
-            final books = _filteredBooks(organization);
-            final featured = organization?.viewMode.hasShelf == true
-                ? _featuredBooks(organization, books)
-                : const <Novel>[];
-            final shelf = organization?.showsShelf(featured.length) == true;
-            final mixed = organization?.viewMode.hasShelf == true;
-            final grid = organization?.viewMode.isGrid == true;
-            final independent =
-                organization?.viewMode.hasShelf == true &&
-                organization?.shelfContent.followCollection == false;
-            // A carousel is a featured view, not a replacement for the index.
-            // Every filtered book remains reachable in the same complete list.
-            final rows = books;
-            return LoadedContentSequence(
-              generation: (
-                organization?.selected,
-                organization?.readingFilter,
-                organization?.sort,
-                organization?.shelfContent.record,
-                _search.text,
-                shelf,
-                grid,
+    final body = CompactMainPageControls(
+      enabled: widget.compactMainPageControls,
+      child: ActiveListenableBuilder(
+        listenable: _viewChanges ?? _bookChanges,
+        builder: (context) {
+          final books = _filteredBooks(organization);
+          final featured = organization?.viewMode.hasShelf == true
+              ? _featuredBooks(organization, books)
+              : const <Novel>[];
+          final shelf = organization?.showsShelf(featured.length) == true;
+          final mixed = organization?.viewMode.hasShelf == true;
+          final grid = organization?.viewMode.isGrid == true;
+          final independent =
+              organization?.viewMode.hasShelf == true &&
+              organization?.shelfContent.followCollection == false;
+          // A carousel is a featured view, not a replacement for the index.
+          // Every filtered book remains reachable in the same complete list.
+          final rows = books;
+          return LoadedContentSequence(
+            generation: (
+              organization?.selected,
+              organization?.readingFilter,
+              organization?.sort,
+              organization?.shelfContent.record,
+              _search.text,
+              shelf,
+              grid,
+            ),
+            child: CustomScrollView(
+              key: const PageStorageKey('local-library'),
+              clipBehavior: LibraryReflowScope.clipOf(context),
+              cacheExtent: BookCollectionLayout.cacheExtentFor(
+                MediaQuery.sizeOf(context).width - 48,
+                base: 250,
+                grid: grid,
               ),
-              child: CustomScrollView(
-                key: const PageStorageKey('local-library'),
-                clipBehavior: LibraryReflowScope.clipOf(context),
-                cacheExtent: BookCollectionLayout.cacheExtentFor(
-                  MediaQuery.sizeOf(context).width - 48,
-                  base: 250,
-                  grid: grid,
-                ),
-                slivers: [
-                  SliverPadding(
-                    padding: EdgeInsets.fromLTRB(
-                      24,
-                      MediaQuery.paddingOf(context).top +
-                          FrostedHeader.toolbarHeight +
-                          20,
-                      24,
-                      14,
+              slivers: [
+                SliverPadding(
+                  padding: EdgeInsets.fromLTRB(
+                    24,
+                    MediaQuery.paddingOf(context).top +
+                        FrostedHeader.toolbarHeight +
+                        20,
+                    24,
+                    14,
+                  ),
+                  sliver: SliverToBoxAdapter(
+                    // SliverToBoxAdapter does not retain its child's picture
+                    // like SliverList does. Keep the toolbar/labels out of the
+                    // scroll repaint path; glass still resolves its transform
+                    // and live backdrop when the retained layers composite.
+                    child: _localToolbarPaint(
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          if (mixed)
+                            _shelfToolbar(organization!, featured.length)
+                          else ...[
+                            _collectionToolbar(organization, books.length),
+                            _searchField(),
+                          ],
+                          const SizedBox(height: 14),
+                          if (widget.books.books.isEmpty &&
+                              organization != null) ...[
+                            const SizedBox(
+                              height: 180,
+                              child: ContentNotice(
+                                icon: CupertinoIcons.tray,
+                                title: '还没有本地书籍',
+                                message: '点击右上角菜单导入书籍，导入后可离线阅读。',
+                              ),
+                            ),
+                          ],
+                          if (organization == null)
+                            BookCollectionSkeleton(
+                              rows: 2,
+                              grid: grid,
+                              gridDensity:
+                                  organization?.gridDensity ??
+                                  const BookGridDensity.auto(),
+                              label: _importProgress == null
+                                  ? '正在整理本地书库'
+                                  : '正在导入 ${_importProgress!.$1} / ${_importProgress!.$2} 本',
+                            )
+                          else if (_importing) ...[
+                            AppText(
+                              _importProgress == null
+                                  ? '正在导入书籍'
+                                  : '正在导入 ${_importProgress!.$1} / ${_importProgress!.$2} 本',
+                              style: const TextStyle(fontSize: 12),
+                            ),
+                            const SizedBox(
+                              height: 8,
+                              child: RefreshProgress(label: '正在导入书籍'),
+                            ),
+                          ],
+                          if ((_error ?? widget.books.seriesError) != null) ...[
+                            AppText(
+                              (_error ?? widget.books.seriesError)!,
+                              style: TextStyle(
+                                color: Theme.of(context).colorScheme.error,
+                              ),
+                            ),
+                            if (organization == null)
+                              GlassTextButton(
+                                onPressed: _load,
+                                child: const AppText('重试'),
+                              ),
+                          ],
+                          if (organization != null &&
+                              books.isEmpty &&
+                              widget.books.books.isNotEmpty &&
+                              !mixed)
+                            SizedBox(
+                              height: 180,
+                              child: ContentNotice(
+                                icon: CupertinoIcons.search,
+                                title: '没有符合条件的书籍',
+                                message: '换个分类、阅读状态或关键词再试。',
+                                secondaryAction: GlassTextButton(
+                                  onPressed: () =>
+                                      _clearCollectionFilters(organization),
+                                  child: const AppText('清除筛选'),
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
                     ),
+                  ),
+                ),
+                if (mixed && featured.isEmpty)
+                  SliverPadding(
+                    padding: const EdgeInsets.fromLTRB(24, 0, 24, 20),
                     sliver: SliverToBoxAdapter(
-                      // SliverToBoxAdapter does not retain its child's picture
-                      // like SliverList does. Keep the toolbar/labels out of the
-                      // scroll repaint path; glass still resolves its transform
-                      // and live backdrop when the retained layers composite.
+                      child: SizedBox(
+                        height: 180,
+                        child: ContentNotice(
+                          icon: CupertinoIcons.book,
+                          title: '立体书架暂无符合条件的书籍',
+                          message: '调整收藏范围或分类后再试。',
+                          secondaryAction: organization == null
+                              ? null
+                              : GlassTextButton(
+                                  onPressed: () =>
+                                      _clearCollectionFilters(organization),
+                                  child: const AppText('清除筛选'),
+                                ),
+                        ),
+                      ),
+                    ),
+                  ),
+                if (mixed && featured.isNotEmpty && !shelf)
+                  SliverPadding(
+                    padding: const EdgeInsets.fromLTRB(24, 0, 24, 20),
+                    sliver: SliverToBoxAdapter(
+                      child: AppText(
+                        '当前范围共 ${featured.length} 本，达到 ${organization!.shelfPreferences.minimumBooks} 本时显示立体书架。',
+                        style: const TextStyle(fontSize: 13),
+                      ),
+                    ),
+                  ),
+                if (shelf)
+                  SliverToBoxAdapter(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 24),
+                      child: ArchiveFileCarousel(
+                        key: ValueKey((
+                          'local-shelf',
+                          independent
+                              ? organization!.shelfContent.record
+                              : (
+                                  organization!.selected,
+                                  organization.readingFilter,
+                                  organization.sort,
+                                  _search.text,
+                                ),
+                          independent ? _shelfCategory(organization) : null,
+                        )),
+                        books: featured
+                            .take(
+                              organization.shelfPreferences.featuredCount(
+                                featured.length,
+                              ),
+                            )
+                            .toList(),
+                        repeatFill: organization.shelfPreferences.repeatFill,
+                        library: widget.state,
+                        entry: ReadingEntry.local,
+                        reduceMotion: widget.state.reduceMotion,
+                        animateEntrance: true,
+                        onOpen: _open,
+                      ),
+                    ),
+                  ),
+                if (mixed)
+                  SliverPadding(
+                    padding: const EdgeInsets.fromLTRB(24, 20, 24, 16),
+                    sliver: SliverToBoxAdapter(
                       child: _localToolbarPaint(
                         Column(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
-                            if (mixed)
-                              _shelfToolbar(organization!, featured.length)
-                            else ...[
-                              _collectionToolbar(organization, books.length),
-                              _searchField(),
-                            ],
-                            const SizedBox(height: 14),
-                            if (widget.books.books.isEmpty &&
-                                organization != null) ...[
-                              const AppText(
-                                '还没有本地书籍，点击右上角导入按钮添加。',
-                                style: TextStyle(height: 1.7),
-                              ),
-                            ],
-                            if (organization == null)
-                              BookCollectionSkeleton(
-                                rows: 2,
-                                grid: grid,
-                                gridDensity:
-                                    organization?.gridDensity ??
-                                    const BookGridDensity.auto(),
-                                label: _importProgress == null
-                                    ? '正在整理本地书库'
-                                    : '正在导入 ${_importProgress!.$1} / ${_importProgress!.$2} 本',
-                              )
-                            else if (_importing) ...[
-                              AppText(
-                                _importProgress == null
-                                    ? '正在导入书籍'
-                                    : '正在导入 ${_importProgress!.$1} / ${_importProgress!.$2} 本',
-                                style: const TextStyle(fontSize: 12),
-                              ),
-                              const SizedBox(
-                                height: 8,
-                                child: RefreshProgress(label: '正在导入书籍'),
-                              ),
-                            ],
-                            if ((_error ?? widget.books.seriesError) !=
-                                null) ...[
-                              AppText(
-                                (_error ?? widget.books.seriesError)!,
-                                style: TextStyle(
-                                  color: Theme.of(context).colorScheme.error,
-                                ),
-                              ),
-                              if (organization == null)
-                                GlassTextButton(
-                                  onPressed: _load,
-                                  child: const AppText('重试'),
-                                ),
-                            ],
-                            if (organization != null &&
-                                books.isEmpty &&
-                                widget.books.books.isNotEmpty &&
-                                !mixed)
-                              const Padding(
-                                padding: EdgeInsets.symmetric(vertical: 24),
-                                child: AppText('没有符合条件的书籍，换个分类或关键词试试。'),
-                              ),
+                            _collectionToolbar(
+                              organization,
+                              books.length,
+                              region: true,
+                            ),
+                            _searchField(),
                           ],
                         ),
                       ),
                     ),
                   ),
-                  if (mixed && featured.isEmpty)
-                    const SliverPadding(
-                      padding: EdgeInsets.fromLTRB(24, 0, 24, 20),
-                      sliver: SliverToBoxAdapter(
-                        child: AppText('立体书架暂无符合条件的书籍'),
-                      ),
-                    ),
-                  if (mixed && featured.isNotEmpty && !shelf)
-                    SliverPadding(
-                      padding: const EdgeInsets.fromLTRB(24, 0, 24, 20),
-                      sliver: SliverToBoxAdapter(
-                        child: AppText(
-                          '当前范围共 ${featured.length} 本，达到 ${organization!.shelfPreferences.minimumBooks} 本时显示立体书架。',
-                          style: const TextStyle(fontSize: 13),
-                        ),
-                      ),
-                    ),
-                  if (shelf)
-                    SliverToBoxAdapter(
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 24),
-                        child: ArchiveFileCarousel(
-                          key: ValueKey((
-                            'local-shelf',
-                            independent
-                                ? organization!.shelfContent.record
-                                : (
-                                    organization!.selected,
-                                    organization.readingFilter,
-                                    organization.sort,
-                                    _search.text,
-                                  ),
-                            independent ? _shelfCategory(organization) : null,
-                          )),
-                          books: featured
-                              .take(
-                                organization.shelfPreferences.featuredCount(
-                                  featured.length,
-                                ),
-                              )
-                              .toList(),
-                          repeatFill: organization.shelfPreferences.repeatFill,
-                          library: widget.state,
-                          entry: ReadingEntry.local,
-                          reduceMotion: widget.state.reduceMotion,
-                          animateEntrance: true,
-                          onOpen: _open,
-                        ),
-                      ),
-                    ),
-                  if (mixed)
-                    SliverPadding(
-                      padding: const EdgeInsets.fromLTRB(24, 20, 24, 16),
-                      sliver: SliverToBoxAdapter(
-                        child: _localToolbarPaint(
-                          Column(
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: [
-                              _collectionToolbar(
-                                organization,
-                                books.length,
-                                region: true,
-                              ),
-                              _searchField(),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
-                  if (mixed && books.isEmpty)
-                    const SliverPadding(
-                      padding: EdgeInsets.fromLTRB(24, 20, 24, 24),
-                      sliver: SliverToBoxAdapter(
-                        child: AppText('下方暂无符合条件的书籍，换个分类或关键词试试。'),
-                      ),
-                    ),
+                if (mixed && books.isEmpty)
                   SliverPadding(
-                    padding: const EdgeInsets.symmetric(horizontal: 24),
-                    sliver: BookCollectionSliver(
-                      shareRowGlass: !grid,
-                      grid: grid,
-                      gridDensity:
-                          organization?.gridDensity ??
-                          const BookGridDensity.auto(),
-                      gridBottomInset: widget.showHeader
-                          ? MediaQuery.paddingOf(context).bottom + 32
-                          : DockLayout.scrollPaddingOf(context),
-                      onGridViewport: (v) => _gridViewport.value = v,
-                      itemCount: rows.length,
-                      itemBuilder: (context, index) {
-                        final book = rows[index],
-                            tag = ValueKey('local-cover-${rows[index].id}');
-                        return LoadedContentItem(
-                          key: ValueKey(book.id),
-                          index: index,
-                          placeholder: grid
-                              ? const BookGridSkeleton()
-                              : const BookRowSkeleton(),
-                          child: grid
-                              ? BookGridTile(
-                                  key: ValueKey('local-grid-book-${book.id}'),
-                                  book: book,
-                                  coverHeroTag: tag,
-                                  onTap: () => _open(book, tag),
-                                  progress: _gridProgress(book),
-                                  trailing: GlassIconButton.custom(
-                                    label: '整理 ${book.title}',
-                                    onPressed: () => _bookMenu(book),
-                                    liveGlass: false,
-                                    transparent: true,
-                                    child: const ArchiveIcon(
-                                      CupertinoIcons.ellipsis,
-                                      size: 18,
+                    padding: const EdgeInsets.fromLTRB(24, 20, 24, 24),
+                    sliver: SliverToBoxAdapter(
+                      child: SizedBox(
+                        height: 180,
+                        child: ContentNotice(
+                          icon: CupertinoIcons.search,
+                          title: '暂无符合条件的书籍',
+                          message: '换个分类、阅读状态或关键词再试。',
+                          secondaryAction: organization == null
+                              ? null
+                              : GlassTextButton(
+                                  onPressed: () =>
+                                      _clearCollectionFilters(organization),
+                                  child: const AppText('清除筛选'),
+                                ),
+                        ),
+                      ),
+                    ),
+                  ),
+                SliverPadding(
+                  padding: const EdgeInsets.symmetric(horizontal: 24),
+                  sliver: BookCollectionSliver(
+                    shareRowGlass: !grid,
+                    grid: grid,
+                    gridDensity:
+                        organization?.gridDensity ??
+                        const BookGridDensity.auto(),
+                    gridBottomInset: widget.showHeader
+                        ? MediaQuery.paddingOf(context).bottom + 32
+                        : DockLayout.scrollPaddingOf(context),
+                    onGridViewport: (v) => _gridViewport.value = v,
+                    itemCount: rows.length,
+                    itemBuilder: (context, index) {
+                      final book = rows[index],
+                          tag = ValueKey('local-cover-${rows[index].id}');
+                      return LoadedContentItem(
+                        key: ValueKey(book.id),
+                        index: index,
+                        placeholder: grid
+                            ? const BookGridSkeleton()
+                            : const BookRowSkeleton(),
+                        child: grid
+                            ? BookGridTile(
+                                key: ValueKey('local-grid-book-${book.id}'),
+                                book: book,
+                                coverHeroTag: tag,
+                                onTap: () => _open(book, tag),
+                                progress: _gridProgress(book),
+                                trailing: GlassMenuAnchor(
+                                  child: Builder(
+                                    builder: (anchor) => GlassIconButton.custom(
+                                      label: '整理 ${book.title}',
+                                      onPressed: () => _bookMenu(anchor, book),
+                                      liveGlass: false,
+                                      transparent: true,
+                                      child: const ArchiveIcon(
+                                        CupertinoIcons.ellipsis,
+                                        size: 18,
+                                      ),
                                     ),
                                   ),
-                                )
-                              : NovelRow(
-                                  novel: book,
-                                  coverHeroTag: tag,
-                                  onTap: () => _open(book, tag),
-                                  trailing: GlassIconButton(
-                                    icon: CupertinoIcons.ellipsis,
-                                    label: '整理 ${book.title}',
-                                    onPressed: () => _bookMenu(book),
-                                    liveGlass: _localRowGlassAction,
+                                ),
+                              )
+                            : NovelRow(
+                                novel: book,
+                                coverHeroTag: tag,
+                                onTap: () => _open(book, tag),
+                                trailing: GlassMenuAnchor(
+                                  child: Builder(
+                                    builder: (anchor) => CompactRowMenuButton(
+                                      label: '整理 ${book.title}',
+                                      onPressed: () => _bookMenu(anchor, book),
+                                    ),
                                   ),
                                 ),
-                        );
-                      },
-                    ),
+                              ),
+                      );
+                    },
                   ),
-                  SliverToBoxAdapter(
-                    child: SizedBox(
-                      height: widget.showHeader
-                          ? MediaQuery.paddingOf(context).bottom + 32
-                          : DockLayout.scrollPaddingOf(context),
-                    ),
+                ),
+                SliverToBoxAdapter(
+                  child: SizedBox(
+                    height: widget.showHeader
+                        ? MediaQuery.paddingOf(context).bottom + 32
+                        : DockLayout.scrollPaddingOf(context),
                   ),
-                ],
-              ),
-            );
-          },
-        ),
+                ),
+              ],
+            ),
+          );
+        },
       ),
     );
-    return widget.showHeader ? Scaffold(body: Atmosphere(child: body)) : body;
+    if (!widget.showHeader) return body;
+    return ArchiveFeaturePage(
+      title: '本地',
+      code: 'LOCAL / LIBRARY',
+      actions: [_pageActions(context)],
+      child: body,
+    );
   }
 }

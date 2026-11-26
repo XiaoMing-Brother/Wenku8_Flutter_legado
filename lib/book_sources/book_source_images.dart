@@ -57,16 +57,42 @@ abstract final class BookSourceImages {
   static Uint8List? peekCover(String sourceKey, String url) =>
       _cache.peek(_coverKey(sourceKey, url));
 
-  static Future<Uint8List> coverBytes(String sourceKey, String url, {String? bookKey}) =>
-      _cache.load(
-        _coverKey(sourceKey, url),
-        () => CoverDiskCache.shared.load(
-          sourceKey, url, () => _fetch((sourceKey: sourceKey, url: url)), bookKey: bookKey,
-        ),
-      );
+  static Future<Uint8List> coverBytes(
+    String sourceKey,
+    String url, {
+    String? bookKey,
+  }) => _cache.load(
+    _coverKey(sourceKey, url),
+    () => CoverDiskCache.shared.load(
+      sourceKey,
+      url,
+      () => _fetchCover((
+        sourceKey: sourceKey,
+        url: url,
+        bookUrl: _bookKeyUrl(bookKey),
+      )),
+      bookKey: bookKey,
+    ),
+  );
 
   static Future<Uint8List> _fetch(({String sourceKey, String url}) image) =>
       _transport.image(sourceKey: image.sourceKey, url: image.url);
+
+  /// 封面需要执行 coverDecodeJs，并把书籍地址传给脚本的 book.bookUrl。
+  static Future<Uint8List> _fetchCover(
+    ({String sourceKey, String url, String? bookUrl}) image,
+  ) => _transport.image(
+    sourceKey: image.sourceKey,
+    url: image.url,
+    cover: true,
+    bookUrl: image.bookUrl,
+  );
+
+  static String? _bookKeyUrl(String? bookKey) {
+    if (bookKey == null || !bookKey.contains('\u0000')) return null;
+    final value = bookKey.substring(bookKey.indexOf('\u0000') + 1).trim();
+    return value.isEmpty ? null : value;
+  }
 
   static int markerRevision(String marker) {
     final image = parseMarker(marker);

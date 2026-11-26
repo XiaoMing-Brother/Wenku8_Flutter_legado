@@ -293,89 +293,95 @@ class _ReadingMomentDialogState extends State<ReadingMomentDialog>
               child: ReadingMomentReveal(
                 animation: _reveal,
                 accent: readingExportTheme(widget.theme).accent,
-                child: Material(
-                  color: scheme.surface,
-                  shape: const BeveledRectangleBorder(
-                    borderRadius: BorderRadius.only(
-                      topRight: Radius.circular(14),
-                      bottomLeft: Radius.circular(14),
+                child: GlassOverlaySurface(
+                  preserveOptics: true,
+                  child: Material(
+                    color: scheme.surface,
+                    shape: const BeveledRectangleBorder(
+                      borderRadius: BorderRadius.only(
+                        topRight: Radius.circular(14),
+                        bottomLeft: Radius.circular(14),
+                      ),
                     ),
-                  ),
-                  clipBehavior: Clip.antiAlias,
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(14, 14, 14, 12),
-                    child: Column(
-                      key: const ValueKey('reading-moment-popup'),
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        _MomentSheetHeader(
-                          title: widget.isPreview ? '效果预览' : '阅读纪念',
-                          subtitle:
-                              '${widget.moment.earnedAt.year}年'
-                              '${widget.moment.earnedAt.month}月${widget.moment.earnedAt.day}日',
-                          closeKey: const ValueKey('reading-moment-close'),
-                        ),
-                        const SizedBox(height: 14),
-                        Flexible(
-                          child: SingleChildScrollView(
-                            key: const ValueKey('reading-moment-popup-content'),
-                            padding: const EdgeInsets.only(bottom: 8),
-                            child: ClipRRect(
-                              borderRadius: BorderRadius.circular(14),
-                              child: Material(
-                                color: Colors.transparent,
-                                child: ReadingMomentContent(
-                                  presentation: _presentation,
-                                  compact: true,
+                    clipBehavior: Clip.antiAlias,
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(14, 14, 14, 12),
+                      child: Column(
+                        key: const ValueKey('reading-moment-popup'),
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          _MomentSheetHeader(
+                            title: widget.isPreview ? '效果预览' : '阅读纪念',
+                            code: 'LIBRARY / READING MOMENT',
+                            subtitle:
+                                '${widget.moment.earnedAt.year}年'
+                                '${widget.moment.earnedAt.month}月${widget.moment.earnedAt.day}日',
+                            closeKey: const ValueKey('reading-moment-close'),
+                          ),
+                          const SizedBox(height: 14),
+                          Flexible(
+                            child: SingleChildScrollView(
+                              key: const ValueKey(
+                                'reading-moment-popup-content',
+                              ),
+                              padding: const EdgeInsets.only(bottom: 8),
+                              child: ClipRRect(
+                                borderRadius: BorderRadius.circular(14),
+                                child: Material(
+                                  color: Colors.transparent,
+                                  child: ReadingMomentContent(
+                                    presentation: _presentation,
+                                    compact: true,
+                                  ),
                                 ),
                               ),
                             ),
                           ),
-                        ),
-                        const SizedBox(height: 10),
-                        if (widget.moment.completion != null)
-                          Row(
-                            children: [
-                              const ArchiveIcon(CupertinoIcons.eye, size: 18),
-                              const SizedBox(width: 10),
-                              const Expanded(child: AppText('书籍信息')),
-                              AppControls.toggle(
-                                context,
-                                key: const ValueKey(
-                                  'reading-moment-book-details',
+                          const SizedBox(height: 10),
+                          if (widget.moment.completion != null)
+                            Row(
+                              children: [
+                                const ArchiveIcon(CupertinoIcons.eye, size: 18),
+                                const SizedBox(width: 10),
+                                const Expanded(child: AppText('书籍信息')),
+                                AppControls.toggle(
+                                  context,
+                                  key: const ValueKey(
+                                    'reading-moment-book-details',
+                                  ),
+                                  value: _showBookDetails,
+                                  onChanged: _exporting
+                                      ? null
+                                      : (value) => setState(
+                                          () => _showBookDetails = value,
+                                        ),
                                 ),
-                                value: _showBookDetails,
-                                onChanged: _exporting
-                                    ? null
-                                    : (value) => setState(
-                                        () => _showBookDetails = value,
-                                      ),
+                              ],
+                            ),
+                          if (LocalPlatform.fileActions) ...[
+                            const SizedBox(height: 8),
+                            _fileActions(context),
+                          ],
+                          if (_feedback != null)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 8),
+                              child: Semantics(
+                                liveRegion: true,
+                                child: AppText(
+                                  _feedback!,
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    height: 1.5,
+                                    color: _failedExport
+                                        ? scheme.error
+                                        : scheme.onSurfaceVariant,
+                                  ),
+                                ),
                               ),
-                            ],
-                          ),
-                        if (LocalPlatform.fileActions) ...[
-                          const SizedBox(height: 8),
-                          _fileActions(context),
+                            ),
                         ],
-                        if (_feedback != null)
-                          Padding(
-                            padding: const EdgeInsets.only(top: 8),
-                            child: Semantics(
-                              liveRegion: true,
-                              child: AppText(
-                                _feedback!,
-                                style: TextStyle(
-                                  fontSize: 13,
-                                  height: 1.5,
-                                  color: _failedExport
-                                      ? scheme.error
-                                      : scheme.onSurfaceVariant,
-                                ),
-                              ),
-                            ),
-                          ),
-                      ],
+                      ),
                     ),
                   ),
                 ),
@@ -391,10 +397,12 @@ class _ReadingMomentDialogState extends State<ReadingMomentDialog>
 class _MomentSheetHeader extends StatelessWidget {
   const _MomentSheetHeader({
     required this.title,
+    required this.code,
     required this.closeKey,
     this.subtitle,
   });
   final String title;
+  final String code;
   final String? subtitle;
   final Key closeKey;
 
@@ -402,24 +410,10 @@ class _MomentSheetHeader extends StatelessWidget {
   Widget build(BuildContext context) => Row(
     children: [
       Expanded(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            AppText(
-              title,
-              style: const TextStyle(fontSize: 21, fontWeight: FontWeight.w600),
-            ),
-            if (subtitle != null) ...[
-              const SizedBox(height: 5),
-              AppText(
-                subtitle!,
-                style: TextStyle(
-                  fontSize: 12,
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
-                ),
-              ),
-            ],
-          ],
+        child: ArchiveSection(
+          title: title,
+          code: code,
+          subtitle: subtitle ?? '',
         ),
       ),
       const SizedBox(width: 12),
@@ -463,12 +457,13 @@ class ReadingMomentsHistorySheet extends StatelessWidget {
     builder: (context, _) {
       final moments = store.moments;
       return Padding(
-        padding: const EdgeInsets.fromLTRB(24, 8, 24, 20),
+        padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             _MomentSheetHeader(
               title: '阅读纪念',
+              code: 'LIBRARY / MOMENT HISTORY',
               subtitle: moments.isEmpty ? null : '已珍藏 ${moments.length} 个时刻',
               closeKey: const ValueKey('reading-moments-history-close'),
             ),

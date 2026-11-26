@@ -230,9 +230,9 @@ class _BookListImportPageState extends State<BookListImportPage> {
       child: ListView(
         padding: featurePadding(context),
         children: [
-          const AppText(
-            '把 Legado 书架带过来',
-            style: TextStyle(fontSize: 22, fontWeight: FontWeight.w600),
+          const ArchiveSection(
+            title: '把 Legado 书架带过来',
+            code: 'MIGRATION / INTRODUCTION',
           ),
           const SizedBox(height: 12),
           const AppText('支持 Legado 导出的完整书架 JSON，也支持 legado_md3 导出的书名、作者和简介列表。'),
@@ -282,7 +282,7 @@ class _BookListImportPageState extends State<BookListImportPage> {
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        sectionHeader(context, '识别结果', ''),
+        sectionHeader(context, '识别结果', '', code: 'MIGRATION / BOOK LIST'),
         const SizedBox(height: 12),
         AppText(
           '${preview.entries.length} 本可加入书架'
@@ -294,6 +294,7 @@ class _BookListImportPageState extends State<BookListImportPage> {
             '来源：$source',
             style: TextStyle(
               fontSize: 12,
+              height: 1.4,
               color: Theme.of(context).colorScheme.onSurfaceVariant,
             ),
           ),
@@ -303,13 +304,18 @@ class _BookListImportPageState extends State<BookListImportPage> {
           preview.hasSourceCoordinates
               ? '已识别到 Legado 书源和书籍地址，点开时会优先按原坐标匹配。'
               : '未识别到书源地址，点开时会按书名和作者搜索。',
-          style: const TextStyle(fontSize: 12),
+          style: TextStyle(
+            fontSize: 12,
+            height: 1.6,
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
+          ),
         ),
         const SizedBox(height: 6),
         AppText(
           '导入后书架会显示「待匹配」，不需要等待搜索。',
           style: TextStyle(
             fontSize: 12,
+            height: 1.4,
             color: Theme.of(context).colorScheme.onSurfaceVariant,
           ),
         ),
@@ -320,12 +326,20 @@ class _BookListImportPageState extends State<BookListImportPage> {
           AppText(
             '· 《${entry.title}》'
             '${entry.author.isEmpty ? '' : ' / ${entry.author}'}',
-            style: const TextStyle(fontSize: 12),
+            style: TextStyle(
+              fontSize: 12,
+              height: 1.4,
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
           ),
         if (preview.entries.length > 12)
           AppText(
             '还有 ${preview.entries.length - 12} 本',
-            style: const TextStyle(fontSize: 12),
+            style: TextStyle(
+              fontSize: 12,
+              height: 1.4,
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
           ),
         const SizedBox(height: 18),
         GlassTextButton(
@@ -344,7 +358,7 @@ class _BookListImportPageState extends State<BookListImportPage> {
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        sectionHeader(context, '导入结果', ''),
+        sectionHeader(context, '导入结果', '', code: 'MIGRATION / RESULT'),
         const SizedBox(height: 12),
         AppText(
           '已加入 ${result.added} 本 · 已在书架 ${result.skipped} 本'
@@ -355,6 +369,7 @@ class _BookListImportPageState extends State<BookListImportPage> {
           result.added > 0 ? '待匹配书籍会在点开时自动搜索书源；也可以从行尾菜单重新匹配。' : '没有新增待匹配书籍。',
           style: TextStyle(
             fontSize: 12,
+            height: 1.6,
             color: Theme.of(context).colorScheme.onSurfaceVariant,
           ),
         ),

@@ -53,6 +53,50 @@ internal class BookSourceVariables(context: Context?) {
         preferences?.edit()?.remove(preferenceKey(key))?.apply()
     }
 
+    fun getSourceValue(sourceKey: String, key: String): String =
+        get(sourceValueKey(sourceKey, key))
+
+    fun putSourceValue(sourceKey: String, key: String, value: String) {
+        put(sourceValueKey(sourceKey, key), value)
+    }
+
+    private fun scopedKey(vararg parts: String) = parts.joinToString("", prefix = "rule:") { "${it.length}:$it" }
+
+    fun readRule(source: String, book: BookData?, chapter: ChapterData?, key: String): String {
+        if (key == "bookName" && book != null) return book.name
+        if (key == "title" && chapter != null) return chapter.title
+        if (chapter != null) {
+            val value = if (chapter.variableUrl.isEmpty()) chapter.pendingVariables[key] else
+                get(scopedKey(source, book?.bookUrl.orEmpty(), chapter.variableUrl, key))
+            if (!value.isNullOrEmpty()) return value
+        }
+        if (book != null) {
+            val value = if (book.bookUrl.isEmpty()) book.pendingVariables[key] else get(scopedKey(source, book.bookUrl, key))
+            if (!value.isNullOrEmpty()) return value
+        }
+        return getSourceValue(source, key)
+    }
+
+    fun writeRule(source: String, book: BookData?, chapter: ChapterData?, key: String, value: String) {
+        when {
+            chapter != null && chapter.variableUrl.isEmpty() -> chapter.pendingVariables[key] = value
+            chapter != null -> put(scopedKey(source, book?.bookUrl.orEmpty(), chapter.variableUrl, key), value)
+            book != null && book.bookUrl.isEmpty() -> book.pendingVariables[key] = value
+            book != null -> put(scopedKey(source, book.bookUrl, key), value)
+            else -> putSourceValue(source, key, value)
+        }
+    }
+
+    fun removeRule(source: String, book: BookData?, chapter: ChapterData?, key: String) {
+        when {
+            chapter != null && chapter.variableUrl.isEmpty() -> chapter.pendingVariables.remove(key)
+            chapter != null -> remove(scopedKey(source, book?.bookUrl.orEmpty(), chapter.variableUrl, key))
+            book != null && book.bookUrl.isEmpty() -> book.pendingVariables.remove(key)
+            book != null -> remove(scopedKey(source, book.bookUrl, key))
+            else -> remove(sourceValueKey(source, key))
+        }
+    }
+
     @Synchronized
     fun deviceId(sourceKey: String): String {
         val key = "scriptDeviceId:$sourceKey"
@@ -75,6 +119,9 @@ internal fun loginInfoKey(sourceKey: String): String = "$LoginInfoKeyPrefix$sour
 internal fun loginHeaderKey(sourceKey: String): String = "$LoginHeaderKeyPrefix$sourceKey"
 
 internal fun cookieKey(sourceKey: String): String = "$CookieKeyPrefix$sourceKey"
+
+internal fun sourceValueKey(sourceKey: String, key: String): String =
+    "sourceValue:$sourceKey:$key"
 
 private const val LoginInfoKeyPrefix = "login:"
 private const val LoginHeaderKeyPrefix = "loginHeader:"

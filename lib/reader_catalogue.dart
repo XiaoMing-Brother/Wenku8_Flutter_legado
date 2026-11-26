@@ -170,17 +170,14 @@ class _ReaderCatalogueState extends State<ReaderCatalogue>
   }
 
   Widget _contents(BuildContext context) => Padding(
-    padding: const EdgeInsets.fromLTRB(18, 8, 18, 12),
+    padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Row(
           children: [
             const Expanded(
-              child: AppText(
-                '目录',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
-              ),
+              child: ArchiveSection(title: '目录', code: 'READER / CATALOGUE'),
             ),
             GlassIconButton(
               key: const ValueKey('reader-catalogue-search-toggle'),
@@ -229,7 +226,20 @@ class _ReaderCatalogueState extends State<ReaderCatalogue>
 
   Widget _chapters(BuildContext context) {
     if (_matches.isEmpty) {
-      return const Center(child: AppText('没有匹配的章节'));
+      return ContentNotice(
+        icon: CupertinoIcons.search,
+        title: '没有匹配的章节',
+        message: '换个章节名或章序再试。',
+        secondaryAction: _search.text.trim().isEmpty
+            ? null
+            : GlassTextButton(
+                onPressed: () {
+                  _search.clear();
+                  _filterChanged('');
+                },
+                child: const AppText('清除搜索'),
+              ),
+      );
     }
     final matches = _matches.toSet();
     // Reorder only the display projection; row indices remain source addresses.

@@ -224,7 +224,7 @@ class _DictRulesPageState extends State<DictRulesPage> {
                       key: const ValueKey('dict-rule-list'),
                       buildDefaultDragHandles: false,
                       padding: EdgeInsets.only(
-                        bottom: MediaQuery.paddingOf(context).bottom + 24,
+                        bottom: MediaQuery.paddingOf(context).bottom + 32,
                       ),
                       itemCount: _visibleRules.length,
                       onReorder: (from, to) => _reorder(from, to),
@@ -353,73 +353,68 @@ class _DictRulesPageState extends State<DictRulesPage> {
     return Container(
       key: ValueKey(rule.name),
       margin: const EdgeInsets.only(bottom: 14),
-      child: ReorderableDelayedDragStartListener(
-        index: index,
-        child: ContentPanel(
-          onTap: () => _edit(rule),
-          child: Row(
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    AppText(
-                      rule.name,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontWeight: FontWeight.w600),
-                    ),
-                    const SizedBox(height: 5),
-                    Tooltip(
-                      message: details,
-                      child: AppText(
-                        details,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: 12,
-                          height: 1.4,
-                          color: muted,
-                        ),
-                      ),
-                    ),
-                    if (unsupported)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 4),
-                        child: Text(
-                          rule.validationError!,
-                          style: TextStyle(
-                            fontSize: 11,
-                            color: Theme.of(context).colorScheme.error,
-                          ),
-                        ),
-                      ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 4),
-              AppControls.toggle(
-                context,
-                value: rule.enabled,
-                liteGlass: true,
-                onChanged: (value) async {
-                  try {
-                    await _store.setEnabled(rule.name, value);
-                  } catch (error) {
-                    _feedback(_message(error), error: true);
-                  }
-                },
-              ),
-              GlassMenuAnchor(
-                child: Builder(
-                  builder: (anchor) => CompactRowMenuButton(
-                    label: '${rule.name} 更多操作',
-                    onPressed: () => _openRuleMenu(anchor, rule),
+      child: ContentPanel(
+        onTap: () => _edit(rule),
+        child: Row(
+          children: [
+            ArchiveReorderHandle(index: index, label: '拖动调整${rule.name}的顺序'),
+            const SizedBox(width: 4),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  AppText(
+                    rule.name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontWeight: FontWeight.w600),
                   ),
+                  const SizedBox(height: 5),
+                  Tooltip(
+                    message: details,
+                    child: AppText(
+                      details,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: 12, height: 1.4, color: muted),
+                    ),
+                  ),
+                  if (unsupported)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: Text(
+                        rule.validationError!,
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: Theme.of(context).colorScheme.error,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 4),
+            AppControls.toggle(
+              context,
+              value: rule.enabled,
+              liteGlass: true,
+              onChanged: (value) async {
+                try {
+                  await _store.setEnabled(rule.name, value);
+                } catch (error) {
+                  _feedback(_message(error), error: true);
+                }
+              },
+            ),
+            GlassMenuAnchor(
+              child: Builder(
+                builder: (anchor) => CompactRowMenuButton(
+                  label: '${rule.name} 更多操作',
+                  onPressed: () => _openRuleMenu(anchor, rule),
                 ),
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
@@ -530,7 +525,7 @@ class _DictRuleEditorState extends State<_DictRuleEditor> {
 
   @override
   Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.fromLTRB(24, 8, 24, 18),
+    padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -673,7 +668,7 @@ class _DictRuleTesterState extends State<_DictRuleTester> {
 
   @override
   Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.fromLTRB(24, 8, 24, 18),
+    padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -713,28 +708,20 @@ class _DictRuleTesterState extends State<_DictRuleTester> {
         ),
         const SizedBox(height: 12),
         Expanded(
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              color: Theme.of(
-                context,
-              ).colorScheme.surfaceContainerHighest.withValues(alpha: .35),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Padding(
-              padding: const EdgeInsets.all(12),
-              child: SingleChildScrollView(
-                child: _error != null
-                    ? Text(
-                        _error!,
-                        style: TextStyle(
-                          color: Theme.of(context).colorScheme.error,
-                        ),
-                      )
-                    : SelectableText(
-                        _result.isEmpty ? '查询结果会显示在这里' : _result,
-                        style: const TextStyle(fontSize: 14, height: 1.65),
+          child: ContentPanel(
+            padding: const EdgeInsets.all(12),
+            child: SingleChildScrollView(
+              child: _error != null
+                  ? AppText(
+                      _error!,
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.error,
                       ),
-              ),
+                    )
+                  : SelectableText(
+                      _result.isEmpty ? '查询结果会显示在这里' : _result,
+                      style: const TextStyle(fontSize: 14, height: 1.65),
+                    ),
             ),
           ),
         ),

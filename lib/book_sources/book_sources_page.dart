@@ -419,6 +419,7 @@ class _BookSourcesPageState extends State<BookSourcesPage> {
       maxWidth: 560,
       builder: (_) => _OptionPickerSheet<String>(
         title: '按分组筛选',
+        code: 'SOURCE / GROUP',
         selected: _groupFilter ?? '',
         options: [('', '全部分组'), for (final group in groups) (group, group)],
       ),
@@ -2787,6 +2788,7 @@ class _SourceEditorSheetState extends State<_SourceEditorSheet> {
                       '${widget.source.typeLabel}书源',
                       style: TextStyle(
                         fontSize: 12,
+                        height: 1.4,
                         color: Theme.of(context).colorScheme.onSurfaceVariant,
                       ),
                     ),
@@ -2911,14 +2913,21 @@ class _BookSourceLoginSheetState extends State<BookSourceLoginSheet> {
     _resetFields(widget.initial);
   }
 
-  void _resetFields(BookSourceLoginState state) {
-    _loggedIn = state.loggedIn;
-    for (final controller in _controllers.values) {
-      controller.dispose();
-    }
+  void _resetFields(BookSourceLoginState state, {bool keepStatus = false}) {
+    if (!keepStatus) _loggedIn = state.loggedIn;
+    final retired = _controllers.values.toList();
     _controllers.clear();
     _fields.clear();
     _selectOptions.clear();
+    if (retired.isNotEmpty) {
+      // 旧输入框在本次 rebuild 之前仍挂在树上，立即 dispose 会触发
+      // “used after being disposed”；等新控件接管后再释放。
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        for (final controller in retired) {
+          controller.dispose();
+        }
+      });
+    }
     _values.addAll(state.values);
     final inputs = <String>{};
     for (final field in state.fields) {
@@ -2942,12 +2951,26 @@ class _BookSourceLoginSheetState extends State<BookSourceLoginSheet> {
         }
       }
       if (field.isToggle) {
-        final (onValue, offValue) = _toggleValues(field);
-        _values[field.name] = current == offValue ? offValue : onValue;
+        final (onValue, _) = _toggleValues(field);
+        final options = field.chars.where((value) => value.isNotEmpty).toSet();
+        _values[field.name] = options.isNotEmpty
+            ? (options.contains(current) ? current : options.first)
+            : (current.isEmpty ? onValue : current);
         continue;
       }
       _values[field.name] = current;
       _controllers[field.name] = TextEditingController(text: current);
+    }
+  }
+
+  void _applyValues(Map<String, String> values) {
+    if (values.isEmpty) return;
+    for (final entry in values.entries) {
+      _values[entry.key] = entry.value;
+      final controller = _controllers[entry.key];
+      if (controller != null && controller.text != entry.value) {
+        controller.text = entry.value;
+      }
     }
   }
 
@@ -2970,6 +2993,7 @@ class _BookSourceLoginSheetState extends State<BookSourceLoginSheet> {
     try {
       String openUrl;
       var message = '';
+      var actionValues = const <String, String>{};
       if (action.startsWith('http://') || action.startsWith('https://')) {
         final uri = Uri.tryParse(action);
         if (uri == null || uri.host.isEmpty) {
@@ -2985,6 +3009,23 @@ class _BookSourceLoginSheetState extends State<BookSourceLoginSheet> {
         );
         openUrl = result.openUrl;
         message = result.message;
+        actionValues = result.values;
+        if (result.values.isNotEmpty || result.fields.isNotEmpty) {
+          setState(() {
+            _applyValues(actionValues);
+            // 脚本调用 reUiView()/reLoginView() 时，条件字段会随当前
+            // 登录信息变化，必须按 native 返回的新表单重建。
+            if (result.fields.isNotEmpty) {
+              _resetFields(
+                BookSourceLoginState(
+                  fields: result.fields,
+                  values: Map.of(_values),
+                ),
+                keepStatus: true,
+              );
+            }
+          });
+        }
       }
       if (!mounted) return;
       if (openUrl.isEmpty) {
@@ -2994,7 +3035,13 @@ class _BookSourceLoginSheetState extends State<BookSourceLoginSheet> {
         final state = await widget.library.loginInfo(widget.source);
         if (!mounted || ModalRoute.of(context)?.isCurrent == false) return;
         setState(() {
-          _resetFields(state);
+          // 刷新失败时登录状态可能拿不到表单行，保留当前输入避免清空表单。
+          if (state.fields.isEmpty) {
+            _loggedIn = state.loggedIn;
+          } else {
+            _resetFields(state);
+            _applyValues(actionValues);
+          }
           if (message.isEmpty) _notice = '登录状态已更新';
         });
         return;
@@ -3007,12 +3054,7 @@ class _BookSourceLoginSheetState extends State<BookSourceLoginSheet> {
           setState(() => _error = '未完成网页登录');
           return;
         }
-        setState(() {
-          _resetFields(state);
-          _notice = state.loggedIn
-              ? '网页登录完成，已保存登录信息'
-              : '网页登录完成，但未获取到 Cookie';
-        });
+        Navigator.pop(context, state);
         return;
       }
       final uri = Uri.tryParse(openUrl.trim());
@@ -3144,6 +3186,38 @@ class _BookSourceLoginSheetState extends State<BookSourceLoginSheet> {
     return _textField(field);
   }
 
+  Future<void> _submit() async {
+    if (_busy) return;
+    for (final entry in _controllers.entries) {
+      _values[entry.key] = entry.value.text;
+    }
+    setState(() {
+      _busy = true;
+      _error = null;
+      _notice = null;
+    });
+    try {
+      final state = widget.initial.hasWebLoginUrl
+          ? await widget.library.webLogin(widget.source)
+          : await widget.library.login(widget.source, _values);
+      if (!mounted || ModalRoute.of(context)?.isCurrent == false) return;
+      if (state == null) {
+        setState(() {
+          _busy = false;
+          _error = '未完成网页登录';
+        });
+        return;
+      }
+      Navigator.pop(context, state);
+    } on Object catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _busy = false;
+        _error = _sourceErrorMessage(error);
+      });
+    }
+  }
+
   @override
   Widget build(BuildContext context) => SizedBox(
     height: math.min(620, MediaQuery.sizeOf(context).height * .86),
@@ -3245,6 +3319,25 @@ class _BookSourceLoginSheetState extends State<BookSourceLoginSheet> {
               ),
             ),
           ],
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: GlassTextButton(
+                  onPressed: _busy ? null : () => Navigator.pop(context),
+                  child: const AppText('取消'),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: GlassTextButton(
+                  key: const ValueKey('book-source-login-submit'),
+                  onPressed: _busy ? null : _submit,
+                  child: AppText(_busy ? '正在登录…' : '登录'),
+                ),
+              ),
+            ],
+          ),
         ],
       ),
     ),
@@ -3478,12 +3571,9 @@ class _SourceImportSheetState extends State<_SourceImportSheet> {
           Row(
             children: [
               Expanded(
-                child: AppText(
-                  widget.link ? '从链接导入' : '从剪贴板导入书源',
-                  style: const TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.w700,
-                  ),
+                child: ArchiveSection(
+                  title: widget.link ? '从链接导入' : '从剪贴板导入书源',
+                  code: 'SOURCE / IMPORT',
                 ),
               ),
               GlassIconButton(
@@ -3532,10 +3622,11 @@ class _SourceImportSheetState extends State<_SourceImportSheet> {
             ),
           if (_error != null) ...[
             const SizedBox(height: 8),
-            Text(
+            AppText(
               _error!,
               style: TextStyle(
                 fontSize: 12,
+                height: 1.4,
                 color: Theme.of(context).colorScheme.error,
               ),
             ),
@@ -3570,13 +3661,13 @@ class _OptionPickerSheet<T> extends StatelessWidget {
     required this.title,
     required this.options,
     this.selected,
-    this.code,
+    this.code = 'SOURCE / OPTIONS',
   });
 
   final String title;
   final List<(T, String)> options;
   final T? selected;
-  final String? code;
+  final String code;
 
   @override
   Widget build(BuildContext context) => SizedBox(
@@ -3585,19 +3676,11 @@ class _OptionPickerSheet<T> extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Padding(
-          padding: const EdgeInsets.fromLTRB(24, 8, 14, 4),
+          padding: const EdgeInsets.fromLTRB(24, 8, 24, 4),
           child: Row(
             children: [
               Expanded(
-                child: code == null
-                    ? AppText(
-                        title,
-                        style: const TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      )
-                    : ArchiveSection(title: title, code: code!),
+                child: ArchiveSection(title: title, code: code),
               ),
               GlassIconButton(
                 icon: CupertinoIcons.xmark,
@@ -3608,41 +3691,32 @@ class _OptionPickerSheet<T> extends StatelessWidget {
           ),
         ),
         Expanded(
-          child: ListView.builder(
-            padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
+          child: ListView.separated(
+            padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
             itemCount: options.length,
+            separatorBuilder: (_, _) => const SizedBox(height: 14),
             itemBuilder: (context, index) {
               final option = options[index];
               final active = option.$1 == selected;
-              return Material(
-                color: Colors.transparent,
-                child: InkWell(
-                  borderRadius: BorderRadius.circular(14),
-                  onTap: () => Navigator.pop(context, option.$1),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 14,
+              return ContentPanel(
+                onTap: () => Navigator.pop(context, option.$1),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: AppText(
+                        option.$2,
+                        style: const TextStyle(fontSize: 14),
+                      ),
                     ),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: AppText(
-                            option.$2,
-                            style: const TextStyle(fontSize: 14),
-                          ),
-                        ),
-                        if (active)
-                          ArchiveIcon(
-                            CupertinoIcons.check_mark,
-                            size: 18,
-                            color: Theme.of(
-                              context,
-                            ).extension<AppTonalColors>()?.action,
-                          ),
-                      ],
-                    ),
-                  ),
+                    if (active)
+                      ArchiveIcon(
+                        CupertinoIcons.check_mark,
+                        size: 18,
+                        color: Theme.of(
+                          context,
+                        ).extension<AppTonalColors>()?.action,
+                      ),
+                  ],
                 ),
               );
             },
@@ -3690,16 +3764,13 @@ class _GroupInputSheetState extends State<_GroupInputSheet> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Padding(
-          padding: const EdgeInsets.fromLTRB(24, 8, 14, 4),
+          padding: const EdgeInsets.fromLTRB(24, 8, 24, 4),
           child: Row(
             children: [
               Expanded(
-                child: AppText(
-                  widget.title,
-                  style: const TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.w700,
-                  ),
+                child: ArchiveSection(
+                  title: widget.title,
+                  code: 'SOURCE / GROUP',
                 ),
               ),
               GlassIconButton(
@@ -3712,34 +3783,34 @@ class _GroupInputSheetState extends State<_GroupInputSheet> {
         ),
         Expanded(
           child: widget.groups.isEmpty
-              ? Center(
-                  child: AppText(
-                    widget.allowCreate ? '输入新分组名称' : '没有可用的分组',
-                    style: TextStyle(
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                    ),
-                  ),
+              ? ContentNotice(
+                  icon: CupertinoIcons.folder,
+                  title: widget.allowCreate ? '还没有分组' : '没有可用的分组',
+                  message: widget.allowCreate
+                      ? '可以直接在下方输入新分组名称。'
+                      : '先在书源页创建分组后再试。',
                 )
-              : ListView.builder(
-                  padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
+              : ListView.separated(
+                  padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
                   itemCount: widget.groups.length,
+                  separatorBuilder: (_, _) => const SizedBox(height: 14),
                   itemBuilder: (context, index) {
                     final group = widget.groups[index];
-                    return Material(
-                      color: Colors.transparent,
-                      child: InkWell(
-                        borderRadius: BorderRadius.circular(14),
-                        onTap: () => Navigator.pop(context, group),
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 14,
+                    return ContentPanel(
+                      onTap: () => Navigator.pop(context, group),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: AppText(
+                              group,
+                              style: const TextStyle(fontSize: 14),
+                            ),
                           ),
-                          child: AppText(
-                            group,
-                            style: const TextStyle(fontSize: 14),
+                          const ArchiveIcon(
+                            CupertinoIcons.chevron_right,
+                            size: 14,
                           ),
-                        ),
+                        ],
                       ),
                     );
                   },
@@ -3747,7 +3818,7 @@ class _GroupInputSheetState extends State<_GroupInputSheet> {
         ),
         if (widget.allowCreate)
           Padding(
-            padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+            padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
             child: Row(
               children: [
                 Expanded(

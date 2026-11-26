@@ -66,8 +66,8 @@ class ReaderStatusFooter extends StatefulWidget {
       time: milliseconds is int
           ? DateTime.fromMillisecondsSinceEpoch(milliseconds)
           : DateTime.now(),
-      battery: battery is int && battery >= 0 && battery <= 100
-          ? battery
+      battery: battery is num && battery >= 0 && battery <= 100
+          ? battery.round()
           : null,
       charging: value['charging'] == true,
     );

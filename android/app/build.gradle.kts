@@ -95,7 +95,9 @@ android {
                 "org/bouncycastle/pqc/**",
                 "org/apache/poi/sl/**",
                 "org/apache/poi/hslf/**",
-                "org/apache/poi/ss/**"
+                "org/apache/poi/ss/**",
+                // hutool-core 与 hutool-crypto 各自带一份 INDEX.LIST，打包时只需保留其一。
+                "META-INF/INDEX.LIST"
             )
         }
     }
@@ -118,6 +120,12 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("com.jayway.jsonpath:json-path:2.9.0")
     implementation("org.mozilla:rhino:1.8.1")
+    // 书源 java.unrarFile / un7zFile / getRarByteArrayContent 等接口依赖
+    // libarchive；版本与上游 Legado 保持一致。
+    implementation("me.zhanghai.android.libarchive:library:1.1.6")
+    // 书源 jsLib 会通过 Packages.cn.hutool.* 直接调用，需保留在 classpath；
+    // 版本与上游 Legado 基线一致，避免书源脚本兼容性回归。
+    implementation("cn.hutool:hutool-crypto:5.8.22")
     implementation("com.tom-roush:pdfbox-android:2.0.27.0")
     // Keep the media host classes available to the app's shared-engine wiring.
     implementation("androidx.media:media:1.7.0")

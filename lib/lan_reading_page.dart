@@ -244,7 +244,7 @@ class _LanReadingPageState extends State<LanReadingPage> {
                           const Expanded(
                             child: ArchiveSection(
                               title: '附近的设备',
-                              code: '01 / NEARBY',
+                              code: 'LAN / NEARBY',
                             ),
                           ),
                           GlassIconButton(
@@ -259,11 +259,15 @@ class _LanReadingPageState extends State<LanReadingPage> {
                       ),
                       const SizedBox(height: 14),
                       if (nearby.isEmpty)
-                        AppText(
-                          sync.automaticDiscovery
-                              ? '还没有发现新设备。请让另一台设备开启局域网续读，并保持 App 在前台。'
-                              : '自动发现暂不可用。请检查 Wi-Fi 与本地网络权限，或使用下方的手动连接。',
-                          style: const TextStyle(fontSize: 13, height: 1.7),
+                        SizedBox(
+                          height: 190,
+                          child: ContentNotice(
+                            icon: CupertinoIcons.wifi,
+                            title: '还没有发现设备',
+                            message: sync.automaticDiscovery
+                                ? '请让另一台设备开启局域网续读，并保持 App 在前台。'
+                                : '自动发现暂不可用。请检查 Wi-Fi 与本地网络权限，或使用下方的手动连接。',
+                          ),
                         ),
                       for (final device in nearby) ...[
                         FeatureEntry(
@@ -275,18 +279,19 @@ class _LanReadingPageState extends State<LanReadingPage> {
                               ? null
                               : () => _run(() => sync.pairNearby(device)),
                         ),
-                        const SizedBox(height: 10),
+                        const SizedBox(height: 14),
                       ],
                       const SizedBox(height: 24),
-                      const ArchiveSection(
-                        title: '已配对',
-                        code: '02 / YOUR DEVICES',
-                      ),
+                      const ArchiveSection(title: '已配对', code: 'LAN / PAIRED'),
                       const SizedBox(height: 12),
                       if (sync.peers.isEmpty)
-                        const AppText(
-                          '还没有配对的设备。',
-                          style: TextStyle(fontSize: 13),
+                        const SizedBox(
+                          height: 170,
+                          child: ContentNotice(
+                            icon: CupertinoIcons.link,
+                            title: '还没有配对设备',
+                            message: '连接附近设备或输入连接码后，会显示在这里。',
+                          ),
                         ),
                       for (final peer in sync.peers) ...[
                         FeatureEntry(
@@ -298,7 +303,7 @@ class _LanReadingPageState extends State<LanReadingPage> {
                           icon: CupertinoIcons.link,
                           onTap: _busy ? null : () => _run(sync.sync),
                         ),
-                        const SizedBox(height: 10),
+                        const SizedBox(height: 14),
                       ],
                       if (sync.lastSync case final time?)
                         AppText(
@@ -321,15 +326,15 @@ class _LanReadingPageState extends State<LanReadingPage> {
                                 : () => _run(() async {
                                     if (await confirmNovelAction(
                                       context,
-                                      title: '解除所有局域网配对？',
+                                      title: '删除所有局域网配对？',
                                       message: '阅读记录保留，旧配对与连接码失效。',
-                                      confirmLabel: '解除配对',
+                                      confirmLabel: '删除配对',
                                       reduceMotion: widget.reduceMotion,
                                     )) {
                                       await sync.forget();
                                     }
                                   }),
-                            child: const AppText('解除配对'),
+                            child: const AppText('删除配对'),
                           ),
                           GlassTextButton(
                             key: const ValueKey('lan-manual-toggle'),

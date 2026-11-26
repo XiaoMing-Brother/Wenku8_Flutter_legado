@@ -180,7 +180,7 @@ class _ReadingStatisticsPageState extends State<ReadingStatisticsPage>
     reduceMotion: widget.state.reduceMotion,
     builder: (context) => StatefulBuilder(
       builder: (context, updateSheet) => Padding(
-        padding: const EdgeInsets.fromLTRB(24, 10, 24, 28),
+        padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -350,7 +350,7 @@ class _ReadingStatisticsPageState extends State<ReadingStatisticsPage>
       context: context,
       reduceMotion: widget.state.reduceMotion,
       builder: (sheet) => Padding(
-        padding: const EdgeInsets.fromLTRB(24, 10, 24, 24),
+        padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -860,7 +860,7 @@ class _ReadingStatisticsPageState extends State<ReadingStatisticsPage>
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-      const ArchiveSection(title: '阅读日历', code: 'READING / CALENDAR'),
+        const ArchiveSection(title: '阅读日历', code: 'READING / CALENDAR'),
         const SizedBox(height: 20),
         _Metrics([
           _Metric('截至区间末连续', '${data.currentStreak}', '天'),
@@ -1006,7 +1006,7 @@ class _ReadingStatisticsPageState extends State<ReadingStatisticsPage>
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-      const ArchiveSection(title: '书页足迹', code: 'READING / FOOTPRINT'),
+        const ArchiveSection(title: '书页足迹', code: 'READING / FOOTPRINT'),
         if (data.readingBooks > 0) ...[
           const SizedBox(height: 20),
           AppText(
@@ -1123,7 +1123,7 @@ class _ReadingStatisticsPageState extends State<ReadingStatisticsPage>
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-      const ArchiveSection(title: '我的藏书', code: 'READING / COLLECTION'),
+        const ArchiveSection(title: '我的藏书', code: 'READING / COLLECTION'),
         const SizedBox(height: 20),
         if (wide)
           Row(

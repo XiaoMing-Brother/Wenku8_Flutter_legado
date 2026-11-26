@@ -139,6 +139,10 @@ abstract final class LocalPlatform {
     readerControls
         .invokeMethod<void>('apply', {
           'readerActive': active,
+          if (android && active && pageKeysActive)
+            'previousKeys': state.readerPreferences.previousKeys,
+          if (android && active && pageKeysActive)
+            'nextKeys': state.readerPreferences.nextKeys,
           'volumePaging':
               volumePaging &&
               active &&

@@ -1,4 +1,3 @@
-import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 
 import 'app_ui.dart';
@@ -17,7 +16,7 @@ class ReaderMoreEntry {
 }
 
 /// 阅读器右上角「⋯ 更多」弹窗：列出所有入口，点按执行；开关固定到底部栏；
-/// 拖动右侧手柄可调整顺序（该顺序即底部栏顺序）。
+/// 拖动左侧手柄可调整顺序（该顺序即底部栏顺序）。
 class ReaderMoreSheet extends StatefulWidget {
   const ReaderMoreSheet({
     super.key,
@@ -39,7 +38,7 @@ class ReaderMoreSheet extends StatefulWidget {
 }
 
 class _ReaderMoreSheetState extends State<ReaderMoreSheet> {
-  late List<String> _order = _initialOrder();
+  late final List<String> _order = _initialOrder();
   late final Set<String> _enabled = widget.dockActions.toSet();
 
   List<String> _initialOrder() {
@@ -98,7 +97,7 @@ class _ReaderMoreSheetState extends State<ReaderMoreSheet> {
           const ArchiveSection(title: '所有入口', code: 'READER / ACTIONS'),
           const SizedBox(height: 4),
           AppText(
-            '点按立即执行；开关固定到底部栏；拖动右侧手柄可调整顺序。',
+            '点按立即执行；开关固定到底部栏；拖动左侧手柄可调整顺序。',
             style: TextStyle(fontSize: 12, height: 1.5, color: muted),
           ),
           const SizedBox(height: 8),
@@ -111,12 +110,16 @@ class _ReaderMoreSheetState extends State<ReaderMoreSheet> {
         final entry = _meta(id);
         return Padding(
           key: ValueKey(id),
-          padding: const EdgeInsets.only(bottom: 12),
+          padding: const EdgeInsets.only(bottom: 14),
           child: ContentPanel(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
             onTap: () => Navigator.pop(context, id),
             child: Row(
               children: [
+                ArchiveReorderHandle(
+                  index: index,
+                  label: '拖动调整${entry.label}的顺序',
+                ),
+                const SizedBox(width: 4),
                 ArchiveIcon(entry.icon, size: 20),
                 const SizedBox(width: 12),
                 Expanded(
@@ -132,18 +135,6 @@ class _ReaderMoreSheetState extends State<ReaderMoreSheet> {
                   context,
                   value: _enabled.contains(id),
                   onChanged: (value) => _toggle(id, value),
-                ),
-                const SizedBox(width: 10),
-                ReorderableDragStartListener(
-                  index: index,
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 4),
-                    child: ArchiveIcon(
-                      CupertinoIcons.line_horizontal_3,
-                      size: 18,
-                      color: muted,
-                    ),
-                  ),
                 ),
               ],
             ),

@@ -140,10 +140,12 @@ class BookSourceTransport {
   }
 
   Future<Map<String, Object?>?> detail({
+    Map<String, Object?> book = const {},
     required String sourceKey,
     required String bookUrl,
   }) async {
     final value = await _invoke<Map<Object?, Object?>>('detail', {
+      if (book.isNotEmpty) 'book': book,
       'sourceKey': sourceKey,
       'bookUrl': bookUrl,
     });
@@ -151,11 +153,13 @@ class BookSourceTransport {
   }
 
   Future<List<Map<String, Object?>>> chapters({
+    Map<String, Object?> book = const {},
     required String sourceKey,
     required String bookUrl,
     String? tocUrl,
   }) async {
     final value = await _invoke<List<Object?>>('chapters', {
+      if (book.isNotEmpty) 'book': book,
       'sourceKey': sourceKey,
       'bookUrl': bookUrl,
       if (tocUrl != null && tocUrl.isNotEmpty) 'tocUrl': tocUrl,
@@ -167,12 +171,15 @@ class BookSourceTransport {
   }
 
   Future<String?> content({
+    Map<String, Object?> book = const {},
     required String sourceKey,
     required String bookUrl,
     required String chapterUrl,
     String? nextChapterUrl,
     String? chapterTitle,
+    int? chapterIndex,
   }) => _invoke<String>('content', {
+    if (book.isNotEmpty) 'book': book,
     'sourceKey': sourceKey,
     'bookUrl': bookUrl,
     'chapterUrl': chapterUrl,
@@ -180,6 +187,7 @@ class BookSourceTransport {
       'nextChapterUrl': nextChapterUrl,
     if (chapterTitle != null && chapterTitle.isNotEmpty)
       'chapterTitle': chapterTitle,
+    if (chapterIndex != null && chapterIndex >= 0) 'chapterIndex': chapterIndex,
   });
 
   /// 抓取本章段评。native 引擎实现 `review` 方法后返回解析好的段评列表；
@@ -211,10 +219,14 @@ class BookSourceTransport {
   Future<Uint8List> image({
     required String sourceKey,
     required String url,
+    bool cover = false,
+    String? bookUrl,
   }) async {
     final value = await _invoke<Uint8List>('fetchImage', {
       'sourceKey': sourceKey,
       'url': url,
+      if (cover) 'cover': true,
+      if (bookUrl != null && bookUrl.isNotEmpty) 'bookUrl': bookUrl,
     });
     if (value == null || value.isEmpty) {
       throw const FormatException('书源图片为空');
@@ -279,6 +291,19 @@ class BookSourceTransport {
     return BookSourceLoginAction(
       openUrl: '${value?['openUrl'] ?? ''}'.trim(),
       message: '${value?['toast'] ?? ''}'.trim(),
+      values: _stringValues(
+        (value?['values'] as Map?)?.cast<Object?, Object?>() ?? const {},
+      ),
+      fields: switch (value?['loginUi']) {
+        final List rows => [
+          for (final row in rows)
+            if (row is Map && '${row['name'] ?? ''}'.trim().isNotEmpty)
+              BookSourceLoginField.fromMap({
+                for (final entry in row.entries) '${entry.key}': entry.value,
+              }),
+        ],
+        _ => const [],
+      },
     );
   }
 
@@ -302,5 +327,7 @@ class BookSourceTransport {
   };
 
   static BookSourceLoginState _loginState(Map<Object?, Object?>? value) =>
-      BookSourceLoginState.fromMap(value == null ? const {} : _stringMap(value));
+      BookSourceLoginState.fromMap(
+        value == null ? const {} : _stringMap(value),
+      );
 }

@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart' show ValueListenable;
 
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
 import 'package:flutter/services.dart';
 import 'package:liquid_glass_easy/liquid_glass_easy.dart' as easy;
 
@@ -1092,6 +1093,39 @@ Widget _unscaleCompactContent({
     ? Transform.scale(scaleX: 1 / scaleX, scaleY: 1 / scaleY, child: child)
     : child;
 
+/// 排序列表行左侧的拖动入口，统一使用横线手柄。
+class ArchiveReorderHandle extends StatelessWidget {
+  const ArchiveReorderHandle({
+    super.key,
+    required this.index,
+    required this.label,
+    this.enabled = true,
+    this.customSemanticsActions,
+  });
+
+  final int index;
+  final String label;
+  final bool enabled;
+  final Map<CustomSemanticsAction, VoidCallback>? customSemanticsActions;
+
+  @override
+  Widget build(BuildContext context) => ReorderableDragStartListener(
+    index: index,
+    enabled: enabled,
+    child: Semantics(
+      label: label,
+      customSemanticsActions: customSemanticsActions,
+      child: const SizedBox(
+        width: 44,
+        height: 48,
+        child: Center(
+          child: ArchiveIcon(CupertinoIcons.line_horizontal_3, size: 18),
+        ),
+      ),
+    ),
+  );
+}
+
 /// 列表行右侧的紧凑更多入口：下拉箭头比三点图标占用更少横向空间。
 class CompactRowMenuButton extends StatelessWidget {
   const CompactRowMenuButton({
@@ -1342,24 +1376,12 @@ class GlassTextButton extends StatelessWidget {
   }
 }
 
-Widget sectionHeader(BuildContext context, String title, String subtitle) =>
-    ArchiveSection(
-      title: title,
-      subtitle: subtitle,
-      code: switch (title) {
-        '更多书籍' => '02 / ARCHIVE INDEX',
-        '简介' => '01 / SYNOPSIS',
-        '目录' => '02 / CONTENTS',
-        '使用方式' => '00 / READING MODE',
-        '阅读偏好' => '01 / READING PROFILE',
-        '阅读记录' || '最近阅读' => '02 / READING LOG',
-        '离线阅读' => '03 / LOCAL ARCHIVE',
-        '玻璃外观' => '04 / OPTICAL SURFACE',
-        '本地数据' => '05 / DATA MANAGEMENT',
-        '性能诊断' => '06 / DIAGNOSTICS',
-        _ => '01 / CATALOG',
-      },
-    );
+Widget sectionHeader(
+  BuildContext context,
+  String title,
+  String subtitle, {
+  required String code,
+}) => ArchiveSection(title: title, subtitle: subtitle, code: code);
 
 class ContentPanel extends StatefulWidget {
   const ContentPanel({

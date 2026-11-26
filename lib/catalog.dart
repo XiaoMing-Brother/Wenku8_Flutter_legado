@@ -65,7 +65,11 @@ class Novel {
           ];
   }
 
-  List<NovelChapter> get directoryChapters {
+  static final _directoryChaptersCache = Expando<List<NovelChapter>>();
+  List<NovelChapter> get directoryChapters =>
+      _directoryChaptersCache[this] ??= _directoryChapters();
+
+  List<NovelChapter> _directoryChapters() {
     final result = <NovelChapter>[];
     final authored = navigation?.entries.isNotEmpty == true;
     var volumeId = 0;
@@ -91,8 +95,14 @@ class Novel {
         ),
       );
     }
-    return result;
+    return List.unmodifiable(result);
   }
+
+  /// Volume folding is derived from [directoryChapters]; keep the contiguous
+  /// ranges alongside that projection instead of rebuilding both per frame.
+  static final _directoryVolumesCache = Expando<List<NovelVolume>>();
+  List<NovelVolume> get directoryVolumes => _directoryVolumesCache[this] ??=
+      List.unmodifiable(NovelVolume.of(directoryChapters));
 
   int directoryIndexFor(int chapter, {int paragraph = 0, int offset = 0}) {
     var best = 0;

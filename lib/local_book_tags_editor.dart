@@ -1,3 +1,4 @@
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 
 import 'app_search_field.dart';
@@ -203,9 +204,17 @@ class _TagChoicesState extends State<_TagChoices> {
             child: SingleChildScrollView(
               keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
               child: tags.isEmpty
-                  ? const Padding(
-                      padding: EdgeInsets.symmetric(vertical: 24),
-                      child: AppText('没有匹配标签，可返回添加自定义标签'),
+                  ? SizedBox(
+                      height: 180,
+                      child: ContentNotice(
+                        icon: CupertinoIcons.search,
+                        title: '没有匹配标签',
+                        message: '清除搜索后可继续选择，或返回添加自定义标签。',
+                        secondaryAction: GlassTextButton(
+                          onPressed: () => setState(_query.clear),
+                          child: const AppText('清除搜索'),
+                        ),
+                      ),
                     )
                   : Wrap(
                       spacing: 8,

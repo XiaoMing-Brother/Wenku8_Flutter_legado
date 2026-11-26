@@ -259,7 +259,7 @@ class _TxtTocRulesPageState extends State<TxtTocRulesPage> {
                   ? ListView.builder(
                       key: const ValueKey('txt-toc-rule-pick-list'),
                       padding: EdgeInsets.only(
-                        bottom: MediaQuery.paddingOf(context).bottom + 24,
+                        bottom: MediaQuery.paddingOf(context).bottom + 32,
                       ),
                       itemCount: _visibleRules.length,
                       itemBuilder: (context, index) =>
@@ -269,7 +269,7 @@ class _TxtTocRulesPageState extends State<TxtTocRulesPage> {
                       key: const ValueKey('txt-toc-rule-list'),
                       buildDefaultDragHandles: false,
                       padding: EdgeInsets.only(
-                        bottom: MediaQuery.paddingOf(context).bottom + 24,
+                        bottom: MediaQuery.paddingOf(context).bottom + 32,
                       ),
                       itemCount: _visibleRules.length,
                       onReorder: (from, to) => _reorder(from, to),
@@ -408,6 +408,13 @@ class _TxtTocRulesPageState extends State<TxtTocRulesPage> {
       onTap: widget.pickMode ? () => _select(rule) : () => _edit(rule),
       child: Row(
         children: [
+          if (!widget.pickMode) ...[
+            ArchiveReorderHandle(
+              index: index,
+              label: '拖动调整${rule.displayName}的顺序',
+            ),
+            const SizedBox(width: 4),
+          ],
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -483,9 +490,7 @@ class _TxtTocRulesPageState extends State<TxtTocRulesPage> {
     return Container(
       key: ValueKey('txt-toc-rule-${rule.id}'),
       margin: const EdgeInsets.only(bottom: 14),
-      child: widget.pickMode
-          ? panel
-          : ReorderableDelayedDragStartListener(index: index, child: panel),
+      child: panel,
     );
   }
 
@@ -604,7 +609,7 @@ class _TxtTocRuleEditorState extends State<_TxtTocRuleEditor> {
 
   @override
   Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.fromLTRB(24, 8, 24, 18),
+    padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -768,11 +773,14 @@ class _TxtTocRuleTesterState extends State<_TxtTocRuleTester> {
 
   @override
   Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.fromLTRB(24, 8, 24, 18),
+    padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const ArchiveSection(title: '测试 TXT 目录规则', code: 'TXT / TOC PREVIEW'),
+        const ArchiveSection(
+          title: '测试 TXT 目录规则',
+          code: 'READER / TOC PREVIEW',
+        ),
         const SizedBox(height: 12),
         DropdownButtonFormField<int>(
           initialValue: _rule?.id,

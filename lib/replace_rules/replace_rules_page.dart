@@ -236,7 +236,7 @@ class _ReplaceRulesPageState extends State<ReplaceRulesPage> {
                       key: const ValueKey('replace-rule-list'),
                       buildDefaultDragHandles: false,
                       padding: EdgeInsets.only(
-                        bottom: MediaQuery.paddingOf(context).bottom + 24,
+                        bottom: MediaQuery.paddingOf(context).bottom + 32,
                       ),
                       itemCount: _visibleRules.length,
                       onReorder: (from, to) => _reorder(from, to),
@@ -382,91 +382,89 @@ class _ReplaceRulesPageState extends State<ReplaceRulesPage> {
     return Container(
       key: ValueKey(rule.id),
       margin: const EdgeInsets.only(bottom: 14),
-      child: ReorderableDelayedDragStartListener(
-        index: index,
-        child: ContentPanel(
-          onTap: () => _edit(rule),
-          child: Row(
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Flexible(
-                          child: AppText(
-                            rule.displayName,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(fontWeight: FontWeight.w600),
-                          ),
+      child: ContentPanel(
+        onTap: () => _edit(rule),
+        child: Row(
+          children: [
+            ArchiveReorderHandle(
+              index: index,
+              label: '拖动调整${rule.displayName}的顺序',
+            ),
+            const SizedBox(width: 4),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Flexible(
+                        child: AppText(
+                          rule.displayName,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontWeight: FontWeight.w600),
                         ),
-                        if (rule.regex) ...[
-                          const SizedBox(width: 8),
-                          _badge(context, '正则'),
-                        ],
-                        if (rule.scopeTitle) ...[
-                          const SizedBox(width: 6),
-                          _badge(context, '标题'),
-                        ],
-                        if (rule.scopeContent) ...[
-                          const SizedBox(width: 6),
-                          _badge(context, '正文'),
-                        ],
+                      ),
+                      if (rule.regex) ...[
+                        const SizedBox(width: 8),
+                        _badge(context, '正则'),
                       ],
-                    ),
-                    const SizedBox(height: 5),
-                    Tooltip(
-                      message: details,
-                      child: AppText(
-                        details,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: 12,
-                          height: 1.4,
-                          color: muted,
-                        ),
-                      ),
-                    ),
-                    if (invalid)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 4),
-                        child: Text(
-                          rule.validationError!,
-                          style: TextStyle(
-                            fontSize: 11,
-                            color: Theme.of(context).colorScheme.error,
-                          ),
-                        ),
-                      ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 4),
-              AppControls.toggle(
-                context,
-                value: rule.enabled,
-                liteGlass: true,
-                onChanged: (value) async {
-                  try {
-                    await _store.setRuleEnabled(rule.id, value);
-                  } catch (error) {
-                    _feedback(_message(error), error: true);
-                  }
-                },
-              ),
-              GlassMenuAnchor(
-                child: Builder(
-                  builder: (anchor) => CompactRowMenuButton(
-                    label: '${rule.displayName} 更多操作',
-                    onPressed: () => _openRuleMenu(anchor, rule),
+                      if (rule.scopeTitle) ...[
+                        const SizedBox(width: 6),
+                        _badge(context, '标题'),
+                      ],
+                      if (rule.scopeContent) ...[
+                        const SizedBox(width: 6),
+                        _badge(context, '正文'),
+                      ],
+                    ],
                   ),
+                  const SizedBox(height: 5),
+                  Tooltip(
+                    message: details,
+                    child: AppText(
+                      details,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: 12, height: 1.4, color: muted),
+                    ),
+                  ),
+                  if (invalid)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: Text(
+                        rule.validationError!,
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: Theme.of(context).colorScheme.error,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 4),
+            AppControls.toggle(
+              context,
+              value: rule.enabled,
+              liteGlass: true,
+              onChanged: (value) async {
+                try {
+                  await _store.setRuleEnabled(rule.id, value);
+                } catch (error) {
+                  _feedback(_message(error), error: true);
+                }
+              },
+            ),
+            GlassMenuAnchor(
+              child: Builder(
+                builder: (anchor) => CompactRowMenuButton(
+                  label: '${rule.displayName} 更多操作',
+                  onPressed: () => _openRuleMenu(anchor, rule),
                 ),
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
@@ -543,11 +541,49 @@ class _ReplaceRulesPageState extends State<ReplaceRulesPage> {
         );
 }
 
+Future<void> showReaderReplaceEditor(
+  BuildContext context, {
+  required String bookTitle,
+  String selectedText = '',
+  required bool reduceMotion,
+  required bool active,
+}) async {
+  final rule = await showJellySheet<ReplaceRule>(
+    context: context,
+    reduceMotion: reduceMotion,
+    heightFactor: .92,
+    maxWidth: 720,
+    builder: (_) => _ReplaceRuleEditor(
+      order: 0,
+      initialScope: bookTitle,
+      initialText: selectedText,
+    ),
+  );
+  if (rule == null || !context.mounted) return;
+  try {
+    await ReplaceRuleStore.shared.add(rule);
+    if (context.mounted) {
+      showNovelFeedback(context, active ? '已添加替换规则' : '已保存规则，本书尚未开启替换净化');
+    }
+  } catch (error) {
+    if (context.mounted) {
+      showNovelFeedback(context, _message(error), haptic: HapticCue.error);
+    }
+  }
+}
+
 class _ReplaceRuleEditor extends StatefulWidget {
-  const _ReplaceRuleEditor({this.rule, required this.order});
+  const _ReplaceRuleEditor({
+    this.rule,
+    required this.order,
+    this.initialScope,
+    this.initialText = '',
+  });
 
   final ReplaceRule? rule;
   final int order;
+  final String? initialScope;
+  final String initialText;
 
   @override
   State<_ReplaceRuleEditor> createState() => _ReplaceRuleEditorState();
@@ -556,15 +592,19 @@ class _ReplaceRuleEditor extends StatefulWidget {
 class _ReplaceRuleEditorState extends State<_ReplaceRuleEditor> {
   late final _name = TextEditingController(text: widget.rule?.name ?? '');
   late final _group = TextEditingController(text: widget.rule?.group ?? '');
-  late final _pattern = TextEditingController(text: widget.rule?.pattern ?? '');
+  late final _pattern = TextEditingController(
+    text: widget.rule?.pattern ?? widget.initialText,
+  );
   late final _replacement = TextEditingController(
     text: widget.rule?.replacement ?? '',
   );
-  late final _scope = TextEditingController(text: widget.rule?.scope ?? '');
+  late final _scope = TextEditingController(
+    text: widget.rule?.scope ?? widget.initialScope ?? '',
+  );
   late final _exclude = TextEditingController(
     text: widget.rule?.excludeScope ?? '',
   );
-  late bool _regex = widget.rule?.regex ?? true;
+  late bool _regex = widget.rule?.regex ?? (widget.initialScope == null);
   late bool _scopeTitle = widget.rule?.scopeTitle ?? false;
   late bool _scopeContent = widget.rule?.scopeContent ?? true;
   late bool _enabled = widget.rule?.enabled ?? true;
@@ -606,7 +646,7 @@ class _ReplaceRuleEditorState extends State<_ReplaceRuleEditor> {
 
   @override
   Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.fromLTRB(24, 8, 24, 18),
+    padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -745,7 +785,7 @@ class _ReplaceRuleTesterState extends State<_ReplaceRuleTester> {
 
   @override
   Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.fromLTRB(24, 8, 24, 18),
+    padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -777,20 +817,12 @@ class _ReplaceRuleTesterState extends State<_ReplaceRuleTester> {
         GlassTextButton(onPressed: _run, child: const AppText('执行测试')),
         const SizedBox(height: 10),
         Expanded(
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              color: Theme.of(
-                context,
-              ).colorScheme.surfaceContainerHighest.withValues(alpha: .35),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Padding(
-              padding: const EdgeInsets.all(12),
-              child: SingleChildScrollView(
-                child: SelectableText(
-                  _result.isEmpty ? '结果会显示在这里' : _result,
-                  style: const TextStyle(fontSize: 14, height: 1.65),
-                ),
+          child: ContentPanel(
+            padding: const EdgeInsets.all(12),
+            child: SingleChildScrollView(
+              child: SelectableText(
+                _result.isEmpty ? '结果会显示在这里' : _result,
+                style: const TextStyle(fontSize: 14, height: 1.65),
               ),
             ),
           ),

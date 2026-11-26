@@ -201,7 +201,8 @@ class _ReadingHistoryPageState extends State<ReadingHistoryPage> {
     final remove = await confirmNovelAction(
       context,
       title: '删除阅读历史？',
-      message: '这条记录会从阅读历史中移除，书架、续读进度和离线缓存保留。',
+      message:
+          '「${_known(id)?.title ?? '书籍 $id'}」的记录会从本机阅读历史库移除，书架、续读进度和离线缓存保留。',
       confirmLabel: '删除阅读历史',
       reduceMotion: widget.state.reduceMotion,
     );

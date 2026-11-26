@@ -140,13 +140,13 @@ class _BookSourceScopeSheetState extends State<BookSourceScopeSheet> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Padding(
-            padding: const EdgeInsets.fromLTRB(24, 8, 14, 4),
+            padding: const EdgeInsets.fromLTRB(24, 8, 24, 4),
             child: Row(
               children: [
                 const Expanded(
-                  child: AppText(
-                    '搜索范围',
-                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+                  child: ArchiveSection(
+                    title: '搜索范围',
+                    code: 'SOURCE / SEARCH SCOPE',
                   ),
                 ),
                 if (_preparing)
@@ -174,22 +174,16 @@ class _BookSourceScopeSheetState extends State<BookSourceScopeSheet> {
           ),
           Expanded(
             child: sources.isEmpty
-                ? Center(
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 32),
-                      child: AppText(
-                        '还没有可搜索的文字书源。先在书源页导入并启用后再设置范围。',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          fontSize: 13,
-                          height: 1.6,
-                          color: muted,
-                        ),
-                      ),
+                ? SizedBox(
+                    height: 180,
+                    child: ContentNotice(
+                      icon: CupertinoIcons.search,
+                      title: '还没有可用书源',
+                      message: '先在书源页导入并启用文字书源，再回来设置搜索范围。',
                     ),
                   )
                 : ListView(
-                    padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
+                    padding: const EdgeInsets.fromLTRB(24, 0, 24, 4),
                     children: [
                       _scopeRow(
                         title: '全部书源',
@@ -221,7 +215,7 @@ class _BookSourceScopeSheetState extends State<BookSourceScopeSheet> {
                   ),
           ),
           Padding(
-            padding: const EdgeInsets.fromLTRB(24, 6, 24, 12),
+            padding: const EdgeInsets.fromLTRB(24, 6, 24, 24),
             child: Row(
               children: [
                 Expanded(
@@ -261,7 +255,7 @@ class _BookSourceScopeSheetState extends State<BookSourceScopeSheet> {
   }
 
   Widget _sectionTitle(BuildContext context, String title) => Padding(
-    padding: const EdgeInsets.fromLTRB(12, 18, 12, 6),
+    padding: const EdgeInsets.fromLTRB(0, 18, 0, 6),
     child: Text(title, style: ArchiveDesign.codeStyle(context)),
   );
 
@@ -272,54 +266,50 @@ class _BookSourceScopeSheetState extends State<BookSourceScopeSheet> {
     required VoidCallback onTap,
   }) {
     final scheme = Theme.of(context).colorScheme;
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        borderRadius: BorderRadius.circular(14),
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 14),
+      child: ContentPanel(
         onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
-          child: Row(
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    AppText(
-                      title,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
-                      ),
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  AppText(
+                    title,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
                     ),
-                    const SizedBox(height: 3),
-                    AppText(
-                      subtitle,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: 12,
-                        height: 1.4,
-                        color: scheme.onSurfaceVariant,
-                      ),
+                  ),
+                  const SizedBox(height: 3),
+                  AppText(
+                    subtitle,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 12,
+                      height: 1.4,
+                      color: scheme.onSurfaceVariant,
                     ),
-                  ],
-                ),
+                  ),
+                ],
               ),
-              const SizedBox(width: 12),
-              ArchiveIcon(
-                selected
-                    ? CupertinoIcons.check_mark_circled_solid
-                    : CupertinoIcons.circle,
-                size: 20,
-                color: selected
-                    ? Theme.of(context).extension<AppTonalColors>()?.action
-                    : scheme.onSurfaceVariant.withValues(alpha: .5),
-              ),
-            ],
-          ),
+            ),
+            const SizedBox(width: 12),
+            ArchiveIcon(
+              selected
+                  ? CupertinoIcons.check_mark_circled_solid
+                  : CupertinoIcons.circle,
+              size: 20,
+              color: selected
+                  ? Theme.of(context).extension<AppTonalColors>()?.action
+                  : scheme.onSurfaceVariant.withValues(alpha: .5),
+            ),
+          ],
         ),
       ),
     );

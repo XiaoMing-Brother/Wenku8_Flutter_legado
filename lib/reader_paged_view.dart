@@ -16,11 +16,94 @@ import 'reader_spine_turn.dart';
 import 'reader_chrome.dart';
 import 'reader_header_footer.dart';
 import 'reader_tip.dart';
+import 'reader_chapter_title.dart';
 
 TextStyle _chapterHeadingStyle(
   TextStyle style,
   ReaderPreferences preferences,
 ) => preferences.titleStyle(style);
+
+/// 小章号样式（对标 RM 阅读页：约 0.72× 正文、深色、常规偏中字重）。
+TextStyle _chapterLabelStyle(TextStyle style, ReaderPreferences preferences) {
+  final base = preferences.titleStyle(style);
+  return base.copyWith(
+    fontSize: ((style.fontSize ?? 19) * .72).clamp(12.0, 20.0),
+    fontWeight: FontWeight.w500,
+    height: 1.15,
+    color: style.color?.withValues(alpha: .85) ?? base.color,
+  );
+}
+
+/// 翻页正文顶部「章号 + 章名」两行标题的总高度（含上下留白）。
+double _headingHeight(
+  BuildContext context,
+  String title,
+  TextStyle style,
+  ReaderPreferences preferences,
+  double width,
+) {
+  if (!preferences.showTitle) return 0;
+  final parts = splitReaderChapterTitle(title);
+  final name = parts.name.isNotEmpty ? parts.name : title;
+  double measure(String text, TextStyle textStyle) {
+    final painter = TextPainter(
+      text: TextSpan(text: text, style: textStyle),
+      textDirection: Directionality.of(context),
+      textScaler: MediaQuery.textScalerOf(context),
+      maxLines: 1,
+    )..layout(maxWidth: width.isFinite && width > 0 ? width : double.infinity);
+    final height = painter.height;
+    painter.dispose();
+    return height;
+  }
+
+  final labelHeight = parts.label.isEmpty
+      ? 0.0
+      : measure(parts.label, _chapterLabelStyle(style, preferences));
+  final gap = parts.label.isEmpty ? 0.0 : 8.0;
+  final titleHeight = measure(name, _chapterHeadingStyle(style, preferences));
+  return preferences.titleTopSpacing +
+      labelHeight +
+      gap +
+      titleHeight +
+      preferences.titleBottomSpacing;
+}
+
+/// 两行章节标题组件：小章号 + 大章名。
+Widget _headingColumn(
+  String title,
+  TextStyle style,
+  ReaderPreferences preferences,
+) {
+  final parts = splitReaderChapterTitle(title);
+  final name = parts.name.isNotEmpty ? parts.name : title;
+  final align = preferences.titleTextAlign;
+  return Column(
+    mainAxisSize: MainAxisSize.min,
+    crossAxisAlignment: preferences.titlePosition == ReaderTitlePosition.center
+        ? CrossAxisAlignment.center
+        : CrossAxisAlignment.start,
+    children: [
+      if (parts.label.isNotEmpty) ...[
+        AppText(
+          parts.label,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          textAlign: align,
+          style: _chapterLabelStyle(style, preferences),
+        ),
+        const SizedBox(height: 8),
+      ],
+      AppText(
+        name,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        textAlign: align,
+        style: _chapterHeadingStyle(style, preferences),
+      ),
+    ],
+  );
+}
 
 List<String> _localImagePriority(ReaderContent content, int? paragraph) {
   final local = content.illustrations.where(
@@ -63,25 +146,10 @@ Offset _bodyOrigin(
   if (!preferences.showTitle) {
     return Offset(padding.left, padding.top);
   }
-  final painter = TextPainter(
-    text: TextSpan(
-      text: title,
-      style: _chapterHeadingStyle(style, preferences),
-    ),
-    textDirection: Directionality.of(context),
-    textScaler: MediaQuery.textScalerOf(context),
-    maxLines: 1,
-    ellipsis: '…',
-  )..layout(maxWidth: width);
-  final origin = Offset(
+  return Offset(
     padding.left,
-    padding.top +
-        preferences.titleTopSpacing +
-        painter.height +
-        preferences.titleBottomSpacing,
+    padding.top + _headingHeight(context, title, style, preferences, width),
   );
-  painter.dispose();
-  return origin;
 }
 
 class ReaderPagedController {
@@ -252,13 +320,16 @@ class ReaderPageSkeleton extends StatelessWidget {
         if (preferences.showTitle) ...[
           if (preferences.titleTopSpacing > 0)
             SizedBox(height: preferences.titleTopSpacing),
-          AppText(
-            title,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            textAlign: preferences.titleTextAlign,
-            style: _chapterHeadingStyle(style, preferences),
-          ),
+          if (preferences.pagedChapterHeading)
+            _headingColumn(title, style, preferences)
+          else
+            AppText(
+              title,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              textAlign: preferences.titleTextAlign,
+              style: _chapterHeadingStyle(style, preferences),
+            ),
           SizedBox(height: preferences.titleBottomSpacing),
         ],
         Expanded(
@@ -483,22 +554,37 @@ class _ReaderPagedViewState extends State<ReaderPagedView>
   );
   double get _headingExtent => _headingExtentFor(widget.title);
   double _headingExtentFor(String title) {
-    if (widget.bookTitle != null || !widget.preferences.showTitle) return 0;
-    final painter = TextPainter(
-      text: TextSpan(
-        text: title,
-        style: _chapterHeadingStyle(widget.style, widget.preferences),
-      ),
-      textDirection: Directionality.of(context),
-      textScaler: MediaQuery.textScalerOf(context),
-      maxLines: 1,
-    )..layout();
-    final height =
-        painter.height +
-        widget.preferences.titleTopSpacing +
-        widget.preferences.titleBottomSpacing;
-    painter.dispose();
-    return height;
+    if (!widget.preferences.showTitle) return 0;
+    // 开启 pagedChapterHeading 后不再按页预留标题带；改为首页分页时下移标题高度，
+    // 后续页从页顶开始，避免每页顶部都空一条。
+    if (widget.preferences.pagedChapterHeading) return 0;
+    // 旧行为：带书名时翻页正文不显示标题。
+    if (widget.bookTitle != null) return 0;
+    final width = MediaQuery.sizeOf(context).width - widget.padding.horizontal;
+    return _headingHeight(
+      context,
+      title,
+      widget.style,
+      widget.preferences,
+      width,
+    );
+  }
+
+  /// 首页需要下移的高度（标题带）；仅在开启开关且为横排分页时生效。
+  double _headingInsetFor(String title) {
+    if (!widget.preferences.pagedChapterHeading ||
+        !widget.preferences.showTitle) {
+      return 0;
+    }
+    if (widget.preferences.mode == ReaderMode.vertical) return 0;
+    final width = MediaQuery.sizeOf(context).width - widget.padding.horizontal;
+    return _headingHeight(
+      context,
+      title,
+      widget.style,
+      widget.preferences,
+      width,
+    );
   }
 
   ReaderBookLayout _layoutFor(Size frame, String title) =>
@@ -510,7 +596,9 @@ class _ReaderPagedViewState extends State<ReaderPagedView>
         ),
         margin: widget.preferences.bindingMargin,
         features: MediaQuery.displayFeaturesOf(context),
-        origin: widget.bookTitle != null
+        origin:
+            widget.bookTitle != null ||
+                widget.preferences.pagedChapterHeading
             ? Offset(widget.padding.left, widget.padding.top)
             : _bodyOrigin(
                 context,
@@ -805,6 +893,7 @@ class _ReaderPagedViewState extends State<ReaderPagedView>
     layout.key,
     _layoutStyle,
     widget.preferences.layoutKey,
+    widget.preferences.pagedChapterHeading,
     scaler.scale(widget.style.fontSize ?? 19),
     (pageBreak?.paragraph, pageBreak?.offset),
   );
@@ -928,6 +1017,7 @@ class _ReaderPagedViewState extends State<ReaderPagedView>
             scaler: scaler,
             current: current,
             localImageSizes: images,
+            firstPageInset: _headingInsetFor(chapter.title),
           );
           if (!current() || pages == null) return;
           _rememberLayout(key, pages, 0);
@@ -1044,6 +1134,7 @@ class _ReaderPagedViewState extends State<ReaderPagedView>
           pageBreak: pageBreak,
           cache: _textLayout,
           localImageSizes: imageSizes,
+          firstPageInset: _headingInsetFor(widget.title),
         );
       }
     } catch (_) {
@@ -1541,12 +1632,12 @@ class _ReaderPagedViewState extends State<ReaderPagedView>
       fontSize: 13,
       height: 1.4,
       color: widget.preferences
-          .controlForeground(Theme.of(context).brightness == Brightness.dark)
+          .chromeForeground(Theme.of(context).brightness == Brightness.dark)
           .withValues(alpha: .72),
     );
     final tipContext = ReaderTipContext(
-      bookName: widget.bookTitle ?? '',
-      chapterTitle: title,
+      bookName: readerBookDisplayName(widget.bookTitle ?? ''),
+      chapterTitle: readerChapterHeadingText(title),
       pageIndex: first,
       pageCount: pagination.pages.length,
       readProgress: '${(fraction * 100).round()}%',
@@ -1557,6 +1648,25 @@ class _ReaderPagedViewState extends State<ReaderPagedView>
         child: Stack(
           fit: StackFit.expand,
           children: [
+            if (widget.preferences.pagedChapterHeading &&
+                widget.preferences.showTitle &&
+                widget.preferences.mode != ReaderMode.vertical &&
+                adjacent == null &&
+                spread == 0)
+              Positioned(
+                left: padding.left,
+                right: padding.right,
+                top: padding.top + widget.preferences.titleTopSpacing,
+                child: part(
+                  IgnorePointer(
+                    child: _headingColumn(
+                      title,
+                      widget.style,
+                      widget.preferences,
+                    ),
+                  ),
+                ),
+              ),
             Positioned(
               left: padding.left + widget.preferences.headerPadding.left,
               right: padding.right + widget.preferences.headerPadding.right,
@@ -1598,6 +1708,7 @@ class _ReaderPagedViewState extends State<ReaderPagedView>
                     tips: ReaderPreferences.fixedFooterTips,
                     baseContext: tipContext,
                     style: informationStyle,
+                    equalSlots: true,
                     slotKeys: [
                       key('reader-custom-footer-left'),
                       key('reader-custom-footer-center'),

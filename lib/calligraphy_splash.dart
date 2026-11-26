@@ -84,7 +84,8 @@ class CalligraphySplashScreen extends StatelessWidget {
                               color: palette.ink,
                               fontSize: fontSize,
                               height: 1.04,
-                              fontFamily: 'SplashCalligraphy',
+                              fontFamily: 'SplashMincho',
+                              fontFamilyFallback: const ['serif'],
                               fontWeight: FontWeight.normal,
                               letterSpacing: 0,
                               decoration: TextDecoration.none,
@@ -392,7 +393,6 @@ class _CalligraphySplashGateState extends State<CalligraphySplashGate> {
       widget.child,
       if (_show)
         CalligraphySplashOverlay(
-          text: widget.state.calligraphySplashText,
           reduceMotion: widget.state.effectiveReduceMotion,
           onFinished: () {
             if (mounted) setState(() => _show = false);

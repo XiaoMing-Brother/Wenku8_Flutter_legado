@@ -24,6 +24,22 @@ class ReaderControlsPlugin : FlutterPlugin, ActivityAware {
     private var channel: MethodChannel? = null
     private var activity: Activity? = null
     private var volumePaging = false
+    private var previousKeys = emptySet<Int>()
+    private var nextKeys = emptySet<Int>()
+    private var capture: MethodChannel.Result? = null
+    private var captureCode: Int? = null
+
+    private fun finishCapture(code: Int? = null) {
+        val result = capture
+        capture = null
+        captureCode = null
+        result?.success(code)
+    }
+
+    private fun bindable(code: Int) = code > 0 && !KeyEvent.isModifierKey(code) && code !in setOf(
+        KeyEvent.KEYCODE_BACK, KeyEvent.KEYCODE_HOME, KeyEvent.KEYCODE_POWER, KeyEvent.KEYCODE_APP_SWITCH,
+        KeyEvent.KEYCODE_DEL, KeyEvent.KEYCODE_ESCAPE, KeyEvent.KEYCODE_CALL, KeyEvent.KEYCODE_ENDCALL
+    )
     private var lastPage = 0L
     private var statusEvents: EventChannel? = null
     private var statusReceiver: BroadcastReceiver? = null
@@ -104,8 +120,18 @@ class ReaderControlsPlugin : FlutterPlugin, ActivityAware {
                         Settings.System.getInt(current.contentResolver, Settings.System.SCREEN_BRIGHTNESS, 128) / 255f
                     result.success(value.coerceIn(0f, 1f).toDouble()); return@setMethodCallHandler
                 }
+                if (call.method == "capturePageKey") {
+                    finishCapture()
+                    if (activity?.hasWindowFocus() == true) capture = result else result.success(null)
+                    return@setMethodCallHandler
+                }
+                if (call.method == "cancelPageKeyCapture") {
+                    finishCapture(); result.success(null); return@setMethodCallHandler
+                }
                 if (call.method != "apply") { result.notImplemented(); return@setMethodCallHandler }
                 volumePaging = call.argument<Boolean>("volumePaging") == true
+                previousKeys = call.argument<List<Int>>("previousKeys").orEmpty().filter(::bindable).toSet()
+                nextKeys = call.argument<List<Int>>("nextKeys").orEmpty().filter(::bindable).toSet()
                 val brightness = call.argument<Number>("brightness")?.toFloat() ?: -1f
                 if (brightness != -1f && brightness !in 0f..1f) {
                     result.error("brightness", "阅读亮度超出范围", null); return@setMethodCallHandler
@@ -118,15 +144,29 @@ class ReaderControlsPlugin : FlutterPlugin, ActivityAware {
         }
     }
     fun dispatch(event: KeyEvent): Boolean {
-        if (!volumePaging || activity?.hasWindowFocus() != true ||
-            event.keyCode !in setOf(KeyEvent.KEYCODE_VOLUME_UP, KeyEvent.KEYCODE_VOLUME_DOWN)) return false
+        if (activity?.hasWindowFocus() != true || !bindable(event.keyCode) || !event.hasNoModifiers()) return false
+        if (capture != null) {
+            if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) captureCode = event.keyCode
+            if (event.action == KeyEvent.ACTION_UP && captureCode == event.keyCode) finishCapture(event.keyCode)
+            return true
+        }
+        val direction = when {
+            event.keyCode in previousKeys -> -1
+            event.keyCode in nextKeys -> 1
+            volumePaging && event.keyCode == KeyEvent.KEYCODE_VOLUME_UP -> -1
+            volumePaging && event.keyCode == KeyEvent.KEYCODE_VOLUME_DOWN -> 1
+            else -> return false
+        }
         if (event.action == KeyEvent.ACTION_DOWN && (event.repeatCount == 0 || event.eventTime - lastPage >= 160)) {
             lastPage = event.eventTime
-            channel?.invokeMethod("page", if (event.keyCode == KeyEvent.KEYCODE_VOLUME_UP) -1 else 1)
+            channel?.invokeMethod("page", direction)
         }
         return true
     }
     fun suspend() {
+        finishCapture()
+        previousKeys = emptySet()
+        nextKeys = emptySet()
         volumePaging = false
         hideStatusBar(false)
         hideNavigationBar(false)

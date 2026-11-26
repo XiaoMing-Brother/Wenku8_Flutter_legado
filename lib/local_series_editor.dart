@@ -317,8 +317,44 @@ class _LocalSeriesEditorState extends State<LocalSeriesEditor> {
     setState(() => _order.insert(to, _order.removeAt(from)));
   }
 
+  Future<void> _openVolumeMenu(
+    BuildContext anchor,
+    int id,
+    String title,
+  ) async {
+    final action = await showGlassMenu<String>(
+      context: anchor,
+      reduceMotion: widget.library.reduceMotion,
+      builder: (menu) => Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          GlassMenuItem(
+            label: '修改卷名',
+            icon: CupertinoIcons.pencil,
+            onPressed: () => Navigator.pop(menu, 'rename'),
+          ),
+          GlassMenuItem(
+            label: '移出分卷',
+            icon: CupertinoIcons.minus_circle,
+            order: 1,
+            onPressed: () => Navigator.pop(menu, 'remove'),
+          ),
+        ],
+      ),
+    );
+    if (!mounted || action == null) return;
+    if (action == 'rename') {
+      await _rename(id);
+    } else if (action == 'remove') {
+      setState(() => _order.remove(id));
+    }
+  }
+
   Widget _volume(BuildContext context, int index) {
     final id = _order[index], book = widget.books.book(_order[index])!;
+    final title = _label(id);
+    final muted = Theme.of(context).colorScheme.onSurfaceVariant;
     return Padding(
       key: ValueKey('series-volume-$id'),
       padding: const EdgeInsets.only(bottom: 14),
@@ -329,6 +365,21 @@ class _LocalSeriesEditorState extends State<LocalSeriesEditor> {
             children: [
               Row(
                 children: [
+                  ArchiveReorderHandle(
+                    key: ValueKey('series-reorder-$id'),
+                    index: index,
+                    enabled: !_busy,
+                    label: '拖动调整 ${book.title} 的顺序',
+                    customSemanticsActions: {
+                      if (index > 0)
+                        CustomSemanticsAction(label: '向前移动'): () =>
+                            _move(index, index - 1),
+                      if (index + 1 < _order.length)
+                        CustomSemanticsAction(label: '向后移动'): () =>
+                            _move(index, index + 1),
+                    },
+                  ),
+                  const SizedBox(width: 4),
                   NovelCover(book, width: 44, height: 62),
                   const SizedBox(width: 14),
                   Expanded(
@@ -336,7 +387,16 @@ class _LocalSeriesEditorState extends State<LocalSeriesEditor> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         AppText(
-                          _label(id),
+                          '${index + 1}'.padLeft(2, '0'),
+                          style: TextStyle(
+                            fontSize: 12,
+                            height: 1.4,
+                            color: muted,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        AppText(
+                          title,
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
@@ -361,66 +421,13 @@ class _LocalSeriesEditorState extends State<LocalSeriesEditor> {
                       ],
                     ),
                   ),
-                  ReorderableDragStartListener(
-                    key: ValueKey('series-reorder-$id'),
-                    index: index,
-                    enabled: !_busy,
-                    child: Semantics(
-                      label: '拖动调整 ${book.title} 的顺序',
-                      customSemanticsActions: {
-                        if (index > 0)
-                          CustomSemanticsAction(label: '向前移动'): () =>
-                              _move(index, index - 1),
-                        if (index + 1 < _order.length)
-                          CustomSemanticsAction(label: '向后移动'): () =>
-                              _move(index, index + 1),
-                      },
-                      child: const SizedBox(
-                        width: 44,
-                        height: 48,
-                        child: Center(
-                          child: ArchiveIcon(
-                            CupertinoIcons.line_horizontal_3,
-                            size: 19,
-                          ),
-                        ),
+                  const SizedBox(width: 4),
+                  GlassMenuAnchor(
+                    child: Builder(
+                      builder: (anchor) => CompactRowMenuButton(
+                        label: '$title 卷操作',
+                        onPressed: () => _openVolumeMenu(anchor, id, title),
                       ),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              Row(
-                children: [
-                  AppText(
-                    '${index + 1}'.padLeft(2, '0'),
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Wrap(
-                      spacing: 8,
-                      runSpacing: 6,
-                      alignment: WrapAlignment.end,
-                      children: [
-                        GlassTextButton(
-                          key: ValueKey('series-rename-$id'),
-                          compact: true,
-                          onPressed: _busy ? null : () => _rename(id),
-                          child: const AppText('修改卷名'),
-                        ),
-                        GlassTextButton(
-                          key: ValueKey('series-remove-$id'),
-                          compact: true,
-                          onPressed: _busy
-                              ? null
-                              : () => setState(() => _order.remove(id)),
-                          child: const AppText('移出'),
-                        ),
-                      ],
                     ),
                   ),
                 ],
@@ -463,8 +470,8 @@ class _LocalSeriesEditorState extends State<LocalSeriesEditor> {
       const SizedBox(height: 28),
       ArchiveSection(
         title: '阅读顺序 · ${_order.length} 卷',
-        code: '01 / VOLUMES',
-        subtitle: '拖动右侧横线排序，移出的书会恢复独立显示。',
+        code: 'LOCAL / VOLUMES',
+        subtitle: '拖动左侧横线排序，移出的书会恢复独立显示。',
       ),
       const SizedBox(height: 18),
       if (_series != null && _order.length < 2) ...[
@@ -477,10 +484,12 @@ class _LocalSeriesEditorState extends State<LocalSeriesEditor> {
         const SizedBox(height: 14),
       ],
       if (_order.isEmpty)
-        ContentPanel(
-          child: const AppText(
-            '还没有分卷，点下方“添加分卷”选择本地书籍。',
-            style: TextStyle(height: 1.6),
+        const SizedBox(
+          height: 180,
+          child: ContentNotice(
+            icon: CupertinoIcons.rectangle_stack,
+            title: '还没有分卷',
+            message: '点下方「添加分卷」选择本地书籍。',
           ),
         ),
     ],
@@ -574,7 +583,7 @@ class _AddVolumesSheetState extends State<_AddVolumesSheet> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const ArchiveSection(title: '添加分卷', code: 'LOCAL / ORIGINALS'),
+          const ArchiveSection(title: '添加分卷', code: 'LOCAL / VOLUMES'),
           const SizedBox(height: 16),
           AppSearchField(
             controller: _search,

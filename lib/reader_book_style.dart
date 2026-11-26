@@ -92,6 +92,7 @@ class ReaderBookStyle {
     'titlePosition',
     'titleTopSpacing',
     'titleBottomSpacing',
+    'pagedChapterHeading',
     'backgroundImage',
     'backgroundOpacity',
     'backgroundFit',

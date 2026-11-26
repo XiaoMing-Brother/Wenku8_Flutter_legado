@@ -1,5 +1,4 @@
 import 'package:flutter/cupertino.dart';
-import 'package:flutter/material.dart';
 
 import 'app_interactions.dart';
 import 'app_ui.dart';
@@ -155,7 +154,7 @@ class _ReaderVolumeIllustrationsPageState
       child: CustomScrollView(
         slivers: [
           SliverPadding(
-            padding: featurePadding(context).copyWith(bottom: 20),
+            padding: featurePadding(context),
             sliver: SliverToBoxAdapter(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -164,19 +163,26 @@ class _ReaderVolumeIllustrationsPageState
                     title: _volume.title.isEmpty
                         ? widget.novel.title
                         : _volume.title,
-                    code:
-                        '${images.length} IMAGES${_loading ? ' / LOADING' : ''}',
+                    code: 'READER / IMAGES',
+                    subtitle: _loading
+                        ? '正在整理本卷插图'
+                        : images.isEmpty
+                        ? '本卷暂无插图'
+                        : '${images.length} 张插图',
                   ),
                   if (_volume.title.isEmpty) ...[
                     const SizedBox(height: 10),
                     const AppText(
                       '本书未分卷，显示全书插图。',
-                      style: TextStyle(fontSize: 12),
+                      style: TextStyle(fontSize: 12, height: 1.4),
                     ),
                   ],
                   if (_loading) ...[
                     const SizedBox(height: 10),
-                    const AppText('正在整理本卷插图…', style: TextStyle(fontSize: 12)),
+                    const AppText(
+                      '正在整理本卷插图…',
+                      style: TextStyle(fontSize: 12, height: 1.4),
+                    ),
                   ],
                   if (_failed.isNotEmpty) ...[
                     const SizedBox(height: 12),
@@ -191,9 +197,13 @@ class _ReaderVolumeIllustrationsPageState
                     ),
                   ],
                   if (!_loading && images.isEmpty && _failed.isEmpty)
-                    const Padding(
-                      padding: EdgeInsets.symmetric(vertical: 40),
-                      child: AppText('本卷没有找到插图。'),
+                    const SizedBox(
+                      height: 190,
+                      child: ContentNotice(
+                        icon: CupertinoIcons.photo,
+                        title: '本卷没有找到插图',
+                        message: '后续章节加入插图后，会显示在这里。',
+                      ),
                     ),
                 ],
               ),

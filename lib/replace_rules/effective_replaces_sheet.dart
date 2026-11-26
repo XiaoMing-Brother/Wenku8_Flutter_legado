@@ -13,12 +13,14 @@ class EffectiveReplacesInline extends StatefulWidget {
     super.key,
     required this.bookTitle,
     required this.origin,
+    required this.pausedIds,
     this.active = true,
     this.store,
   });
 
   final String bookTitle;
   final String origin;
+  final ValueNotifier<Set<String>> pausedIds;
   final bool active;
   final ReplaceRuleStore? store;
 
@@ -72,25 +74,26 @@ class _EffectiveReplacesInlineState extends State<EffectiveReplacesInline> {
     return result;
   }
 
-  Future<void> _toggle(ReplaceRule rule, bool value) async {
-    try {
-      await _store.setRuleEnabled(rule.id, value);
-    } catch (_) {}
+  bool _enabled(ReplaceRule rule) =>
+      rule.enabled && !widget.pausedIds.value.contains(rule.id);
+
+  void _setActive(Iterable<ReplaceRule> rules, bool value) {
+    final next = {...widget.pausedIds.value};
+    final ids = rules.where((rule) => rule.enabled).map((rule) => rule.id);
+    if (value) {
+      next.removeAll(ids);
+    } else {
+      next.addAll(ids);
+    }
+    if (next.length != widget.pausedIds.value.length) {
+      widget.pausedIds.value = Set.unmodifiable(next);
+    }
   }
 
   Future<void> _importBuiltin() async {
     try {
       await _store.importText(encodeReplaceRules(builtinReplaceRules()));
     } catch (_) {}
-  }
-
-  Future<void> _setGroup(List<ReplaceRule> rules, bool value) async {
-    for (final rule in rules) {
-      if (rule.enabled == value) continue;
-      try {
-        await _store.setRuleEnabled(rule.id, value);
-      } catch (_) {}
-    }
   }
 
   Widget _groupToggles(
@@ -114,14 +117,18 @@ class _EffectiveReplacesInlineState extends State<EffectiveReplacesInline> {
                 Expanded(
                   child: AppText(
                     '${entry.key} · '
-                    '${entry.value.where((r) => r.enabled).length}/${entry.value.length}',
+                    '${entry.value.where(_enabled).length}/${entry.value.where((rule) => rule.enabled).length}',
                     style: TextStyle(fontSize: 13, color: muted),
                   ),
                 ),
                 AppControls.toggle(
                   context,
-                  value: entry.value.every((r) => r.enabled),
-                  onChanged: (value) => _setGroup(entry.value, value),
+                  value:
+                      entry.value.any(_enabled) &&
+                      entry.value.where((rule) => rule.enabled).every(_enabled),
+                  onChanged: entry.value.any((rule) => rule.enabled)
+                      ? (value) => _setActive(entry.value, value)
+                      : null,
                 ),
               ],
             ),
@@ -140,37 +147,47 @@ class _EffectiveReplacesInlineState extends State<EffectiveReplacesInline> {
     }
     return Padding(
       padding: const EdgeInsets.only(bottom: 14),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                AppText(
-                  rule.enabled ? rule.displayName : '${rule.displayName}（已停用）',
-                  style: const TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
+      child: ContentPanel(
+        onTap: rule.enabled ? () => _setActive([rule], !_enabled(rule)) : null,
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  AppText(
+                    !rule.enabled
+                        ? '${rule.displayName}（全局已停用）'
+                        : _enabled(rule)
+                        ? rule.displayName
+                        : '${rule.displayName}（本次已停用）',
+                    style: const TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
-                ),
-                const SizedBox(height: 4),
-                AppText(
-                  detail.toString(),
-                  style: TextStyle(fontSize: 12, height: 1.5, color: muted),
-                  maxLines: 3,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ],
+                  const SizedBox(height: 4),
+                  AppText(
+                    detail.toString(),
+                    style: TextStyle(fontSize: 12, height: 1.4, color: muted),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
             ),
-          ),
-          const SizedBox(width: 12),
-          AppControls.toggle(
-            context,
-            value: rule.enabled,
-            onChanged: (value) => _toggle(rule, value),
-          ),
-        ],
+            const SizedBox(width: 12),
+            AppControls.toggle(
+              context,
+              key: ValueKey('reader-session-replace-${rule.id}'),
+              value: _enabled(rule),
+              onChanged: rule.enabled
+                  ? (value) => _setActive([rule], value)
+                  : null,
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -179,40 +196,41 @@ class _EffectiveReplacesInlineState extends State<EffectiveReplacesInline> {
   Widget build(BuildContext context) {
     final rules = _effective;
     final muted = Theme.of(context).colorScheme.onSurfaceVariant;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        const ArchiveSection(title: '生效的替换', code: 'REPLACE / ACTIVE'),
-        const SizedBox(height: 8),
-        if (_loading)
-          const Padding(
-            padding: EdgeInsets.symmetric(vertical: 16),
-            child: Center(child: CupertinoActivityIndicator()),
-          )
-        else ...[
-          Align(
-            alignment: Alignment.centerLeft,
-            child: GlassTextButton(
-              key: const ValueKey('effective-replaces-builtin-inline'),
-              compact: true,
-              onPressed: _importBuiltin,
-              child: const AppText('导入内置净化规则'),
-            ),
-          ),
+    return ValueListenableBuilder<Set<String>>(
+      valueListenable: widget.pausedIds,
+      builder: (context, _, _) => Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const ArchiveSection(title: '生效的替换', code: 'REPLACE / ACTIVE'),
+          const AppText('下方开关只影响本次阅读，退出阅读页后恢复。要永久启停，请使用「管理替换规则」。'),
           const SizedBox(height: 8),
-          if (rules.isNotEmpty) _groupToggles(context, rules, muted),
-          if (rules.isEmpty)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 12),
-              child: AppText(
-                '当前书籍没有作用域匹配的替换规则。',
-                style: TextStyle(fontSize: 13, color: muted),
-              ),
+          if (_loading)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 16),
+              child: Center(child: CupertinoActivityIndicator()),
             )
-          else
-            for (final rule in rules) _ruleRow(context, rule, muted),
+          else ...[
+            Align(
+              alignment: Alignment.centerLeft,
+              child: GlassTextButton(
+                key: const ValueKey('effective-replaces-builtin-inline'),
+                compact: true,
+                onPressed: _importBuiltin,
+                child: const AppText('导入内置净化规则'),
+              ),
+            ),
+            const SizedBox(height: 8),
+            if (rules.isNotEmpty) _groupToggles(context, rules, muted),
+            if (rules.isEmpty)
+              const ContentNotice(
+                icon: CupertinoIcons.wand_stars,
+                title: '当前书籍没有作用域匹配的替换规则',
+              )
+            else
+              for (final rule in rules) _ruleRow(context, rule, muted),
+          ],
         ],
-      ],
+      ),
     );
   }
 }

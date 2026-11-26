@@ -1,7 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
-import 'dart:typed_data' show BytesBuilder;
+import 'dart:typed_data' show BytesBuilder, Uint8List;
 
 import 'package:archive/archive.dart';
 import 'package:crypto/crypto.dart';
@@ -27,7 +27,8 @@ import 'local_book_series.dart';
 import 'epub_image_styles.dart';
 import 'personal_images.dart';
 import 'local_text_import.dart';
-import 'local_text_rules.dart' show defaultLocalHeadingCandidate;
+import 'local_text_rules.dart'
+    show defaultLocalHeadingCandidate, localLooksLikeSiteHeader;
 import 'local_text_storage.dart';
 import 'local_text_reference.dart';
 import 'local_linked_text_index.dart';
@@ -142,8 +143,10 @@ ImportedBook parseLocalBook(
   var volume = '';
   var volumeId = 0;
   var hasTitle = false;
-  void flush() {
+  void flush({bool atHeading = false}) {
     if (buffer.isEmpty) return;
+    // 首个章节标题之前的正文（简介/盗版头）统一命名为「前言」。
+    final leading = atHeading && !hasTitle && chapters.isEmpty;
     // Bound unstructured TXT chapters as well as memory and lazy text layout.
     final paragraphs = <String>[];
     for (final line in buffer) {
@@ -158,7 +161,11 @@ ImportedBook parseLocalBook(
         length += p.length;
         chunk.add(p);
       }
-      final displayTitle = hasTitle || autoTitles ? title : '正文';
+      final displayTitle = leading
+          ? '前言'
+          : hasTitle || autoTitles
+          ? title
+          : '正文';
       final section = chunk.length == paragraphs.length
           ? displayTitle
           : '$displayTitle · 片段 ${++part}';
@@ -182,15 +189,16 @@ ImportedBook parseLocalBook(
     final candidate = line.length <= 90
         ? defaultLocalHeadingCandidate(line)
         : line;
-    if (line.length <= 90 && localTextVolumePattern.hasMatch(candidate)) {
-      flush();
+    final looksHeading =
+        line.length <= 90 && !localLooksLikeSiteHeader(candidate);
+    if (looksHeading && localTextVolumePattern.hasMatch(candidate)) {
+      flush(atHeading: true);
       volume = candidate;
       volumeId++;
       title = candidate;
       hasTitle = true;
-    } else if (line.length <= 90 &&
-        localTextChapterPattern.hasMatch(candidate)) {
-      flush();
+    } else if (looksHeading && localTextChapterPattern.hasMatch(candidate)) {
+      flush(atHeading: true);
       title = candidate;
       hasTitle = true;
     } else {
@@ -1874,6 +1882,17 @@ class LocalBookStore extends ChangeNotifier
        documentAccess = documentAccess ?? PlatformLocalDocumentAccess();
   final Directory directory;
   final LocalTextAccess textAccess;
+
+  /// 读取本地书的原书文件字节（用于提取出版方字体等）。
+  Future<Uint8List?> originalBytes(int id) async {
+    final file = File('${directory.path}/$id/original');
+    if (!await file.exists()) return null;
+    try {
+      return await file.readAsBytes();
+    } on FileSystemException {
+      return null;
+    }
+  }
   final LocalDocumentAccess documentAccess;
   final Map<int, LocalTextIndex> _linkedIndices = {};
   final Map<int, Novel> _books = {};

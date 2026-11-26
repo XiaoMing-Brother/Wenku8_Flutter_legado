@@ -9,6 +9,7 @@ import 'app_ui.dart';
 import 'app_interactions.dart';
 import 'catalog.dart';
 import 'library_state.dart';
+import 'publisher_fonts.dart';
 import 'reader_annotation_editor.dart';
 import 'reader_bookmark_excerpt.dart';
 import 'local_platform.dart';
@@ -25,7 +26,59 @@ import 'local_books.dart' show isLocalBook;
 import 'reader_languages.dart';
 import 'bookmark_categories.dart';
 import 'replace_rules/replace_rule_store.dart';
+import 'replace_rules/replace_rules_page.dart';
 import 'replace_rules/effective_replaces_sheet.dart';
+
+class _ReaderKeyRecorder extends StatefulWidget {
+  const _ReaderKeyRecorder({required this.previous});
+  final bool previous;
+
+  @override
+  State<_ReaderKeyRecorder> createState() => _ReaderKeyRecorderState();
+}
+
+class _ReaderKeyRecorderState extends State<_ReaderKeyRecorder> {
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _capture();
+  }
+
+  Future<void> _capture() async {
+    try {
+      final code = await LocalPlatform.readerControls.invokeMethod<int>(
+        'capturePageKey',
+      );
+      if (mounted && ModalRoute.of(context)?.isCurrent == true) {
+        Navigator.pop(context, code);
+      }
+    } catch (_) {
+      if (mounted) setState(() => _error = '按键录入不可用，请关闭后重试');
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
+    child: Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        ArchiveSection(
+          title: widget.previous ? '录入上一页按键' : '录入下一页按键',
+          code: 'READER / PAGE KEY',
+        ),
+        AppText(_error ?? '按下并松开一个实体键。同一按键重新录入后使用新的方向，系统返回键不参与绑定。'),
+        GlassTextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const AppText('取消'),
+        ),
+      ],
+    ),
+  );
+}
 
 sealed class ReaderToolAction {
   const ReaderToolAction();
@@ -326,6 +379,7 @@ enum ReaderToolsScope { all, appearance, listening, operations, bookmarks }
 class ReaderTools extends StatefulWidget {
   const ReaderTools({
     super.key,
+    required this.pausedReplaceIds,
     required this.novel,
     required this.state,
     required this.position,
@@ -345,11 +399,13 @@ class ReaderTools extends StatefulWidget {
     this.canHandoff = false,
     this.onStyleScopeChanged,
     this.onReaderTypefaceChanged,
+    this.onUsePublisherFont,
     this.languages = const {},
     this.onHiddenLanguagesChanged,
     this.rangeContextResolver,
   });
   final Novel novel;
+  final ValueNotifier<Set<String>> pausedReplaceIds;
   final LibraryState state;
   final ReadingPosition? position;
   final Future<ReaderBookmark?> Function() onAddBookmark;
@@ -367,6 +423,7 @@ class ReaderTools extends StatefulWidget {
   final void Function(ReaderPreferences, bool persist)? onPreferencesChanged;
   final Future<void> Function(bool)? onStyleScopeChanged;
   final Future<void> Function(String)? onReaderTypefaceChanged;
+  final Future<void> Function(bool)? onUsePublisherFont;
   final Set<String> languages;
   final Future<void> Function(Set<String>, {String? onlyLanguage})?
   onHiddenLanguagesChanged;
@@ -492,12 +549,76 @@ class _ReaderToolsState extends State<ReaderTools>
     );
     if (!mounted || selected == null) return;
     final card = ReaderLook(theme: selected);
-    if (_readerPreferences.shelf(night).any((item) => item.choiceKey == card.choiceKey)) {
+    if (_readerPreferences
+        .shelf(night)
+        .any((item) => item.choiceKey == card.choiceKey)) {
       showNovelFeedback(context, '主题已在列表中');
       return;
     }
     _preferences(_readerPreferences.saveCard(night, card));
     showNovelFeedback(context, '已添加到${night ? '夜间' : '日间'}主题');
+  }
+
+  Future<void> _editTapCell(int index) async {
+    final grid = _readerPreferences.tapGrid;
+    final choices = ReaderTapAction.values.where(
+      (action) =>
+          action == ReaderTapAction.controls ||
+          grid[index] != ReaderTapAction.controls ||
+          grid.where((item) => item == ReaderTapAction.controls).length > 1,
+    );
+    final selected = await showJellySheet<ReaderTapAction>(
+      context: context,
+      reduceMotion: widget.state.reduceMotion,
+      builder: (sheet) => Padding(
+        padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
+        child: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const ArchiveSection(title: '点按动作', code: 'READER / TAP ACTION'),
+              GlassChoiceGroup<ReaderTapAction>(
+                name: 'tap-action',
+                label: '第 ${index ~/ 3 + 1} 行，第 ${index % 3 + 1} 列',
+                value: grid[index],
+                options: {for (final action in choices) action: action.label},
+                onChanged: (value) => Navigator.pop(sheet, value),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (!mounted || selected == null) return;
+    final prefs = _readerPreferences;
+    _preferences(
+      prefs.copyWith(tapGrid: [...prefs.tapGrid]..[index] = selected),
+    );
+  }
+
+  Future<void> _recordPageKey(bool previous) async {
+    final code = await showJellySheet<int>(
+      context: context,
+      reduceMotion: widget.state.reduceMotion,
+      builder: (_) => _ReaderKeyRecorder(previous: previous),
+    );
+    await LocalPlatform.readerControls
+        .invokeMethod<void>('cancelPageKeyCapture')
+        .catchError((Object _) {});
+    if (!mounted || code == null) return;
+    final prefs = _readerPreferences;
+    _preferences(
+      prefs.copyWith(
+        previousKeys: [
+          ...prefs.previousKeys.where((key) => key != code),
+          if (previous) code,
+        ],
+        nextKeys: [
+          ...prefs.nextKeys.where((key) => key != code),
+          if (!previous) code,
+        ],
+      ),
+    );
   }
 
   void _preferences(ReaderPreferences value, {bool persist = true}) {
@@ -738,13 +859,7 @@ class _ReaderToolsState extends State<ReaderTools>
                   else
                     const SizedBox(width: 10),
                   Expanded(
-                    child: AppText(
-                      title,
-                      style: const TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
+                    child: ArchiveSection(title: title, code: 'READER / TOOLS'),
                   ),
                   if (_category == 'bookmarks')
                     GlassIconButton(
@@ -1019,7 +1134,7 @@ class _ReaderToolsState extends State<ReaderTools>
     required String category,
   }) => _settingsItems([
     if (category == 'page')
-      const ArchiveSection(title: '布局', code: 'SCREEN / LAYOUT'),
+      const ArchiveSection(title: '布局', code: 'READER / LAYOUT'),
     if (category == 'page')
       _adjustment(
         GlassChoiceGroup<String>(
@@ -1037,7 +1152,7 @@ class _ReaderToolsState extends State<ReaderTools>
         ),
       ),
     if (category == 'page')
-      const ArchiveSection(title: '页眉页脚', code: 'SCREEN / HEADER'),
+      const ArchiveSection(title: '页眉页脚', code: 'READER / HEADER'),
     if (category == 'page')
       _adjustment(
         GlassTextButton(
@@ -1062,7 +1177,7 @@ class _ReaderToolsState extends State<ReaderTools>
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     const AppText(
-                      '页眉页脚与边距',
+                      '页边距',
                       style: TextStyle(
                         fontSize: 14,
                         fontWeight: FontWeight.w600,
@@ -1070,7 +1185,7 @@ class _ReaderToolsState extends State<ReaderTools>
                     ),
                     const SizedBox(height: 2),
                     AppText(
-                      '页眉 · 正文 · 页脚 三区边距（可手动输入）',
+                      '页眉/页脚信息位固定，仅调整三区内边距',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
@@ -1097,7 +1212,7 @@ class _ReaderToolsState extends State<ReaderTools>
         ),
       ),
     if (category == 'page')
-      const ArchiveSection(title: '图片', code: 'SCREEN / IMAGE'),
+      const ArchiveSection(title: '图片', code: 'READER / IMAGE'),
     if (category == 'page')
       _adjustment(
         ReaderChoicePicker<ReaderImageTap>(
@@ -1212,12 +1327,37 @@ class _ReaderToolsState extends State<ReaderTools>
             ),
             const SizedBox(height: 6),
             AppText(
-              '替换规则只改变阅读页显示，不改写缓存正文。可在「设置 → 阅读与外观 → 替换净化」中管理规则和全局开关。',
+              '替换规则只改变阅读页显示，不改写缓存正文。新建时预填当前书名，清空作用范围后可用于所有书籍。',
               style: TextStyle(
                 fontSize: 12,
                 height: 1.6,
                 color: Theme.of(context).colorScheme.onSurfaceVariant,
               ),
+            ),
+            Wrap(
+              spacing: 8,
+              children: [
+                GlassTextButton(
+                  onPressed: () => showReaderReplaceEditor(
+                    context,
+                    bookTitle: widget.novel.title,
+                    reduceMotion: widget.state.reduceMotion,
+                    active: _replaceRulesEnabled,
+                  ),
+                  child: const AppText('新建自定义替换'),
+                ),
+                GlassTextButton(
+                  onPressed: () => pushNovelPage<void>(
+                    context,
+                    ReplaceRulesPage(
+                      store: ReplaceRuleStore.shared,
+                      reduceMotion: widget.state.reduceMotion,
+                    ),
+                    reduceMotion: widget.state.reduceMotion,
+                  ),
+                  child: const AppText('管理替换规则'),
+                ),
+              ],
             ),
             if (_replaceRulesOverridden)
               Align(
@@ -1234,6 +1374,7 @@ class _ReaderToolsState extends State<ReaderTools>
     if (category == 'replace' && _replaceRulesEnabled)
       _adjustment(
         EffectiveReplacesInline(
+          pausedIds: widget.pausedReplaceIds,
           bookTitle: widget.novel.title,
           origin: ReplaceRuleStore.originFor(widget.novel),
           active: _replaceRulesEnabled,
@@ -1283,6 +1424,7 @@ class _ReaderToolsState extends State<ReaderTools>
           ReaderValueSlider(
             sliderKey: const ValueKey('reader-night-text-brightness'),
             label: '夜读文字亮度',
+            stepper: true,
             value: _readerPreferences.nightTextBrightness,
             min: .35,
             max: 1,
@@ -1476,6 +1618,18 @@ class _ReaderToolsState extends State<ReaderTools>
               _readerPreferences.justify,
               (v) => _preferences(_readerPreferences.copyWith(justify: v)),
             ),
+            _switch(
+              context,
+              '使用出版方字体',
+              widget.state.readerTypefaceFor(widget.novel.id) ==
+                  publisherFontId(widget.novel.id),
+              (v) {
+                final action = widget.onUsePublisherFont?.call(v);
+                action?.whenComplete(() {
+                  if (mounted) setState(() {});
+                });
+              },
+            ),
           ],
         ),
       ),
@@ -1577,8 +1731,25 @@ class _ReaderToolsState extends State<ReaderTools>
       ),
     if (category == 'title')
       _adjustment(
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _switch(
+              context,
+              '翻页正文显示章节标题',
+              _readerPreferences.pagedChapterHeading,
+              (v) => _preferences(
+                _readerPreferences.copyWith(pagedChapterHeading: v),
+              ),
+            ),
+          ],
+        ),
+      ),
+    if (category == 'title')
+      _adjustment(
         AppText(
-          '标题只在滚动阅读的章节开头显示；翻页模式的章节名仍由页眉页脚信息位控制。',
+          '开启后，翻页模式会在正文顶部绘制「章号 + 章名」两行标题（对标 RM/多看）；滚动模式本来就在章节开头显示标题。',
           style: TextStyle(
             fontSize: 12,
             height: 1.6,
@@ -1588,7 +1759,7 @@ class _ReaderToolsState extends State<ReaderTools>
       ),
     if (category == 'turn') ..._behaviorItems(context, 'turn'),
     if (category == 'page')
-      const ArchiveSection(title: '阅读信息', code: 'SCREEN / STATUS'),
+      const ArchiveSection(title: '阅读信息', code: 'READER / STATUS'),
     if (category == 'page') ..._behaviorItems(context, 'screen'),
     if (category == 'body' || category == 'title' || category == 'page')
       _adjustment(
@@ -1885,6 +2056,7 @@ class _ReaderToolsState extends State<ReaderTools>
                       ReaderValueSlider(
                         sliderKey: const ValueKey('reader-status-font-size'),
                         label: '阅读信息字号',
+                        stepper: true,
                         value: prefs.statusFontSize,
                         min: 9,
                         max: 18,
@@ -1907,13 +2079,14 @@ class _ReaderToolsState extends State<ReaderTools>
                       ReaderValueSlider(
                         sliderKey: const ValueKey('reader-status-top-offset'),
                         label: '阅读信息上下位置',
+                        stepper: true,
                         value: prefs.statusTopOffset,
                         min: -8,
                         max: 24,
                         divisions: 32,
                         format: (v) => v == 0
                             ? '居中'
-                            : '${v > 0 ? '下移' : '上移'} ${v.abs().round()}',
+                            : '${v > 0 ? '下移' : '上移'} ${v.abs().round()} px',
                         onPreview: (v) => _preferences(
                           prefs.copyWith(statusTopOffset: v),
                           persist: false,
@@ -1940,11 +2113,12 @@ class _ReaderToolsState extends State<ReaderTools>
             ReaderValueSlider(
               sliderKey: const ValueKey('reader-status-inset'),
               label: '阅读信息左右留边',
+              stepper: true,
               value: prefs.statusSideInset,
               min: 0,
               max: 96,
               divisions: 48,
-              format: (v) => v == 0 ? '自动' : '+${v.round()}',
+              format: (v) => v == 0 ? '自动' : '+${v.round()} px',
               onPreview: (v) => _preferences(
                 prefs.copyWith(statusSideInset: v),
                 persist: false,
@@ -2059,12 +2233,71 @@ class _ReaderToolsState extends State<ReaderTools>
             expanded:
                 prefs.tapPaging &&
                 !prefs.tapBothSidesNext &&
-                prefs.tapLayout != ReaderTapLayout.standard,
+                (prefs.tapLayout == ReaderTapLayout.leftHand ||
+                    prefs.tapLayout == ReaderTapLayout.rightHand),
             child: AppText(
               '${prefs.tapLayout == ReaderTapLayout.rightHand ? '右' : '左'}半屏上部回退、下部前进，另一侧显示控件。',
               style: const TextStyle(fontSize: 12, height: 1.6),
             ),
           ),
+          if (prefs.tapPaging &&
+              !prefs.tapBothSidesNext &&
+              prefs.tapLayout == ReaderTapLayout.custom)
+            Column(
+              children: [
+                for (var row = 0; row < 3; row++)
+                  Row(
+                    children: [
+                      for (var col = 0; col < 3; col++)
+                        Expanded(
+                          child: GlassTextButton(
+                            compact: true,
+                            onPressed: () => _editTapCell(row * 3 + col),
+                            child: AppText(
+                              prefs.tapGrid[row * 3 + col].label,
+                              textAlign: TextAlign.center,
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                const AppText(
+                  '点选区域设置动作；至少保留一格显示控件。',
+                  style: TextStyle(fontSize: 12),
+                ),
+              ],
+            ),
+          if (LocalPlatform.android)
+            for (final previous in [true, false])
+              Wrap(
+                crossAxisAlignment: WrapCrossAlignment.center,
+                spacing: 8,
+                children: [
+                  GlassTextButton(
+                    onPressed: () => _recordPageKey(previous),
+                    child: AppText('录入${previous ? '上一页' : '下一页'}按键'),
+                  ),
+                  for (final code
+                      in previous ? prefs.previousKeys : prefs.nextKeys)
+                    GlassTextButton(
+                      compact: true,
+                      onPressed: () {
+                        final current = _readerPreferences;
+                        _preferences(
+                          current.copyWith(
+                            previousKeys: previous
+                                ? ([...current.previousKeys]..remove(code))
+                                : null,
+                            nextKeys: previous
+                                ? null
+                                : ([...current.nextKeys]..remove(code)),
+                          ),
+                        );
+                      },
+                      child: AppText('移除键 $code'),
+                    ),
+                ],
+              ),
           if (LocalPlatform.volumePaging)
             _switch(
               context,
@@ -2076,6 +2309,7 @@ class _ReaderToolsState extends State<ReaderTools>
           ReaderValueSlider(
             sliderKey: const ValueKey('reader-auto-scroll-speed'),
             label: prefs.mode.paginated ? '自动翻页间隔' : '自动滚动速度',
+            stepper: true,
             value: prefs.mode.paginated
                 ? 600 / prefs.autoScrollSpeed
                 : prefs.autoScrollSpeed,
@@ -2129,6 +2363,7 @@ class _ReaderToolsState extends State<ReaderTools>
             ReaderValueSlider(
               sliderKey: const ValueKey('reader-brightness'),
               label: '阅读亮度',
+              stepper: true,
               value: prefs.brightness ?? .7,
               min: 0,
               max: 1,

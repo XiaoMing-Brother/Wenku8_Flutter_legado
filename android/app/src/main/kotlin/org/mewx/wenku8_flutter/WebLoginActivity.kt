@@ -36,6 +36,7 @@ import org.mewx.wenku8_flutter.booksource.origin
 import org.mewx.wenku8_flutter.booksource.readWebCookieDetails
 import org.mewx.wenku8_flutter.booksource.webCookieTargets
 import org.mewx.wenku8_flutter.booksource.WebCookieLine
+import org.json.JSONTokener
 
 /**
  * 独立的网页登录页。登录完成后只回传 Cookie，账号密码不离开网页本身。
@@ -50,11 +51,16 @@ class WebLoginActivity : Activity() {
     private val capturedCookies = linkedSetOf<WebCookieLine>()
     private var cookiesReady = false
     private var finished = false
+    private var returnHtml = false
+    private var allowEmpty = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val url = intent.getStringExtra(EXTRA_URL).orEmpty().trim()
-        if (url.isEmpty()) {
+        val html = intent.getStringExtra(EXTRA_HTML).orEmpty()
+        returnHtml = intent.getBooleanExtra(EXTRA_RETURN_HTML, false)
+        allowEmpty = intent.getBooleanExtra(EXTRA_ALLOW_EMPTY, false) || returnHtml
+        if (url.isEmpty() && html.isBlank()) {
             finish()
             return
         }
@@ -212,7 +218,17 @@ class WebLoginActivity : Activity() {
         prepareCookies(initialCookies) {
             if (!finished && !isFinishing && !isDestroyed) {
                 cookiesReady = true
-                web.loadUrl(url, headers)
+                if (html.isNotBlank()) {
+                    web.loadDataWithBaseURL(
+                        url.ifBlank { "about:blank" },
+                        html,
+                        "text/html",
+                        "UTF-8",
+                        url.ifBlank { "about:blank" },
+                    )
+                } else {
+                    web.loadUrl(url, headers)
+                }
             }
         }
     }
@@ -402,13 +418,28 @@ class WebLoginActivity : Activity() {
 
     private fun finishWithCookies() {
         if (finished || !cookiesReady) return
+        val web = webView
+        if (returnHtml && web != null) {
+            web.evaluateJavascript("document.documentElement.outerHTML") { value ->
+                val html = runCatching {
+                    JSONTokener(value.orEmpty()).nextValue() as? String
+                }.getOrNull().orEmpty()
+                finishWithCookies(html)
+            }
+            return
+        }
+        finishWithCookies("")
+    }
+
+    private fun finishWithCookies(html: String) {
+        if (finished || !cookiesReady) return
         val targets = observedTargets()
         val root = targets.first()
         val scoped = WebViewFeature.isFeatureSupported(WebViewFeature.GET_COOKIE_INFO)
         val completed = webView?.url?.let { it.toHttpUrlOrNull() } ?: root
         capturedCookies.addAll(captureCookies())
         val lines = capturedCookies.toList()
-        if (lines.isEmpty()) {
+        if (lines.isEmpty() && !allowEmpty) {
             Toast.makeText(this, "无法读取网页登录状态，请重试", Toast.LENGTH_SHORT).show()
             return
         }
@@ -419,7 +450,8 @@ class WebLoginActivity : Activity() {
             RESULT_OK,
             Intent().putStringArrayListExtra(EXTRA_COOKIES_RESULT, ArrayList(cookies))
                 .putStringArrayListExtra(EXTRA_COOKIE_TARGETS_RESULT, ArrayList(cookieUrls))
-                .putExtra(EXTRA_SCOPED, scoped).putExtra(EXTRA_COMPLETED_URL, completed.toString()),
+                .putExtra(EXTRA_SCOPED, scoped).putExtra(EXTRA_COMPLETED_URL, completed.toString())
+                .putExtra(EXTRA_HTML_RESULT, html),
         )
         clearCookiesAndFinish()
     }
@@ -481,6 +513,10 @@ class WebLoginActivity : Activity() {
 
     companion object {
         const val EXTRA_URL = "webLoginUrl"
+        const val EXTRA_HTML = "webLoginHtml"
+        const val EXTRA_RETURN_HTML = "webLoginReturnHtml"
+        const val EXTRA_ALLOW_EMPTY = "webLoginAllowEmpty"
+        const val EXTRA_HTML_RESULT = "webLoginHtmlResult"
         const val EXTRA_TITLE = "webLoginTitle"
         const val EXTRA_HEADERS = "webLoginHeaders"
         const val EXTRA_COOKIE_TARGETS = "webLoginCookieTargets"

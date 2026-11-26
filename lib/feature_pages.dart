@@ -124,6 +124,7 @@ class FeatureEntry extends StatelessWidget {
                     subtitle!,
                     style: TextStyle(
                       fontSize: 12,
+                      height: 1.4,
                       color: Theme.of(context).colorScheme.onSurfaceVariant,
                     ),
                   ),

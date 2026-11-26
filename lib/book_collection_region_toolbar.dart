@@ -55,7 +55,7 @@ class BookCollectionRegionToolbar extends StatelessWidget {
             Expanded(
               child: ArchiveSection(
                 title: title,
-                code: 'COLLECTION / REGION',
+                code: 'LIBRARY / SHELF',
                 subtitle: subtitle ?? '',
               ),
             ),
@@ -93,7 +93,7 @@ Future<String?> chooseBookCollectionRegionCategory(
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const ArchiveSection(title: '立体书架分类', code: 'SHELF / CATEGORY'),
+        const ArchiveSection(title: '立体书架分类', code: 'LIBRARY / CATEGORY'),
         const SizedBox(height: 12),
         for (final (index, entry) in options.entries.indexed)
           GlassMenuItem(

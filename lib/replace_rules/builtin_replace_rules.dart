@@ -28,6 +28,39 @@ List<ReplaceRule> builtinReplaceRules() => const [
     order: 10,
   ),
   ReplaceRule(
+    id: 'builtin-pirate-banner',
+    name: '删盗版站横幅（全本/精校/TXT 下载 + 网址）',
+    group: '内置净化',
+    // 典型："本站发的所有小说都是全本-完结-精校-校对 的无错TXT小说下载 : http://..."
+    pattern:
+        r'^[ \t]*(?:本站|本网站|本书|更多).{0,60}?(?:全本|完结|精校|校对|免费|TXT|txt|小说).{0,60}?(?:下载|https?://|www\.|\.com).{0,200}$',
+    replacement: '',
+    scopeContent: true,
+    scopeTitle: false,
+    order: 5,
+  ),
+  ReplaceRule(
+    id: 'builtin-separator-line',
+    name: '删纯分隔线（整行 = - — * _ 等重复）',
+    group: '内置净化',
+    // 仅匹配"整行只由分隔符组成"，不会误删 `=== 第2话 标题 ===` 这类带文字的装饰标题。
+    pattern: r'^[ \t]*[=\-—–*_~#]{3,}[ \t]*$',
+    replacement: '',
+    scopeContent: true,
+    scopeTitle: false,
+    order: 6,
+  ),
+  ReplaceRule(
+    id: 'builtin-bare-url-line',
+    name: '删整行裸网址',
+    group: '内置净化',
+    pattern: r'^[ \t]*(?:https?://|www\.)\S+[ \t]*$',
+    replacement: '',
+    scopeContent: true,
+    scopeTitle: false,
+    order: 7,
+  ),
+  ReplaceRule(
     id: 'builtin-mobile-url',
     name: '删手机版网址尾巴',
     group: '内置净化',

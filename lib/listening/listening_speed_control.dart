@@ -1,6 +1,8 @@
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../app_ui.dart';
 import '../local_platform.dart';
 import '../reader_tools.dart' show ReaderValueSlider;
 import 'models.dart';
@@ -48,6 +50,7 @@ class _ListeningSpeedControlState extends State<ListeningSpeedControl> {
       return ReaderValueSlider(
         sliderKey: const ValueKey('listening-speed'),
         label: '语速',
+        stepper: true,
         value: widget.value,
         min: listeningMinimumSpeed,
         max: listeningMaximumSpeed,
@@ -69,6 +72,7 @@ class _ListeningSpeedControlState extends State<ListeningSpeedControl> {
         ReaderValueSlider(
           sliderKey: const ValueKey('listening-speed'),
           label: '语速',
+          stepper: true,
           value: nearest.toDouble(),
           min: 0,
           max: (rates.length - 1).toDouble(),
@@ -92,15 +96,15 @@ class _ListeningSpeedControlState extends State<ListeningSpeedControl> {
           future: _rates,
           builder: (context, snapshot) {
             if (snapshot.hasError) {
-              return TextButton(
+              return GlassTextButton(
                 onPressed: () => setState(() => _rates = _load()),
-                child: const Text('语速能力读取失败，点击重试'),
+                child: const AppText('语速能力读取失败，点击重试'),
               );
             }
             if (snapshot.connectionState != ConnectionState.done) {
               return const SizedBox(
                 height: 56,
-                child: Center(child: CircularProgressIndicator()),
+                child: Center(child: CupertinoActivityIndicator()),
               );
             }
             return _slider(snapshot.data);

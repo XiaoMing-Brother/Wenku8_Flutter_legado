@@ -223,7 +223,8 @@ class ReplaceRuleStore extends ChangeNotifier {
     var updated = 0;
     var nextOrder = _rules.isEmpty ? 0 : _rules.last.order + 10;
     for (final rule in batch.rules) {
-      if (rule.order != ReplaceRule.unspecifiedOrder && rule.order >= nextOrder) {
+      if (rule.order != ReplaceRule.unspecifiedOrder &&
+          rule.order >= nextOrder) {
         nextOrder = rule.order + 10;
       }
     }
@@ -262,8 +263,9 @@ class ReplaceRuleStore extends ChangeNotifier {
     required bool titles,
     required String bookTitle,
     required String origin,
+    Set<String> excludedIds = const {},
   }) => [
-    for (final rule in _rules)
+    for (final rule in _without(excludedIds))
       if (rule.enabled &&
           (titles ? rule.scopeTitle : rule.scopeContent) &&
           ReplaceRuleEngine.inScope(rule, bookTitle: bookTitle, origin: origin))
@@ -274,9 +276,10 @@ class ReplaceRuleStore extends ChangeNotifier {
     String text, {
     required String bookTitle,
     required String origin,
+    Set<String> excludedIds = const {},
   }) => ReplaceRuleEngine.applyContent(
     text,
-    _rules,
+    _without(excludedIds),
     bookTitle: bookTitle,
     origin: origin,
   );
@@ -285,12 +288,16 @@ class ReplaceRuleStore extends ChangeNotifier {
     String title, {
     required String bookTitle,
     required String origin,
+    Set<String> excludedIds = const {},
   }) => ReplaceRuleEngine.applyTitle(
     title,
-    _rules,
+    _without(excludedIds),
     bookTitle: bookTitle,
     origin: origin,
   );
+
+  Iterable<ReplaceRule> _without(Set<String> ids) =>
+      ids.isEmpty ? _rules : _rules.where((rule) => !ids.contains(rule.id));
 
   @override
   void dispose() {

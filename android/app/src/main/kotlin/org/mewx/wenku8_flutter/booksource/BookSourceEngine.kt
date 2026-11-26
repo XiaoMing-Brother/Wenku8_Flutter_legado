@@ -13,6 +13,33 @@ import org.json.JSONObject
 private const val MaxContentPages = 100
 private const val MaxTocPages = 20
 private val FalseChapterFlags = setOf("", "null", "false", "no", "not", "0", "0.0")
+private val BookNameSuffix = Regex("""\s+作\s*者.*|\s+\S+\s+著""")
+private val BookAuthorPrefix = Regex("""^\s*作\s*者[:：\s]+|\s+著""")
+private val WordCountRegex = Regex("""(\d+(?:\.\d+)?)\s*(亿|万)?""")
+
+private fun formatBookName(value: String): String =
+    value.replace(BookNameSuffix, "").trim()
+
+private fun formatBookAuthor(value: String): String =
+    value.replace(BookAuthorPrefix, "").trim()
+
+/**
+ * Legado 把字数存成 `12.3万字` / `12345` 这类文本，本仓库用整数保存；
+ * 这里换算常见中文单位，无法识别时返回 null。
+ */
+private fun parseWordCount(value: String): Int? {
+    val text = value.trim().replace(",", "").replace(" ", "")
+    if (text.isEmpty()) return null
+    text.toIntOrNull()?.let { return it }
+    val match = WordCountRegex.find(text) ?: return null
+    val number = match.groupValues[1].toDoubleOrNull() ?: return null
+    val multiplier = when (match.groupValues[2]) {
+        "亿" -> 100_000_000.0
+        "万" -> 10_000.0
+        else -> 1.0
+    }
+    return (number * multiplier).toInt().takeIf { it > 0 }
+}
 
 internal data class WebLoginConfig(
     val url: String,
@@ -33,20 +60,110 @@ private data class ContentPage(
 )
 
 internal class BookSourceEngine(
-    private val variables: BookSourceVariables? = null,
+    private val variables: BookSourceVariables? = BookSourceVariables(null),
+    private val host: BookSourceHost? = null,
+    cacheRoot: File? = null,
+    readerConfig: (() -> Map<String, Any?>)? = null,
 ) {
     private val sources = ConcurrentHashMap<String, BookSource>()
     private val infoMaps = ConcurrentHashMap<String, MutableMap<String, String>>()
     private val http = BookSourceHttp(variables)
-    private val js = BookSourceJs(http)
+    private val loginDefaultsGuard = ThreadLocal<Boolean>()
+    private val files = BookSourceFiles(cacheRoot)
+    private val js = BookSourceJs(
+        http,
+        host,
+        { sourceKey -> loginDefaults(sourceKey) },
+        files,
+        readerConfig,
+    )
+
+    init {
+        // URL 选项里的 js 用当前书源的作用域执行，result 是被替换的地址。
+        http.urlTransformer = { source, request, script ->
+            val headers = request.option.headers.toMutableMap()
+            val value = runCatching {
+                js.eval(
+                    script,
+                    JsEnv(
+                        source = source,
+                        analyzer = analyzer(source),
+                        content = request.url,
+                        baseUrl = request.url,
+                        key = request.key,
+                        page = request.page,
+                        book = request.book,
+                        chapter = request.chapter,
+                        variables = variables,
+                        headerMap = headers,
+                        infoMap = request.infoMap,
+                    ),
+                )
+            }.getOrNull()
+            UrlTransform(
+                url = value?.toString()?.trim()?.takeIf { it.isNotEmpty() },
+                headers = headers,
+            )
+        }
+        http.responseTransformer = { source, spec, response ->
+            val script = spec.option.bodyJs?.trim().orEmpty()
+            if (script.isEmpty()) {
+                response
+            } else {
+                val value = js.eval(
+                    script,
+                    JsEnv(
+                        source = source,
+                        analyzer = analyzer(source),
+                        content = response.text,
+                        baseUrl = response.url,
+                        key = spec.key,
+                        page = spec.page,
+                        book = spec.book,
+                        chapter = spec.chapter,
+                        variables = variables,
+                        infoMap = spec.infoMap,
+                    ),
+                )
+                response.copy(text = value?.toString() ?: "null")
+            }
+        }
+        // URL 选项里的 webView=true 表示必须让页面 JS 跑完再取结果。
+        http.webViewFetcher = { source, spec, html, pageUrl ->
+            val target = pageUrl.toHttpUrlOrNull()
+            val headers = if (target != null) {
+                http.sourceHeaders(source, target, http.cookieStore(source.key)) +
+                    spec.option.headers
+            } else {
+                spec.option.headers
+            }.toMutableMap().apply {
+                if (keys.none { it.equals("User-Agent", ignoreCase = true) }) {
+                    put("User-Agent", BookSourceHttp.DefaultUserAgent)
+                }
+            }
+            host?.loadWebView(
+                sourceKey = source.key,
+                html = html,
+                url = pageUrl,
+                js = spec.option.webJs.orEmpty(),
+                sourceRegex = spec.option.sourceRegex.orEmpty(),
+                overrideUrlRegex = "",
+                cacheFirst = spec.option.cacheFirst,
+                delayMs = spec.option.webViewDelayTime,
+                headers = headers,
+            )
+        }
+    }
 
     fun upsert(value: Any?) {
         val source = BookSource.from(value)
-        sources[source.key] = source
+        val previous = sources.put(source.key, source)
+        if (previous != null && previous.concurrentRate != source.concurrentRate) http.rateLimiter.clear(source.key)
     }
 
     fun remove(key: String) {
         sources.remove(key)
+        http.rateLimiter.clear(key)
         infoMaps.remove(key)
         variables?.remove(loginInfoKey(key))
         variables?.remove(loginHeaderKey(key))
@@ -54,6 +171,23 @@ internal class BookSourceEngine(
     }
 
     fun loginInfo(sourceKey: String): Map<String, Any?> = loginState(sourceKey)
+
+    /**
+     * Legado 的 source.getLoginInfoMap() 在没有保存登录信息时返回 loginUi
+     * 表单项的默认值，并写回登录信息。登录表单脚本常依赖这一步初始化。
+     */
+    private fun loginDefaults(sourceKey: String): Map<String, String> {
+        if (loginDefaultsGuard.get() == true) return emptyMap()
+        loginDefaultsGuard.set(true)
+        return try {
+            val source = sources[sourceKey] ?: return emptyMap()
+            val stored = storedLoginInfo(sourceKey)
+            if (stored.isNotEmpty()) return stored
+            defaultLoginInfo(loginUi(source, emptyMap()))
+        } finally {
+            loginDefaultsGuard.remove()
+        }
+    }
 
     fun login(
         sourceKey: String,
@@ -102,6 +236,7 @@ internal class BookSourceEngine(
         }
         var openUrl: String? = null
         var toast: String? = null
+        var refreshUi = false
         val env = loginEnv(source, info).copy(
             onOpenUrl = { openUrl = it },
             onToast = { toast = it },
@@ -112,13 +247,25 @@ internal class BookSourceEngine(
                 if (openUrl.isNullOrBlank()) openUrl = webLoginAddress(source)
             },
             abortAfterOpenUrl = true,
+            // java.reUiView()/reLoginView() 会按更新后的 loginInfo 重建表单，
+            // 条件字段（例如开启“自订模式”后才出现的配色项）依赖这一步。
+            onRefresh = { action -> if (action == "login") refreshUi = true },
         )
         try {
             js.eval(script, env)
         } catch (_: BookSourceOpenUrlSignal) {
             // 网页登录已经在应用内打开，剩余脚本需要等登录完成后再执行。
         }
-        return mapOf("openUrl" to openUrl, "toast" to toast)
+        val updated = env.infoMap ?: emptyMap<String, String>()
+        return mapOf(
+            "openUrl" to openUrl,
+            "toast" to toast,
+            // 登录按钮脚本常用 java.upLoginData()/infoMap 回填验证码、令牌等字段，
+            // 需要带回去让 Flutter 登录弹层同步刷新。
+            "values" to updated,
+            "refreshUi" to refreshUi,
+            "loginUi" to if (refreshUi) loginUi(source, updated) else emptyList<Map<String, Any?>>(),
+        )
     }
 
     fun logout(sourceKey: String): Map<String, Any?> {
@@ -176,9 +323,60 @@ internal class BookSourceEngine(
         http.cancelSearches()
     }
 
-    fun image(sourceKey: String, url: String): ByteArray {
+    fun image(
+        sourceKey: String,
+        url: String,
+        cover: Boolean = false,
+        bookUrl: String = "",
+    ): ByteArray {
         val source = requireSource(sourceKey)
-        return http.fetchBytes(source, http.requestSpec(source.key, url))
+        val spec = withSourceHeaders(
+            source,
+            http.requestSpec(source.key, url),
+            key = "",
+            page = 1,
+        )
+        val bytes = http.fetchBytes(source, spec)
+        val script = (if (cover) source.coverDecodeJs else source.content.imageDecode)
+            ?.trim()
+            .orEmpty()
+        if (script.isEmpty()) return bytes
+        val book = BookData(bookUrl = bookUrl)
+        return js.decodeImageBytes(
+            script = script,
+            bytes = bytes,
+            src = url,
+            book = book,
+            analyzer = analyzer(source),
+            source = source,
+            variables = variables,
+        )?.takeIf { it.isNotEmpty() } ?: bytes
+    }
+
+    fun verificationImage(sourceKey: String, imageUrl: String): ByteArray? {
+        val value = imageUrl.trim()
+        if (value.startsWith("data:", true)) {
+            val separator = value.indexOf(',')
+            if (separator < 0 || !value.substring(0, separator).endsWith(";base64")) return null
+            return runCatching {
+                java.util.Base64.getMimeDecoder().decode(value.substring(separator + 1))
+            }.getOrNull()
+        }
+        if (!value.startsWith("http", true)) return null
+        return runCatching { image(sourceKey, value) }.getOrNull()
+    }
+
+    fun cookieValues(sourceKey: String, url: String): Map<String, String> {
+        val target = runCatching {
+            val value = url.trim()
+            if (value.startsWith("http", true)) value else "https://$value/"
+        }.getOrNull()?.toHttpUrlOrNull() ?: return emptyMap()
+        return http.cookieStore(sourceKey).values(target)
+    }
+
+    fun saveWebViewCookies(sourceKey: String, url: String, cookie: String) {
+        if (cookie.isBlank()) return
+        http.replaceCookie(sourceKey, url, cookie)
     }
 
     fun search(
@@ -226,6 +424,7 @@ internal class BookSourceEngine(
             baseUrl = loaded.url,
             key = keyword,
             page = page,
+            book = BookData(),
         )
         val rows = analyzer.getObjects(source.search.bookList, context)
         val items = rows.mapNotNull { row ->
@@ -328,10 +527,12 @@ internal class BookSourceEngine(
         if (template.isBlank()) throw IllegalArgumentException("书源没有配置发现地址")
         val analyzer = analyzer(source)
         val infoMap = infoMap(sourceKey, values)
+        val pageParam = source.explore.pageParam?.trim().orEmpty()
+        val templateUsesPageParam = pageParam.isNotEmpty() && supportsPageParam(template)
         val expanded = resolveAddress(
             source,
             analyzer,
-            template,
+            if (templateUsesPageParam) withPageParam(template, page, pageParam) else template,
             keyword,
             page,
             infoMap,
@@ -350,6 +551,7 @@ internal class BookSourceEngine(
                     http.requestSpec(source.key, candidate),
                     key = keyword,
                     page = page,
+                    infoMap = infoMap,
                 )
                 break
             } catch (error: Throwable) {
@@ -363,6 +565,7 @@ internal class BookSourceEngine(
             baseUrl = loaded.url,
             key = keyword,
             page = page,
+            book = BookData(),
         )
         val rule = if (source.explore.bookList.isNullOrBlank()) {
             source.search
@@ -378,8 +581,39 @@ internal class BookSourceEngine(
         }
         mapOf(
             "items" to items,
-            "hasMore" to BookSourceUrlRule.hasNext(template, page, items.isNotEmpty(), jsonIsLastPage(loaded.text)),
+            "hasMore" to (
+                BookSourceUrlRule.hasNext(template, page, items.isNotEmpty(), jsonIsLastPage(loaded.text)) ||
+                    (templateUsesPageParam && items.isNotEmpty())
+                ),
         )
+    }
+
+    /**
+     * Legado 的 `ruleExplore.pageParam`：地址本身没有 {{page}}、也没有 JS/选项时，
+     * 按参数名追加页码。只有显式声明 pageParam 的源才启用，避免给所有发现地址
+     * 加上无意义的 page 参数。
+     */
+    private fun supportsPageParam(template: String): Boolean =
+        template.isNotBlank() &&
+            !template.contains("{{") &&
+            !template.contains("}}") &&
+            !template.contains('<') &&
+            !template.contains("@js:", ignoreCase = true) &&
+            !template.contains("<js>", ignoreCase = true) &&
+            !UrlOptionPattern.containsMatchIn(template)
+
+    private fun withPageParam(template: String, page: Int, param: String): String {
+        if (page <= 1) return template
+        val hash = template.indexOf('#')
+        val base = if (hash >= 0) template.substring(0, hash) else template
+        val fragment = if (hash >= 0) template.substring(hash) else ""
+        val pattern = Regex("([?&])${Regex.escape(param)}=\\d+")
+        val paged = if (pattern.containsMatchIn(base)) {
+            pattern.replace(base) { match -> "${match.groupValues[1]}$param=$page" }
+        } else {
+            base + (if (base.contains('?')) "&" else "?") + "$param=$page"
+        }
+        return paged + fragment
     }
 
     /**
@@ -461,11 +695,11 @@ internal class BookSourceEngine(
         )
     }
 
-    fun detail(sourceKey: String, bookUrl: String, includeDownloads: Boolean = false): Map<String, Any?> {
+    fun detail(sourceKey: String, bookUrl: String, includeDownloads: Boolean = false, metadata: BookData = BookData()): Map<String, Any?> {
         val source = requireSource(sourceKey)
         requireTextSource(source)
         val analyzer = analyzer(source)
-        val book = BookData(bookUrl = bookUrl)
+        var book = metadata.copy(bookUrl = bookUrl)
         val response = applyLoginCheck(
             source,
             fetchResponse(
@@ -480,52 +714,62 @@ internal class BookSourceEngine(
         var content: Any = response.text
         val init = source.bookInfo.init
         if (!init.isNullOrBlank()) {
+            // Legado 的 init 用 getElement 只取第一个匹配节点作为后续字段的解析容器。
             val evaluated = analyzer.getObjects(
                 init,
-                RuleContext(content, response.url, book = book),
-            )
-            if (evaluated.size == 1) {
-                content = evaluated.first() ?: content
-            } else if (evaluated.size > 1) {
-                content = evaluated
-            }
+                RuleContext(content, response.url, book = book, fromBookInfo = true),
+            ).firstOrNull()
+            if (evaluated != null) content = evaluated
         }
-        val context = RuleContext(content, response.url, book = book)
+        fun context() = RuleContext(content, response.url, book = book, fromBookInfo = true)
+        fun read(rule: String?) = analyzer.getString(rule, context())
+        fun readUrl(rule: String?) = read(rule).lineSequence()
+            .map { it.trim() }
+            .firstOrNull { it.isNotEmpty() }
+            .orEmpty()
         val info = source.bookInfo
         val pageTitle = runCatching { Jsoup.parse(response.text).title() }.getOrDefault("")
-        val name = analyzer.getString(info.name, context)
+        val name = formatBookName(read(info.name)).ifBlank { book.name }
             .ifBlank { pageTitle }
             .ifBlank { bookUrl }
+        book = book.copy(name = name)
+        book = book.copy(author = formatBookAuthor(read(info.author)).ifBlank { book.author })
+        book = book.copy(
+            kind = analyzer.getStrings(info.kind, context())
+                .joinToString(",")
+                .take(1000)
+                .ifBlank { book.kind },
+        )
+        book = book.copy(wordCount = read(info.wordCount).trim().ifBlank { book.wordCount })
+        book = book.copy(lastChapter = read(info.lastChapter).ifBlank { book.lastChapter })
+        book = book.copy(intro = plainText(read(info.intro)).ifBlank { book.intro })
+        book = book.copy(coverUrl = http.resolve(response.url, readUrl(info.coverUrl)).ifBlank { book.coverUrl })
+        book = book.copy(updateTime = read(info.updateTime).ifBlank { book.updateTime })
         val tocUrl = http.resolve(
             response.url,
-            analyzer.getString(info.tocUrl, context).ifBlank { bookUrl },
+            readUrl(info.tocUrl).ifBlank { bookUrl },
         )
+        book = book.copy(tocUrl = tocUrl)
         val totalChapterNum = analyzer
-            .getString(info.totalChapterNum, context)
+            .getString(info.totalChapterNum, context())
             .trim()
             .toIntOrNull()
-        val wordCount = analyzer
-            .getString(info.wordCount, context)
-            .trim()
-            .toIntOrNull()
-        val downloads = if (includeDownloads) analyzer.getStrings(info.downloadUrls, context).flatMap { it.lines() }
+        val downloads = if (includeDownloads) analyzer.getStrings(info.downloadUrls, context()).flatMap { it.lines() }
             .filter { it.isNotBlank() }.map { http.resolve(response.url, it) }.distinct() else emptyList()
         return mapOf(
             "name" to name,
             "downloadUrls" to downloads,
-            "author" to analyzer.getString(info.author, context),
-            "coverUrl" to http.resolve(
-                response.url,
-                analyzer.getString(info.coverUrl, context),
-            ),
-            "intro" to plainText(analyzer.getString(info.intro, context)),
-            "kind" to analyzer.getString(info.kind, context),
-            "lastUpdate" to analyzer.getString(info.updateTime, context),
-            "updateTime" to analyzer.getString(info.updateTime, context),
+            "author" to book.author,
+            "coverUrl" to book.coverUrl,
+            "intro" to book.intro,
+            "kind" to book.kind,
+            "lastChapter" to book.lastChapter,
+            "lastUpdate" to book.updateTime,
+            "updateTime" to book.updateTime,
             "tocUrl" to tocUrl,
-            "status" to analyzer.getString(info.status, context),
+            "status" to read(info.status),
             "totalChapterNum" to totalChapterNum,
-            "wordCount" to wordCount,
+            "wordCount" to parseWordCount(book.wordCount),
         )
     }
 
@@ -533,6 +777,7 @@ internal class BookSourceEngine(
         sourceKey: String,
         bookUrl: String,
         tocUrl: String?,
+        metadata: BookData = BookData(),
     ): List<Map<String, Any?>> {
         val source = requireSource(sourceKey)
         requireTextSource(source)
@@ -542,7 +787,38 @@ internal class BookSourceEngine(
             return downloads.indices.map { index -> mapOf("title" to "文件 ${index + 1}", "url" to "wenku-download:$index") }
         }
         val analyzer = analyzer(source)
-        val book = BookData(bookUrl = bookUrl, tocUrl = tocUrl.orEmpty())
+        var book = metadata.copy(bookUrl = bookUrl, tocUrl = tocUrl ?: metadata.tocUrl)
+        var effectiveTocUrl = tocUrl
+        val preUpdateJs = source.toc.preUpdateJs
+        if (!preUpdateJs.isNullOrBlank()) {
+            var refreshToc = false
+            runCatching {
+                js.eval(
+                    preUpdateJs,
+                    JsEnv(
+                        source = source,
+                        analyzer = analyzer,
+                        content = bookUrl,
+                        baseUrl = bookUrl,
+                        key = "",
+                        page = 1,
+                        book = book,
+                        variables = variables,
+                        onRefresh = { action -> if (action == "tocUrl") refreshToc = true },
+                    ),
+                )
+            }
+            if (refreshToc) {
+                // refreshTocUrl() 在 Legado 中会重新抓详情页，让动态目录地址
+                // 覆盖旧值；失败时继续使用调用方传进来的地址。
+                runCatching {
+                    detail(sourceKey, bookUrl, metadata = book)["tocUrl"]?.toString()
+                }.getOrNull()?.takeIf { it.isNotBlank() }?.let {
+                    effectiveTocUrl = it
+                    book = book.copy(tocUrl = it)
+                }
+            }
+        }
         val result = mutableListOf<ChapterData>()
         val visited = mutableSetOf<String>()
         val rawRule = source.toc.chapterList.orEmpty().trim()
@@ -569,12 +845,12 @@ internal class BookSourceEngine(
             val context = RuleContext(response.text, url, book = book, redirectUrl = response.url)
             val rows = analyzer.getObjects(listRule, context)
             for (row in rows) {
-                result.add(chapterRow(source, analyzer, row, response.url, book))
+                result.add(chapterRow(source, analyzer, row, response.url, book, result.size))
             }
             if (!readNext) return emptyList()
             return analyzer.nextPageUrls(source.toc.nextTocUrl, context, visited)
         }
-        val start = http.resolve(bookUrl, tocUrl.orEmpty()).ifBlank { bookUrl }
+        val start = http.resolve(bookUrl, effectiveTocUrl.orEmpty()).ifBlank { bookUrl }
         val pending = loadPage(start, true)
         if (pending.size == 1) {
             var next = pending.firstOrNull()
@@ -608,11 +884,27 @@ internal class BookSourceEngine(
         chapterUrl: String,
         nextChapterUrl: String?,
         chapterTitle: String?,
+        metadata: BookData = BookData(),
+        chapterIndex: Int = 0,
     ): String {
         val source = requireSource(sourceKey)
         requireTextSource(source)
         val analyzer = analyzer(source)
-        val book = BookData(bookUrl = bookUrl)
+        // Legado 的 book 实体在阅读时保存当前进度章节，正文替换规则常用
+        // book.durChapterTitle / durChapterIndex 去掉页内重复标题。
+        val book = metadata.copy(
+            bookUrl = bookUrl,
+            durChapterTitle = chapterTitle.orEmpty(),
+            durChapterIndex = chapterIndex,
+        )
+        val currentChapter = ChapterData(
+            index = chapterIndex,
+            title = chapterTitle.orEmpty(),
+            bookUrl = bookUrl,
+            url = chapterUrl,
+            variableUrl = chapterUrl,
+            nextUrl = nextChapterUrl.orEmpty(),
+        )
         val parts = mutableListOf<String>()
         val visited = mutableSetOf<String>()
         val nextRule = source.content.nextContentUrl
@@ -631,16 +923,23 @@ internal class BookSourceEngine(
             val key = http.pageKey(url)
             if (key == nextChapterKey || !visited.add(key)) return null
             pageCount++
-            val chapter = ChapterData(
-                title = chapterTitle.orEmpty(),
-                url = url,
-                nextUrl = nextUrl,
+            val chapter = currentChapter.copy(url = url, nextUrl = nextUrl)
+            val baseRequest = http.requestSpec(source.key, url)
+            val contentWebJs = source.content.webJs?.trim().orEmpty()
+            // 正文级 webJs 依赖 WebView 跑完页面脚本后再取内容；书源把
+            // sourceRegex 写在 ruleContent 里，需要一起交给 WebView 嗅探。
+            val request = if (contentWebJs.isEmpty()) baseRequest else baseRequest.copy(
+                option = baseRequest.option.copy(
+                    webView = true,
+                    webJs = contentWebJs,
+                    sourceRegex = source.content.sourceRegex?.trim().orEmpty(),
+                ),
             )
             val response = applyLoginCheck(
                 source,
                 fetchResponse(
                     source,
-                    http.requestSpec(source.key, url),
+                    request,
                     book = book,
                     chapter = chapter,
                 ),
@@ -749,7 +1048,7 @@ internal class BookSourceEngine(
                         content = normalized,
                         baseUrl = chapterUrl,
                         book = book,
-                        chapter = ChapterData(url = chapterUrl),
+                        chapter = currentChapter,
                     ),
                 )
             }.getOrNull()
@@ -783,7 +1082,7 @@ internal class BookSourceEngine(
 
         val analyzer = analyzer(source)
         val book = BookData(bookUrl = bookUrl)
-        val chapter = ChapterData(url = chapterUrl)
+        val chapter = ChapterData(bookUrl = bookUrl, url = chapterUrl, variableUrl = chapterUrl)
         val urlContext = RuleContext(chapterUrl, chapterUrl, book = book, chapter = chapter)
         val reviewUrl = http.resolve(
             chapterUrl,
@@ -837,10 +1136,33 @@ internal class BookSourceEngine(
         parent: RuleContext,
         rule: SearchRule = source.search,
     ): Map<String, Any?>? {
-        val context = parent.copy(content = row)
+        var book = BookData(pendingVariables = parent.book?.pendingVariables.orEmpty().toMutableMap())
+        fun read(expression: String?) = analyzer.getString(expression, parent.copy(content = row, book = book))
+        fun readUrl(expression: String?) = read(expression).lineSequence()
+            .map { it.trim() }
+            .firstOrNull { it.isNotEmpty() }
+            .orEmpty()
+        book = book.copy(name = formatBookName(read(rule.name)).ifBlank {
+            when (row) {
+                is Element -> row.text()
+                is Map<*, *> -> row["name"]?.toString().orEmpty()
+                else -> analyzer.stringValue(row)
+            }
+        })
+        book = book.copy(author = formatBookAuthor(read(rule.author)))
+        book = book.copy(
+            kind = analyzer.getStrings(rule.kind, parent.copy(content = row, book = book))
+                .joinToString(",")
+                .take(1000),
+        )
+        book = book.copy(wordCount = read(rule.wordCount).trim())
+        book = book.copy(lastChapter = read(rule.lastChapter))
+        book = book.copy(intro = plainText(read(rule.intro)))
+        book = book.copy(coverUrl = http.resolve(parent.baseUrl, readUrl(rule.coverUrl)))
+        book = book.copy(updateTime = read(rule.updateTime))
         val bookUrl = http.resolve(
             parent.baseUrl,
-            analyzer.getString(rule.bookUrl, context).ifBlank {
+            readUrl(rule.bookUrl).ifBlank {
                 when (row) {
                     is Element -> row.absUrl("href")
                     is Map<*, *> -> row["bookUrl"]?.toString()
@@ -852,23 +1174,18 @@ internal class BookSourceEngine(
         if (!bookUrl.startsWith("http://") && !bookUrl.startsWith("https://")) {
             return null
         }
-        val fallbackName = when (row) {
-            is Element -> row.text()
-            is Map<*, *> -> row["name"]?.toString().orEmpty()
-            else -> analyzer.stringValue(row)
-        }
+        book = book.copy(bookUrl = bookUrl)
+        for ((name, value) in book.pendingVariables) variables?.writeRule(source.key, book, null, name, value)
         return mapOf(
-            "name" to analyzer.getString(rule.name, context).ifBlank { fallbackName },
-            "author" to analyzer.getString(rule.author, context),
-            "kind" to analyzer.getString(rule.kind, context),
-            "intro" to plainText(analyzer.getString(rule.intro, context)),
-            "lastChapter" to analyzer.getString(rule.lastChapter, context),
-            "updateTime" to analyzer.getString(rule.updateTime, context),
+            "name" to book.name,
+            "author" to book.author,
+            "kind" to book.kind,
+            "intro" to book.intro,
+            "lastChapter" to book.lastChapter,
+            "updateTime" to book.updateTime,
+            "wordCount" to parseWordCount(book.wordCount),
             "bookUrl" to bookUrl,
-            "coverUrl" to http.resolve(
-                parent.baseUrl,
-                analyzer.getString(rule.coverUrl, context),
-            ),
+            "coverUrl" to book.coverUrl,
         )
     }
 
@@ -937,9 +1254,30 @@ internal class BookSourceEngine(
     private fun loginState(sourceKey: String): Map<String, Any?> {
         val source = requireSource(sourceKey)
         val stored = storedLoginInfo(sourceKey)
-        val rows = loginUi(source, stored)
+        var rows = loginUi(source, stored)
+        var values = defaultLoginInfo(rows).toMutableMap()
+        for ((key, value) in stored) if (value.isNotEmpty()) values[key] = value
+        // Legado 首次打开表单时先用 loginUi 默认值生成登录信息，再按这些
+        // 默认值重新渲染登录表单；依赖开关状态的条件字段（例如“自订模式”
+        // 后才出现的颜色、圆角、高度）必须走第二遍才会显示。
+        if (rows.isNotEmpty() && values != stored) {
+            val rebuilt = loginUi(source, values)
+            if (rebuilt.isNotEmpty()) {
+                rows = rebuilt
+                val rebuiltValues = defaultLoginInfo(rows).toMutableMap()
+                for ((key, value) in values) if (value.isNotEmpty()) rebuiltValues[key] = value
+                values = rebuiltValues
+            }
+        }
+        if (stored.isEmpty() && values.isNotEmpty()) {
+            // 和 Legado getLoginInfoMap() 一样，把默认值写入登录信息，
+            // 后续登录脚本与规则可以直接读取。
+            variables?.put(loginInfoKey(sourceKey), JSONObject(values).toString())
+        }
         return mapOf(
-            "values" to if (stored.isEmpty()) defaultLoginInfo(rows) else stored,
+            // 补齐已保存信息中缺失的字段；Legado 会对空的 select/toggle
+            // 使用 loginUi 的默认值，否则条件标题和后续字段会判断错误。
+            "values" to values,
             "loginUi" to rows,
             "loginUrl" to source.loginUrl.orEmpty(),
             "loginCheckJs" to source.loginCheckJs.orEmpty(),
@@ -964,7 +1302,7 @@ internal class BookSourceEngine(
         }
         if (evaluated is List<*>) {
             return evaluated.mapNotNull { item ->
-                (item as? Map<*, *>)?.let { loginRow(it) }
+                (item as? Map<*, *>)?.let { loginRow(it, source, env) }
             }
         }
         val text = evaluated?.toString().orEmpty()
@@ -972,7 +1310,7 @@ internal class BookSourceEngine(
         return buildList {
             for (index in 0 until array.length()) {
                 val map = jsonToKotlin(array.opt(index)) as? Map<*, *> ?: continue
-                loginRow(map)?.let(::add)
+                loginRow(map, source, env)?.let(::add)
             }
         }
     }
@@ -989,13 +1327,17 @@ internal class BookSourceEngine(
         return "$login\n$script"
     }
 
-    private fun loginRow(value: Map<*, *>): Map<String, Any?>? {
+    private fun loginRow(
+        value: Map<*, *>,
+        source: BookSource,
+        env: JsEnv,
+    ): Map<String, Any?>? {
         val name = value["name"]?.toString()?.trim().orEmpty()
         if (name.isEmpty()) return null
         val style = value["style"] as? Map<*, *>
         return mapOf(
             "name" to name,
-            "title" to loginRowTitle(name, value["viewName"]?.toString().orEmpty()),
+            "title" to loginRowTitle(name, value["viewName"]?.toString().orEmpty(), source, env),
             "type" to (value["type"]?.toString()?.trim()?.ifEmpty { "text" } ?: "text"),
             "action" to value["action"]?.toString()?.trim().orEmpty(),
             "chars" to (value["chars"] as? List<*>)
@@ -1012,20 +1354,34 @@ internal class BookSourceEngine(
         )
     }
 
-    private fun loginRowTitle(name: String, rawTitle: String): String {
+    private fun loginRowTitle(
+        name: String,
+        rawTitle: String,
+        source: BookSource,
+        env: JsEnv,
+    ): String {
         val title = rawTitle.trim()
         if (title.isEmpty()) return name
-        if (title.startsWith("@js:", ignoreCase = true)) {
-            return name
-        }
         if (title.length < 2) return title
         val first = title.first()
         val last = title.last()
-        return if ((first == '\'' && last == '\'') || (first == '"' && last == '"')) {
-            title.substring(1, title.length - 1)
-        } else {
-            title
+        if ((first == '\'' && last == '\'') || (first == '"' && last == '"')) {
+            return title.substring(1, title.length - 1)
         }
+        val script = when {
+            title.startsWith("@js:", ignoreCase = true) -> title.substring(4)
+            title.startsWith("<js>", ignoreCase = true) -> {
+                val end = title.lastIndexOf("</js>")
+                if (end > 4) title.substring(4, end) else title.substring(4)
+            }
+            else -> return title
+        }
+        val login = extractLoginJs(source.loginUrl)
+        val code = if (login.isBlank()) script else "$login\n$script"
+        return runCatching { js.eval(code, env)?.toString() }
+            .getOrNull()
+            ?.takeIf { it.isNotBlank() }
+            ?: name
     }
 
     private fun storedLoginInfo(sourceKey: String): Map<String, String> {
@@ -1129,6 +1485,7 @@ internal class BookSourceEngine(
                 chapter = chapter,
                 variables = variables,
                 response = response,
+                headerMap = response.requestHeaders.toMutableMap(),
             ),
         )
         return responseFromCheck(checked, response)
@@ -1224,9 +1581,14 @@ internal class BookSourceEngine(
         row: Any?,
         baseUrl: String,
         book: BookData,
+        index: Int = 0,
     ): ChapterData {
-        var chapter = ChapterData(bookUrl = book.bookUrl, baseUrl = baseUrl)
+        var chapter = ChapterData(index = index, bookUrl = book.bookUrl, baseUrl = baseUrl)
         fun read(expression: String?) = analyzer.getString(expression, RuleContext(row, baseUrl, book = book, chapter = chapter))
+        fun readUrl(expression: String?) = read(expression).lineSequence()
+            .map { it.trim() }
+            .firstOrNull { it.isNotEmpty() }
+            .orEmpty()
         fun flag(expression: String?): Boolean = read(expression).trim().lowercase() !in FalseChapterFlags
         val rule = source.toc
         val title = read(rule.chapterName).ifBlank {
@@ -1237,16 +1599,22 @@ internal class BookSourceEngine(
             }
         }
         chapter = chapter.copy(title = title)
-        val rawUrl = read(rule.chapterUrl).ifBlank {
+        val rawUrl = readUrl(rule.chapterUrl).ifBlank {
             when (row) {
                 is Element -> row.attr("href")
                 is Map<*, *> -> row["url"]?.toString().orEmpty()
                 else -> ""
             }
         }
-        chapter = chapter.copy(url = rawUrl)
+        chapter = chapter.copy(url = rawUrl, variableUrl = http.resolve(baseUrl, rawUrl))
+        if (chapter.variableUrl.isNotEmpty()) for ((name, value) in chapter.pendingVariables) {
+            variables?.writeRule(source.key, book, chapter, name, value)
+        }
         chapter = chapter.copy(tag = read(rule.updateTime))
-        return chapter.copy(isVolume = flag(rule.isVolume))
+        chapter = chapter.copy(isVolume = flag(rule.isVolume))
+        chapter = chapter.copy(isVip = flag(rule.isVip))
+        chapter = chapter.copy(isPay = flag(rule.isPay))
+        return chapter
     }
 
     private fun analyzer(source: BookSource): BookSourceAnalyzer =
@@ -1259,12 +1627,45 @@ internal class BookSourceEngine(
         page: Int = 1,
         book: BookData? = null,
         chapter: ChapterData? = null,
+        infoMap: MutableMap<String, String>? = null,
     ): BookSourceResponse {
-        val resolved = applyRequestJs(source, spec, key, page, book, chapter)
+        val resolved = applyRequestJs(source, spec, key, page, book, chapter, infoMap)
         return http.fetch(
             source,
-            resolved,
+            withSourceHeaders(source, resolved, key, page, book, chapter, infoMap),
             allowUnsuccessful = source.loginCheckJs?.isNotBlank() == true,
+        )
+    }
+
+    private fun withSourceHeaders(
+        source: BookSource,
+        spec: RequestSpec,
+        key: String,
+        page: Int,
+        book: BookData? = null,
+        chapter: ChapterData? = null,
+        infoMap: MutableMap<String, String>? = null,
+    ): RequestSpec {
+        val headers = js.evaluatedHeaders(
+            JsEnv(
+                source = source,
+                analyzer = analyzer(source),
+                content = spec.url,
+                baseUrl = spec.url,
+                key = key,
+                page = page,
+                book = book,
+                chapter = chapter,
+                variables = variables,
+                infoMap = infoMap,
+            ),
+            spec.url,
+        )
+        if (headers.isEmpty()) return spec
+        return spec.copy(
+            option = spec.option.copy(
+                headers = headers + spec.option.headers,
+            ),
         )
     }
 
@@ -1279,26 +1680,37 @@ internal class BookSourceEngine(
         page: Int,
         book: BookData?,
         chapter: ChapterData?,
+        infoMap: MutableMap<String, String>?,
     ): RequestSpec {
         val script = spec.option.js?.trim().orEmpty()
-        if (script.isEmpty()) return spec
+        val contextSpec = spec.copy(
+            key = key,
+            page = page,
+            book = book,
+            chapter = chapter,
+            infoMap = infoMap,
+        )
+        if (script.isEmpty()) return contextSpec
+        val headers = spec.option.headers.toMutableMap()
         val env = JsEnv(
             source = source,
             analyzer = analyzer(source),
             content = spec.url,
-            baseUrl = source.key,
+            baseUrl = spec.url,
             key = key,
             page = page,
             book = book,
             chapter = chapter,
             variables = variables,
+            headerMap = headers,
+            infoMap = infoMap,
         )
         val value = js.eval(script, env)
-        val option = spec.option.copy(js = null)
+        val option = spec.option.copy(js = null, headers = headers)
         val url = value?.toString()?.trim().orEmpty()
-        if (value == null) return spec.copy(option = option)
+        if (value == null) return contextSpec.copy(option = option)
         if (url.isEmpty()) throw IllegalStateException("书源请求脚本没有返回地址")
-        return spec.copy(url = http.resolve(source.key, url), option = option)
+        return contextSpec.copy(url = http.resolve(source.key, url), option = option)
     }
 
     private fun requireSource(key: String): BookSource =
@@ -1307,8 +1719,8 @@ internal class BookSourceEngine(
     private fun requireTextSource(source: BookSource) {
         if (!source.supported) {
             throw IllegalArgumentException(when {
+                source.type == 2 && source.content.content.isNullOrBlank() -> "漫画书源缺少正文规则"
                 source.type != 2 -> "当前不支持该书源类型"
-                !source.content.imageDecode.isNullOrBlank() -> "暂不支持带 imageDecode 的漫画书源"
                 else -> "漫画书源缺少正文规则"
             })
         }
@@ -1318,7 +1730,7 @@ internal class BookSourceEngine(
         val source = requireSource(key)
         requireTextSource(source)
         val book = BookData(bookUrl = bookUrl)
-        val chapter = ChapterData(title = title, url = chapterUrl)
+        val chapter = ChapterData(title = title, bookUrl = bookUrl, url = chapterUrl, variableUrl = chapterUrl)
         val address = when (source.type) {
             1, 4 -> {
                 val response = applyLoginCheck(source, fetchResponse(source, http.requestSpec(key, chapterUrl), book = book, chapter = chapter),
@@ -1335,7 +1747,7 @@ internal class BookSourceEngine(
             }
             else -> error("该书源不是音视频或下载型书源")
         }
-        val spec = applyRequestJs(source, http.requestSpec(key, address), "", 1, book, chapter)
+        val spec = applyRequestJs(source, http.requestSpec(key, address), "", 1, book, chapter, null)
         return http.downloadResource(source, spec, directory)
     }
 
@@ -1362,6 +1774,8 @@ internal class BookSourceEngine(
 
     companion object {
         private val ComicImageFile = Regex("""^[^\s<>]+\.(?:png|jpe?g|gif|webp|avif|bmp)(?:[?#].*)?$""", RegexOption.IGNORE_CASE)
+        /** 地址选项 `,{...}` 分隔符；忽略 JSON 字符串内部的逗号。 */
+        private val UrlOptionPattern = Regex(""",(?=(?:[^"]*"[^"]*")*[^"]*$)\s*\{""")
         private const val LoginCallScript =
             "if (typeof login === 'function') { login.apply(this); }"
     }

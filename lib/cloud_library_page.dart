@@ -100,8 +100,8 @@ class CloudLibraryPage extends StatelessWidget {
     code: 'LOCAL / CLOUD SOURCES',
     child: AnimatedBuilder(
       animation: settings,
-      builder: (context, _) => Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
+      builder: (context, _) => ListView(
+        padding: featurePadding(context),
         children: [
           const ArchiveSection(title: '网盘来源', code: 'CLOUD / SOURCES'),
           const SizedBox(height: 12),
@@ -375,156 +375,167 @@ class _CloudConnectionPageState extends State<CloudConnectionPage> {
               ? 'S3'
               : '夸克网盘'}',
     code: widget.syncConnection ? 'LIBRARY / S3 SYNC' : 'LOCAL / CONNECTION',
-    child: Align(
-      alignment: Alignment.topCenter,
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 760),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            if (widget.kind == CloudSourceKind.webdav) ...[
-              const AppText(
-                'OpenList 地址一般以 /dav/ 结尾。账号需要 WebDAV 读取权限。',
-                style: TextStyle(height: 1.65),
-              ),
-              const SizedBox(height: 24),
-              _field('WebDAV 地址', _address, hint: 'https://你的域名/dav/'),
-              _field('用户名', _user),
-              _field('密码', _password, secret: true),
-              Row(
-                children: [
-                  const Expanded(child: AppText('允许 HTTP 连接')),
-                  AppControls.toggle(
-                    context,
-                    value: _http,
-                    onChanged: _busy ? null : (v) => setState(() => _http = v),
+    child: ListView(
+      padding: featurePadding(context),
+      children: [
+        Align(
+          alignment: Alignment.topCenter,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 760),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                if (widget.kind == CloudSourceKind.webdav) ...[
+                  const AppText(
+                    'OpenList 地址一般以 /dav/ 结尾。账号需要 WebDAV 读取权限。',
+                    style: TextStyle(height: 1.65),
+                  ),
+                  const SizedBox(height: 24),
+                  _field('WebDAV 地址', _address, hint: 'https://你的域名/dav/'),
+                  _field('用户名', _user),
+                  _field('密码', _password, secret: true),
+                  Row(
+                    children: [
+                      const Expanded(child: AppText('允许 HTTP 连接')),
+                      AppControls.toggle(
+                        context,
+                        value: _http,
+                        onChanged: _busy
+                            ? null
+                            : (v) => setState(() => _http = v),
+                      ),
+                    ],
+                  ),
+                  AnimatedOptionSection(
+                    expanded: _http,
+                    child: const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 12),
+                      child: AppText(
+                        'HTTP 不加密传输账号和书籍，仅在可信局域网中使用。',
+                        style: TextStyle(height: 1.6),
+                      ),
+                    ),
+                  ),
+                ] else if (widget.kind == CloudSourceKind.s3) ...[
+                  AppText(
+                    widget.syncConnection
+                        ? '两台设备填写相同的桶与同步文件路径。同步需要读取、写入此文件的权限，只有点按「立即同步」才会传输。'
+                        : '填写存储服务的 Endpoint 和桶名。连接只需列目录、读取对象的权限。',
+                    style: const TextStyle(height: 1.65),
+                  ),
+                  const SizedBox(height: 24),
+                  _field(
+                    'Endpoint 地址',
+                    _address,
+                    hint: 'https://s3.us-east-1.amazonaws.com',
+                  ),
+                  _field('存储桶 Bucket', _bucket),
+                  _field('区域 Region', _region, hint: 'us-east-1'),
+                  _field('Access Key ID', _user),
+                  _field('Secret Access Key', _password, secret: true),
+                  _field('目录前缀（可选）', _prefix, hint: 'books/'),
+                  if (widget.syncConnection)
+                    _field(
+                      '同步文件路径',
+                      _syncPath,
+                      hint: 'wenku8/library.wenku8sync',
+                      helper: '位于目录前缀内；使用独立的 .wenku8sync 文件。',
+                    ),
+                  _field('Session Token（可选）', _token, secret: true),
+                  Row(
+                    children: [
+                      const Expanded(child: AppText('路径式寻址')),
+                      AppControls.toggle(
+                        context,
+                        value: _pathStyle,
+                        onChanged: _busy
+                            ? null
+                            : (v) => setState(() => _pathStyle = v),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      const Expanded(child: AppText('允许 HTTP 连接')),
+                      AppControls.toggle(
+                        context,
+                        value: _http,
+                        onChanged: _busy
+                            ? null
+                            : (v) => setState(() => _http = v),
+                      ),
+                    ],
+                  ),
+                  AnimatedOptionSection(
+                    expanded: _http,
+                    child: const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 12),
+                      child: AppText(
+                        'HTTP 不加密传输连接信息和书籍，仅在可信局域网中使用。',
+                        style: TextStyle(height: 1.6),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  const AppText(
+                    '凭据只保存在本机加密存储，不写入阅读备份。',
+                    style: TextStyle(fontSize: 12, height: 1.6),
+                  ),
+                ] else ...[
+                  const AppText(
+                    '在电脑登录 pan.quark.cn，打开开发者工具的「网络」，复制网盘请求中的 Cookie 请求头。只填写 Cookie 的值。',
+                    style: TextStyle(height: 1.7),
+                  ),
+                  const SizedBox(height: 24),
+                  _field(
+                    'Cookie',
+                    _cookie,
+                    hint: '__pus=…; __puus=…',
+                    secret: true,
+                  ),
+                  const AppText(
+                    '登录凭据仅加密保存在这台设备。导入只读取文件，不移动或删除网盘内容。',
+                    style: TextStyle(height: 1.65),
                   ),
                 ],
-              ),
-              AnimatedOptionSection(
-                expanded: _http,
-                child: const Padding(
-                  padding: EdgeInsets.symmetric(vertical: 12),
-                  child: AppText(
-                    'HTTP 不加密传输账号和书籍，仅在可信局域网中使用。',
-                    style: TextStyle(height: 1.6),
+                const SizedBox(height: 20),
+                if (_busy)
+                  BookRowSkeleton(
+                    label: widget.syncConnection ? '正在保存同步连接' : '正在检查目录读取权限',
                   ),
-                ),
-              ),
-            ] else if (widget.kind == CloudSourceKind.s3) ...[
-              AppText(
-                widget.syncConnection
-                    ? '两台设备填写相同的桶与同步文件路径。同步需要读取、写入此文件的权限，只有点按「立即同步」才会传输。'
-                    : '填写存储服务的 Endpoint 和桶名。连接只需列目录、读取对象的权限。',
-                style: const TextStyle(height: 1.65),
-              ),
-              const SizedBox(height: 24),
-              _field(
-                'Endpoint 地址',
-                _address,
-                hint: 'https://s3.us-east-1.amazonaws.com',
-              ),
-              _field('存储桶 Bucket', _bucket),
-              _field('区域 Region', _region, hint: 'us-east-1'),
-              _field('Access Key ID', _user),
-              _field('Secret Access Key', _password, secret: true),
-              _field('目录前缀（可选）', _prefix, hint: 'books/'),
-              if (widget.syncConnection)
-                _field(
-                  '同步文件路径',
-                  _syncPath,
-                  hint: 'wenku8/library.wenku8sync',
-                  helper: '位于目录前缀内；使用独立的 .wenku8sync 文件。',
-                ),
-              _field('Session Token（可选）', _token, secret: true),
-              Row(
-                children: [
-                  const Expanded(child: AppText('路径式寻址')),
-                  AppControls.toggle(
-                    context,
-                    value: _pathStyle,
-                    onChanged: _busy
-                        ? null
-                        : (v) => setState(() => _pathStyle = v),
+                if (_error != null)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 16),
+                    child: AppText(
+                      _error!,
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.error,
+                      ),
+                    ),
                   ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              Row(
-                children: [
-                  const Expanded(child: AppText('允许 HTTP 连接')),
-                  AppControls.toggle(
-                    context,
-                    value: _http,
-                    onChanged: _busy ? null : (v) => setState(() => _http = v),
-                  ),
-                ],
-              ),
-              AnimatedOptionSection(
-                expanded: _http,
-                child: const Padding(
-                  padding: EdgeInsets.symmetric(vertical: 12),
-                  child: AppText(
-                    'HTTP 不加密传输连接信息和书籍，仅在可信局域网中使用。',
-                    style: TextStyle(height: 1.6),
-                  ),
+                GlassPillButton(
+                  key: const ValueKey('cloud-connect'),
+                  icon: CupertinoIcons.link,
+                  label: _busy
+                      ? widget.syncConnection
+                            ? '正在保存'
+                            : '正在连接'
+                      : widget.syncConnection
+                      ? '保存同步连接'
+                      : '连接并浏览',
+                  onPressed: _busy ? null : _connect,
                 ),
-              ),
-              const SizedBox(height: 12),
-              const AppText(
-                '凭据只保存在本机加密存储，不写入阅读备份。',
-                style: TextStyle(fontSize: 12, height: 1.6),
-              ),
-            ] else ...[
-              const AppText(
-                '在电脑登录 pan.quark.cn，打开开发者工具的「网络」，复制网盘请求中的 Cookie 请求头。只填写 Cookie 的值。',
-                style: TextStyle(height: 1.7),
-              ),
-              const SizedBox(height: 24),
-              _field(
-                'Cookie',
-                _cookie,
-                hint: '__pus=…; __puus=…',
-                secret: true,
-              ),
-              const AppText(
-                '登录凭据仅加密保存在这台设备。导入只读取文件，不移动或删除网盘内容。',
-                style: TextStyle(height: 1.65),
-              ),
-            ],
-            const SizedBox(height: 20),
-            if (_busy)
-              BookRowSkeleton(
-                label: widget.syncConnection ? '正在保存同步连接' : '正在检查目录读取权限',
-              ),
-            if (_error != null)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 16),
-                child: AppText(
-                  _error!,
-                  style: TextStyle(color: Theme.of(context).colorScheme.error),
-                ),
-              ),
-            GlassPillButton(
-              key: const ValueKey('cloud-connect'),
-              icon: CupertinoIcons.link,
-              label: _busy
-                  ? widget.syncConnection
-                        ? '正在保存'
-                        : '正在连接'
-                  : widget.syncConnection
-                  ? '保存同步连接'
-                  : '连接并浏览',
-              onPressed: _busy ? null : _connect,
+                if (_busy && !widget.syncConnection)
+                  GlassTextButton(
+                    onPressed: () => _testing?.cancel(),
+                    child: const AppText('取消连接'),
+                  ),
+              ],
             ),
-            if (_busy && !widget.syncConnection)
-              GlassTextButton(
-                onPressed: () => _testing?.cancel(),
-                child: const AppText('取消连接'),
-              ),
-          ],
+          ),
         ),
-      ),
+      ],
     ),
   );
 }
@@ -753,12 +764,9 @@ class _CloudBookBrowserState extends State<CloudBookBrowser> {
                     Row(
                       children: [
                         Expanded(
-                          child: AppText(
-                            _folders.last.name,
-                            style: const TextStyle(
-                              fontSize: 20,
-                              fontWeight: FontWeight.w600,
-                            ),
+                          child: ArchiveSection(
+                            title: _folders.last.name,
+                            code: 'CLOUD / DIRECTORY',
                           ),
                         ),
                         GlassIconButton(

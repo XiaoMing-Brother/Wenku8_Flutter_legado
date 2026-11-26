@@ -37,21 +37,14 @@ Future<TextRange?> showReaderTextRangePicker({
   heightFactor: readerTextSheetHeightFactor(context, text),
   maxWidth: 640,
   builder: (sheet) => Padding(
-    padding: const EdgeInsets.fromLTRB(20, 4, 20, 12),
+    padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Row(
           children: [
             Expanded(
-              child: AppText(
-                title,
-                style: const TextStyle(
-                  fontSize: 20,
-                  height: 1.3,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
+              child: ArchiveSection(title: title, code: 'READER / TEXT PICKER'),
             ),
             ArchiveIconButton(
               tooltip: '取消选择文字',
@@ -417,7 +410,11 @@ class _ReaderTextRangePickerState extends State<ReaderTextRangePicker> {
                         !_geometryReady
               ? const Center(child: CupertinoActivityIndicator())
               : document.chunks.isEmpty
-              ? const Center(child: AppText('没有可选择的文字'))
+              ? const ContentNotice(
+                  icon: CupertinoIcons.textformat,
+                  title: '没有可选择的文字',
+                  message: '切换章节或调整选择范围后再试。',
+                )
               : CustomScrollView(
                   key: const ValueKey('reader-text-picker-scroll'),
                   center: _center,

@@ -216,7 +216,7 @@ class _BatchChangeSourcePageState extends State<BatchChangeSourcePage> {
                 child: AppText(
                   '已选 ${_selected.length}/${_items.length} · '
                   '${_busy ? _status : (_result == null ? _status : '完成')}',
-                  style: TextStyle(fontSize: 12, color: muted),
+                  style: TextStyle(fontSize: 12, height: 1.4, color: muted),
                 ),
               ),
               if (_busy)

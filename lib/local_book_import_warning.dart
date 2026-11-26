@@ -228,17 +228,14 @@ class _LocalBookImportIssuesSheetState
       final visible = widget.books.shouldShowImportWarning(widget.book.id);
       return Padding(
         key: const ValueKey('local-import-issues-sheet'),
-        padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
+        padding: const EdgeInsets.fromLTRB(24, 8, 24, 0),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Row(
               children: [
                 const Expanded(
-                  child: AppText(
-                    '导入问题',
-                    style: TextStyle(fontSize: 19, fontWeight: FontWeight.w700),
-                  ),
+                  child: ArchiveSection(title: '导入问题', code: 'LOCAL / ISSUES'),
                 ),
                 GlassTextButton(
                   key: const ValueKey('local-import-warning-toggle'),
@@ -300,7 +297,7 @@ class _LocalBookImportIssuesSheetState
                           padding: const EdgeInsets.only(top: 8),
                           child: ArchiveSection(
                             title: '${_groupTitle(kind)} · ${group.length}',
-                            code: 'IMPORT / ISSUES',
+                            code: 'LOCAL / ISSUES',
                           ),
                         ),
                       ),

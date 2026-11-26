@@ -17,6 +17,7 @@ enum ReaderTipValue {
   chapterProgress('本章进度'),
   totalProgress('全书进度'),
   pageAndProgress('页码 + 进度'),
+  chapterRemaining('本章剩余'),
   time('时间'),
   battery('电量'),
   timeBattery('时间 + 电量'),
@@ -127,6 +128,8 @@ String formatReaderTip(
           ? '${c.chapterIndex + 1}/${c.chapterCount}'
           : '';
     case ReaderTipValue.page:
+      // 翻页模式给「1/10」章节进度；滚动模式没有分页，回退为进度文案。
+      if (c.pageCount <= 0) return c.readProgress;
       return '${c.pageIndex + 1}/${_pageCountText(c)}';
     case ReaderTipValue.chapterProgress:
       return c.readProgress;
@@ -134,6 +137,11 @@ String formatReaderTip(
       return c.readProgress;
     case ReaderTipValue.pageAndProgress:
       return '${c.pageIndex + 1}/${_pageCountText(c)}  ${c.readProgress}'.trim();
+    case ReaderTipValue.chapterRemaining:
+      // 本章还剩多少页（不含当前页）。章未分页时返回空串。
+      if (c.pageCount <= 0) return '';
+      final remaining = c.pageCount - c.pageIndex - 1;
+      return remaining < 0 ? '' : '本章剩余 $remaining 页';
     case ReaderTipValue.time:
       return c.time;
     case ReaderTipValue.battery:

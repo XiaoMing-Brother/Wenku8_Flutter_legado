@@ -224,6 +224,49 @@ class UserFontStore extends ChangeNotifier {
     await temp.rename('${root.path}/fonts.json');
   }
 
+  /// 注册「出版方字体」：字节已由 `extractPublisherFontFromEpub` 去混淆。
+  /// 使用确定性 id（`font_pub-b<bookId>`），重复调用即幂等。
+  Future<UserFont> registerPublisherFont({
+    required String id,
+    required String name,
+    required String extension,
+    required Uint8List bytes,
+  }) async {
+    await load();
+    if (!RegExp(r'^font_[a-z0-9-]{1,64}$').hasMatch(id)) {
+      throw const FormatException('出版方字体标识不合法');
+    }
+    if (!['ttf', 'otf'].contains(extension)) {
+      throw const FormatException('出版方字体格式不支持');
+    }
+    if (bytes.isEmpty || bytes.length > maxBytes) {
+      throw const FormatException('出版方字体大小超出限制');
+    }
+    final root = await _root();
+    await root.create(recursive: true);
+    final font = UserFont(
+      id,
+      String.fromCharCodes(
+        (name.trim().isEmpty ? '出版方字体' : name.trim()).runes.take(80),
+      ),
+      extension,
+    );
+    final destination = _file(root, font);
+    await destination.writeAsBytes(bytes, flush: true);
+    if (find(id) == null) _fonts.add(font);
+    try {
+      await _save();
+      await ensureLoaded(id);
+    } catch (_) {
+      _fonts.removeWhere((f) => f.id == id);
+      _loads.remove(id);
+      if (await destination.exists()) await destination.delete();
+      rethrow;
+    }
+    _changed();
+    return font;
+  }
+
   Future<UserFont> importFile(String name, String path) async {
     await load();
     if (_fonts.length >= 20) {

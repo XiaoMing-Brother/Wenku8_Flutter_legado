@@ -43,7 +43,9 @@ class _ReaderBackgroundState extends State<ReaderBackground> {
     final theme = widget.look.theme;
     final store = widget.store;
     final preview = widget.preview;
-    _themeFile = theme == null || theme.imageCandidates.isEmpty
+    final texture = theme?.textureFor(widget.night);
+    _themeFile =
+        theme == null || texture != null || theme.imageCandidates.isEmpty
         ? null
         : store.themeFile(theme.id).then<File?>((file) {
             if (file != null || preview) return file;
@@ -106,7 +108,30 @@ class _ReaderBackgroundState extends State<ReaderBackground> {
     return image(0);
   }
 
+  /// 内置纸纹已带完整日/夜色调，仅叠一层很淡的纸色让主题色更统一。
+  Widget _textureImage(String asset) => Image.asset(
+    asset,
+    key: ValueKey(asset),
+    width: double.infinity,
+    height: double.infinity,
+    fit: BoxFit.cover,
+    color: widget.paper.withValues(alpha: .14),
+    colorBlendMode: BlendMode.srcOver,
+    filterQuality: FilterQuality.low,
+    gaplessPlayback: true,
+    errorBuilder: (_, _, _) => const SizedBox.expand(),
+  );
+
   Widget _background() {
+    final texture = widget.look.theme?.textureFor(widget.night);
+    if (texture != null) {
+      return AnimatedSwitcher(
+        duration: widget.reduceMotion ? Duration.zero : NovelMotion.enter,
+        switchInCurve: NovelMotion.ease,
+        switchOutCurve: NovelMotion.retract,
+        child: _textureImage(texture),
+      );
+    }
     // 主题自带背景图优先于手动背景，避免选择主题后仍显示旧的自定义图片。
     final theme = widget.look.theme;
     if (theme != null && theme.imageCandidates.isNotEmpty) {

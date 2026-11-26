@@ -333,13 +333,15 @@ Future<ReaderPagination?> paginateReader({
   ReaderTextAnchor? pageBreak,
   ReaderTextLayoutCache? cache,
   Map<String, Size> localImageSizes = const {},
+  /// 首页顶部预留给章节标题的高度（仅首页生效，后续页从 0 开始）。
+  double firstPageInset = 0,
 }) async {
   final pages = <ReaderLeaf>[];
   var fragments = <ReaderPageFragment>[];
   var columns = <_VerticalColumn>[];
   var pageText = StringBuffer();
   var previousParagraph = -1;
-  var y = 0.0;
+  var y = firstPageInset;
   var right = size.width;
   final clock = Stopwatch()..start();
   final painter = TextPainter(

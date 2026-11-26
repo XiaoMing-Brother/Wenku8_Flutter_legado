@@ -1,3 +1,4 @@
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -83,6 +84,64 @@ class _LibraryBackupPageState extends State<LibraryBackupPage> {
     }
   });
 
+  Future<void> _openPageActions(BuildContext anchor) async {
+    if (_busy != null) return;
+    final action = await showGlassMenu<String>(
+      context: anchor,
+      reduceMotion: widget.state.reduceMotion,
+      builder: (menu) => Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (LocalPlatform.fileActions) ...[
+            GlassMenuItem(
+              key: const ValueKey('backup-export-file'),
+              label: '导出备份文件',
+              icon: CupertinoIcons.arrow_up_doc,
+              onPressed: () => Navigator.pop(menu, 'exportFile'),
+            ),
+            GlassMenuItem(
+              key: const ValueKey('backup-import-file'),
+              label: '选择备份文件',
+              icon: CupertinoIcons.arrow_down_doc,
+              order: 1,
+              onPressed: () => Navigator.pop(menu, 'importFile'),
+            ),
+          ],
+          GlassMenuItem(
+            key: const ValueKey('backup-copy'),
+            label: '复制备份文本',
+            icon: CupertinoIcons.doc_on_clipboard,
+            order: 2,
+            onPressed: () => Navigator.pop(menu, 'copy'),
+          ),
+          GlassMenuItem(
+            key: const ValueKey('backup-paste'),
+            label: '从剪贴板读取备份',
+            icon: CupertinoIcons.doc_text,
+            order: 3,
+            onPressed: () => Navigator.pop(menu, 'paste'),
+          ),
+        ],
+      ),
+    );
+    if (!anchor.mounted || !mounted || action == null) return;
+    switch (action) {
+      case 'exportFile':
+        await _export();
+        break;
+      case 'importFile':
+        await _import();
+        break;
+      case 'copy':
+        await _export(clipboard: true);
+        break;
+      case 'paste':
+        await _import(clipboard: true);
+        break;
+    }
+  }
+
   @override
   Widget build(BuildContext context) => PopScope<void>(
     canPop: _busy == null,
@@ -90,6 +149,18 @@ class _LibraryBackupPageState extends State<LibraryBackupPage> {
       title: '备份与恢复',
       code: 'SYSTEM / DATA TRANSFER',
       canPop: _busy == null,
+      actions: [
+        GlassMenuAnchor(
+          child: Builder(
+            builder: (anchor) => GlassIconButton(
+              key: const ValueKey('backup-actions'),
+              icon: CupertinoIcons.ellipsis,
+              label: '备份操作',
+              onPressed: _busy == null ? () => _openPageActions(anchor) : null,
+            ),
+          ),
+        ),
+      ],
       child: LoadedContentSequence(
         generation: _preview,
         child: ListView(
@@ -101,37 +172,9 @@ class _LibraryBackupPageState extends State<LibraryBackupPage> {
             const AppText('备份书架、阅读进度、书签、阅读历史、最近搜索和偏好。离线正文不包含在备份中。'),
             const SizedBox(height: 24),
             ContentPanel(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  if (LocalPlatform.fileActions) ...[
-                    GlassTextButton(
-                      key: const ValueKey('backup-export-file'),
-                      onPressed: _busy == null ? _export : null,
-                      child: const AppText('导出备份文件'),
-                    ),
-                    GlassTextButton(
-                      key: const ValueKey('backup-import-file'),
-                      onPressed: _busy == null ? _import : null,
-                      child: const AppText('选择备份文件'),
-                    ),
-                    const Divider(height: 24),
-                  ],
-                  GlassTextButton(
-                    key: const ValueKey('backup-copy'),
-                    onPressed: _busy == null
-                        ? () => _export(clipboard: true)
-                        : null,
-                    child: const AppText('复制备份文本'),
-                  ),
-                  GlassTextButton(
-                    key: const ValueKey('backup-paste'),
-                    onPressed: _busy == null
-                        ? () => _import(clipboard: true)
-                        : null,
-                    child: const AppText('从剪贴板读取备份'),
-                  ),
-                ],
+              child: const AppText(
+                '从右上角菜单导出备份文件、选择备份文件、复制备份文本或从剪贴板读取备份。',
+                style: TextStyle(height: 1.6),
               ),
             ),
             if (_busy != null)
@@ -167,7 +210,12 @@ class _LibraryBackupPageState extends State<LibraryBackupPage> {
               const SizedBox(height: 24),
               LoadedContentItem(
                 index: 0,
-                child: sectionHeader(context, '恢复预览', ''),
+                child: sectionHeader(
+                  context,
+                  '恢复预览',
+                  '',
+                  code: 'SYSTEM / RESTORE PREVIEW',
+                ),
               ),
               const SizedBox(height: 14),
               LoadedContentItem(

@@ -646,6 +646,7 @@ class _ListeningPanelState extends State<ListeningPanel> {
               ReaderValueSlider(
                 sliderKey: const ValueKey('listening-paragraph-gap'),
                 label: '段落间隔',
+                stepper: true,
                 value: state.paragraphGapMs / 1000,
                 min: 0,
                 max: listeningMaximumParagraphGapMs / 1000,

@@ -143,14 +143,11 @@ class _ReaderSearchPanelState extends State<ReaderSearchPanel> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Padding(
-          padding: const EdgeInsets.fromLTRB(24, 8, 14, 8),
+          padding: const EdgeInsets.fromLTRB(24, 8, 24, 8),
           child: Row(
             children: [
               const Expanded(
-                child: AppText(
-                  '查找',
-                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
-                ),
+                child: ArchiveSection(title: '查找', code: 'READER / FIND'),
               ),
               GlassIconButton(
                 icon: CupertinoIcons.xmark,

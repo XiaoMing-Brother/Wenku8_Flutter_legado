@@ -1,7 +1,7 @@
 import 'dart:convert';
 
 const defaultLocalChapterRule =
-    r'^(第[零〇一二三四五六七八九十百千万萬两兩0-9０-９]+[章节節回幕话話]|chapter\s+\d+|序章|序言|楔子|尾声|尾聲|后记|後記|番外)';
+    r'^(第[零〇一二三四五六七八九十百千万萬两兩0-9０-９]+[章节節回幕话話]|chapter\s+\d+|序章|序言|前言|楔子|尾声|尾聲|后记|後記|番外)';
 const defaultLocalVolumeRule =
     r'^(第[零〇一二三四五六七八九十百千万萬两兩0-9０-９]+[卷部]|volume\s+\d+)';
 

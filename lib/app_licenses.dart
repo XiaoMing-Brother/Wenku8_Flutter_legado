@@ -12,6 +12,9 @@ void registerAppLicenses() {
     yield LicenseEntryWithLineBreaks(const [
       'Source Han Serif CN / TW · Adobe',
     ], await rootBundle.loadString('assets/fonts/OFL-SourceHanSerif.txt'));
+    yield LicenseEntryWithLineBreaks(const [
+      'Huiwen Mincho subset · TrionesType / bosswnx',
+    ], await rootBundle.loadString('assets/fonts/CC0-HuiwenMincho.txt'));
     for (final entry in const {
       'BarlowCondensed': 'Barlow Condensed · Jeremy Tribby',
       'NotoSerifSC': 'Noto Serif SC · Google (Reading Serif Display subset)',

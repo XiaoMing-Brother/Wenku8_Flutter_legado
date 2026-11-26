@@ -403,6 +403,7 @@ class ReaderSelection extends StatelessWidget {
     this.vertical = false,
     this.onBookmark,
     this.onDictionary,
+    this.onReplace,
     this.onIllustrations,
   });
   final ReaderSelectionController controller;
@@ -411,6 +412,7 @@ class ReaderSelection extends StatelessWidget {
   final bool vertical;
   final ValueChanged<ReaderQuoteSelection>? onBookmark;
   final ValueChanged<ReaderQuoteSelection>? onDictionary;
+  final ValueChanged<ReaderQuoteSelection>? onReplace;
   final VoidCallback? onIllustrations;
   @override
   Widget build(BuildContext context) {
@@ -518,6 +520,13 @@ class ReaderSelection extends StatelessWidget {
                                 label: '词典',
                                 semanticLabel: '词典',
                                 onPressed: () => action(onDictionary!),
+                              ),
+                            if (onReplace != null)
+                              _selectionAction(
+                                key: const ValueKey('reader-selection-replace'),
+                                icon: CupertinoIcons.wand_stars,
+                                label: '替换',
+                                onPressed: () => action(onReplace!),
                               ),
                             if (onIllustrations != null)
                               _selectionAction(

@@ -1,8 +1,8 @@
-import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 
 import 'app_ui.dart';
 import 'dock_layout.dart';
+import 'feature_pages.dart';
 
 /// The book editors compose the same header and two-pill Dock as detail pages.
 class LocalBookEditLayout extends StatelessWidget {
@@ -45,87 +45,72 @@ class LocalBookEditLayout extends StatelessWidget {
       iconSize: DockLayout.iconSize,
       fontSize: DockLayout.labelFontSize,
     );
-    return Scaffold(
-      body: Atmosphere(
-        child: GlassHeaderLayout(
-          header: ArchiveHeaderBar(
-            leading: GlassIconButton(
-              icon: CupertinoIcons.back,
-              label: '返回',
-              onPressed: onBack,
+    return ArchiveFeaturePage(
+      title: title,
+      code: code,
+      onBack: onBack,
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 760),
+              child: CustomScrollView(
+                keyboardDismissBehavior:
+                    ScrollViewKeyboardDismissBehavior.onDrag,
+                slivers: [
+                  ...slivers,
+                  SliverToBoxAdapter(
+                    child: SizedBox(height: geometry.extent + 20),
+                  ),
+                ],
+              ),
             ),
-            title: ArchiveRouteTitle(title: title, code: code),
           ),
-          body: Stack(
-            fit: StackFit.expand,
-            children: [
-              Center(
+          Positioned(
+            bottom: 0,
+            left: 0,
+            right: 0,
+            child: DockUnderlay(contentHeight: geometry.height),
+          ),
+          Align(
+            alignment: Alignment.bottomCenter,
+            child: Padding(
+              padding: EdgeInsets.fromLTRB(
+                DockLayout.actionSideInset + safe.left,
+                0,
+                DockLayout.actionSideInset + safe.right,
+                DockLayout.bottomPaddingOf(context, viewPadding: true),
+              ),
+              child: ControlMaterialScope.chrome(
                 child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 760),
-                  child: CustomScrollView(
-                    keyboardDismissBehavior:
-                        ScrollViewKeyboardDismissBehavior.onDrag,
-                    slivers: [
-                      ...slivers,
-                      SliverToBoxAdapter(
-                        child: SizedBox(height: geometry.extent + 20),
-                      ),
-                    ],
+                  constraints: const BoxConstraints(
+                    maxWidth: DockLayout.actionMaxWidth,
+                  ),
+                  child: SizedBox(
+                    height: geometry.height,
+                    child: geometry.stacked
+                        ? Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              action(primary: false),
+                              const SizedBox(height: DockLayout.actionGap),
+                              action(primary: true),
+                            ],
+                          )
+                        : Row(
+                            children: [
+                              Expanded(flex: 5, child: action(primary: false)),
+                              const SizedBox(width: DockLayout.actionGap),
+                              Expanded(flex: 7, child: action(primary: true)),
+                            ],
+                          ),
                   ),
                 ),
               ),
-              Positioned(
-                bottom: 0,
-                left: 0,
-                right: 0,
-                child: DockUnderlay(contentHeight: geometry.height),
-              ),
-              Align(
-                alignment: Alignment.bottomCenter,
-                child: Padding(
-                  padding: EdgeInsets.fromLTRB(
-                    DockLayout.actionSideInset + safe.left,
-                    0,
-                    DockLayout.actionSideInset + safe.right,
-                    DockLayout.bottomPaddingOf(context, viewPadding: true),
-                  ),
-                  child: ControlMaterialScope.chrome(
-                    child: ConstrainedBox(
-                      constraints: const BoxConstraints(
-                        maxWidth: DockLayout.actionMaxWidth,
-                      ),
-                      child: SizedBox(
-                        height: geometry.height,
-                        child: geometry.stacked
-                            ? Column(
-                                crossAxisAlignment: CrossAxisAlignment.stretch,
-                                children: [
-                                  action(primary: false),
-                                  const SizedBox(height: DockLayout.actionGap),
-                                  action(primary: true),
-                                ],
-                              )
-                            : Row(
-                                children: [
-                                  Expanded(
-                                    flex: 5,
-                                    child: action(primary: false),
-                                  ),
-                                  const SizedBox(width: DockLayout.actionGap),
-                                  Expanded(
-                                    flex: 7,
-                                    child: action(primary: true),
-                                  ),
-                                ],
-                              ),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ],
+            ),
           ),
-        ),
+        ],
       ),
     );
   }

@@ -21,6 +21,7 @@ class ReaderInfoStrip extends StatelessWidget {
     required this.tipContext,
     required this.style,
     this.slotKeys,
+    this.equalSlots = false,
   }) : assert(tips.length == 3);
 
   /// 左 / 中 / 右三个槽位，长度固定为 3。
@@ -35,18 +36,26 @@ class ReaderInfoStrip extends StatelessWidget {
   /// 可选：每槽用于测试/无障碍定位的 Key。
   final List<Key?>? slotKeys;
 
+  /// 三槽等分：中间槽永远落在页面正中（页脚书名居中）；默认按文字宽度加权。
+  final bool equalSlots;
+
   /// 三个槽位是否全部为空。
   static bool isEmpty(List<ReaderTip> tips) =>
       tips.every((t) => t.value == ReaderTipValue.none);
 
-  static const _aligns = [
-    TextAlign.start,
-    TextAlign.center,
-    TextAlign.end,
-  ];
+  static const _aligns = [TextAlign.start, TextAlign.center, TextAlign.end];
 
   @override
   Widget build(BuildContext context) {
+    if (equalSlots) {
+      // 等分槽位保持中槽居中，并由文字决定信息条高度。
+      return Row(
+        children: [
+          for (var i = 0; i < 3; i++)
+            Expanded(child: _slot(i, tips[i], _aligns[i])),
+        ],
+      );
+    }
     // 按各槽实际文字宽度分配比例：长内容更宽、空槽几乎不占，避免「章节名被截断」。
     final weights = <int>[];
     for (var i = 0; i < 3; i++) {
@@ -67,10 +76,7 @@ class ReaderInfoStrip extends StatelessWidget {
     return Row(
       children: [
         for (var i = 0; i < 3; i++)
-          Expanded(
-            flex: weights[i],
-            child: _slot(i, tips[i], _aligns[i]),
-          ),
+          Expanded(flex: weights[i], child: _slot(i, tips[i], _aligns[i])),
       ],
     );
   }
@@ -101,12 +107,14 @@ class ReaderTipStrip extends StatefulWidget {
     required this.baseContext,
     required this.style,
     this.slotKeys,
+    this.equalSlots = false,
   });
 
   final List<ReaderTip> tips;
   final ReaderTipContext baseContext;
   final TextStyle style;
   final List<Key?>? slotKeys;
+  final bool equalSlots;
 
   @override
   State<ReaderTipStrip> createState() => _ReaderTipStripState();
@@ -114,6 +122,8 @@ class ReaderTipStrip extends StatefulWidget {
 
 class _ReaderTipStripState extends State<ReaderTipStrip>
     with WidgetsBindingObserver {
+  /// 跨实例保留最近一次有效电量：翻页时信息条会换 State，避免电量闪没。
+  static int? _lastBattery;
   StreamSubscription<dynamic>? _subscription;
   DateTime _time = DateTime.now();
   int? _battery;
@@ -121,6 +131,7 @@ class _ReaderTipStripState extends State<ReaderTipStrip>
   @override
   void initState() {
     super.initState();
+    _battery = _lastBattery;
     final cached = ReaderStatusFooter.lastStatus;
     if (cached != null) _read(cached);
     WidgetsBinding.instance.addObserver(this);
@@ -138,7 +149,13 @@ class _ReaderTipStripState extends State<ReaderTipStrip>
   void _read(Map value) {
     final status = ReaderStatusFooter.decodeStatus(value);
     _time = status.time;
-    _battery = status.battery;
+    // 分/秒级状态事件可能只带时间不带电量；不要用缺失值覆盖上一次电量，
+    // 否则页脚右侧会在「14:51 96%」和「14:51」之间闪。
+    final battery = status.battery;
+    if (battery != null) {
+      _lastBattery = battery.clamp(0, 100);
+      _battery = _lastBattery;
+    }
   }
 
   @override
@@ -172,6 +189,7 @@ class _ReaderTipStripState extends State<ReaderTipStrip>
       tipContext: tipContext,
       style: widget.style,
       slotKeys: widget.slotKeys,
+      equalSlots: widget.equalSlots,
     );
   }
 }

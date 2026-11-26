@@ -9,6 +9,7 @@ import 'feature_pages.dart';
 import 'library_state.dart';
 import 'palette_image.dart';
 import 'personal_images.dart';
+import 'reader_tools.dart';
 
 String paletteHex(Color color) =>
     '#${(color.toARGB32() & 0xffffff).toRadixString(16).padLeft(6, '0').toUpperCase()}';
@@ -153,7 +154,7 @@ class _PaletteSettingsPageState extends State<PaletteSettingsPage>
               children: [
                 const ArchiveSection(
                   title: '莫奈配色',
-                  code: '01 / TONAL PALETTE',
+                  code: 'APPEARANCE / TONAL PALETTE',
                   subtitle: '浅色与深色自动配套，阅读器保留独立配色。',
                 ),
                 const SizedBox(height: 16),
@@ -209,7 +210,7 @@ class _PaletteSettingsPageState extends State<PaletteSettingsPage>
                       const SizedBox(height: 24),
                       const ArchiveSection(
                         title: '选择主色',
-                        code: '02 / SOURCE COLOR',
+                        code: 'APPEARANCE / SOURCE COLOR',
                       ),
                       const SizedBox(height: 12),
                       Wrap(
@@ -264,7 +265,10 @@ class _PaletteSettingsPageState extends State<PaletteSettingsPage>
                   ),
                 ),
                 const SizedBox(height: 28),
-                const ArchiveSection(title: '桌面图标', code: '03 / APP ICON'),
+                const ArchiveSection(
+                  title: '桌面图标',
+                  code: 'APPEARANCE / APP ICON',
+                ),
                 const SizedBox(height: 12),
                 Row(
                   children: [
@@ -445,6 +449,13 @@ class _SeedEditorState extends State<_SeedEditor> {
     });
   }
 
+  HSVColor _withComponent(String component, double value) =>
+      switch (component) {
+        '色相' => _hsv.withHue(value * 360),
+        '饱和度' => _hsv.withSaturation(value),
+        _ => _hsv.withValue(value),
+      };
+
   @override
   void dispose() {
     _hex.dispose();
@@ -461,7 +472,7 @@ class _SeedEditorState extends State<_SeedEditor> {
     ),
     shrinkWrap: true,
     children: [
-      const ArchiveSection(title: '自选颜色', code: 'COLOR / SOURCE'),
+      const ArchiveSection(title: '自选颜色', code: 'APPEARANCE / CUSTOM COLOR'),
       const SizedBox(height: 18),
       Container(
         height: 52,
@@ -494,22 +505,25 @@ class _SeedEditorState extends State<_SeedEditor> {
       ),
       const SizedBox(height: 12),
       for (final component in ['色相', '饱和度', '明度']) ...[
-        AppText(component, style: const TextStyle(fontSize: 13)),
-        AppControls.slider(
-          context,
+        ReaderValueSlider(
+          sliderKey: ValueKey('palette-$component'),
+          label: component,
           value: component == '色相'
               ? _hsv.hue / 360
               : component == '饱和度'
               ? _hsv.saturation
               : _hsv.value,
-          onChanged: (v) => _change(
-            component == '色相'
-                ? _hsv.withHue(v * 360)
-                : component == '饱和度'
-                ? _hsv.withSaturation(v)
-                : _hsv.withValue(v),
-          ),
+          min: 0,
+          max: 1,
+          divisions: component == '色相' ? 360 : 100,
+          format: (value) => component == '色相'
+              ? '${(value * 360).round()}°'
+              : '${(value * 100).round()}%',
+          onPreview: (value) => _change(_withComponent(component, value)),
+          onCommitted: (value) => _change(_withComponent(component, value)),
+          stepper: true,
         ),
+        const SizedBox(height: 4),
       ],
       GlassTextButton(
         key: const ValueKey('palette-apply-color'),

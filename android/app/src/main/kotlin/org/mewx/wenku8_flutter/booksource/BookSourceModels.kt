@@ -11,8 +11,11 @@ internal data class SearchRule(
     val kind: String?,
     val lastChapter: String?,
     val updateTime: String?,
+    val wordCount: String?,
     val bookUrl: String?,
     val coverUrl: String?,
+    /** 发现页翻页参数名；地址没有 {{page}} 时按它追加页码。 */
+    val pageParam: String? = null,
 )
 
 internal typealias ExploreRule = SearchRule
@@ -31,6 +34,7 @@ internal data class BookInfoRule(
     val totalChapterNum: String?,
     val downloadUrls: String?,
     val wordCount: String?,
+    val canReName: String?,
 )
 
 internal data class TocRule(
@@ -41,6 +45,7 @@ internal data class TocRule(
     val isVip: String?,
     val isPay: String?,
     val formatJs: String?,
+    val preUpdateJs: String?,
     val updateTime: String?,
     val nextTocUrl: String?,
 )
@@ -52,6 +57,11 @@ internal data class ContentRule(
     val title: String?,
     val replaceRegex: String?,
     val imageDecode: String?,
+    val imageStyle: String?,
+    val sourceRegex: String?,
+    val webJs: String?,
+    val payAction: String?,
+    val callBackJs: String?,
 )
 
 internal class BookSource(private val raw: JSONObject) {
@@ -65,7 +75,7 @@ internal class BookSource(private val raw: JSONObject) {
     }
     val supported: Boolean
         get() = type == 0 || type == 3 || (!content.content.isNullOrBlank() &&
-            (type == 1 || type == 4 || (type == 2 && content.imageDecode.isNullOrBlank())))
+            (type == 1 || type == 4 || type == 2))
     val searchUrl: String = raw.optString("searchUrl").trim()
     val exploreUrl: String = raw.optString("exploreUrl").trim()
     val loginUrl: String? = raw.stringOrNull("loginUrl")
@@ -73,6 +83,11 @@ internal class BookSource(private val raw: JSONObject) {
     val loginCheckJs: String? = raw.stringOrNull("loginCheckJs")
     val enabledCookieJar: Boolean = raw.optBoolean("enabledCookieJar", true)
     val jsLib: String = raw.optString("jsLib")
+    val bookUrlPattern: String? = raw.stringOrNull("bookUrlPattern")
+    val coverDecodeJs: String? = raw.stringOrNull("coverDecodeJs")
+    val concurrentRate: String? = raw.stringOrNull("concurrentRate")
+    val variableComment: String? = raw.stringOrNull("variableComment")
+    val rawHeader: String? = raw.stringOrNull("header")
     val charset: String? = raw.optString("charset").trim().ifEmpty { null }
         ?: raw.optString("bookSourceCharset").trim().ifEmpty { null }
     val respondTime: Int = raw.optInt("respondTime", 180000)
@@ -132,8 +147,10 @@ internal class BookSource(private val raw: JSONObject) {
             kind = raw.stringOrNull("kind"),
             lastChapter = raw.stringOrNull("lastChapter"),
             updateTime = raw.stringOrNull("updateTime"),
+            wordCount = raw.stringOrNull("wordCount"),
             bookUrl = raw.stringOrNull("bookUrl"),
             coverUrl = raw.stringOrNull("coverUrl"),
+            pageParam = raw.stringOrNull("pageParam"),
         )
 
         private fun parseBookInfoRule(raw: JSONObject?): BookInfoRule = BookInfoRule(
@@ -150,6 +167,7 @@ internal class BookSource(private val raw: JSONObject) {
             totalChapterNum = raw.stringOrNull("totalChapterNum"),
             wordCount = raw.stringOrNull("wordCount"),
             downloadUrls = raw.stringOrNull("downloadUrls"),
+            canReName = raw.stringOrNull("canReName"),
         )
 
         private fun parseTocRule(raw: JSONObject?): TocRule = TocRule(
@@ -160,6 +178,7 @@ internal class BookSource(private val raw: JSONObject) {
             isVip = raw.stringOrNull("isVip"),
             isPay = raw.stringOrNull("isPay"),
             formatJs = raw.stringOrNull("formatJs"),
+            preUpdateJs = raw.stringOrNull("preUpdateJs"),
             updateTime = raw.stringOrNull("updateTime"),
             nextTocUrl = raw.stringOrNull("nextTocUrl"),
         )
@@ -172,6 +191,11 @@ internal class BookSource(private val raw: JSONObject) {
             title = raw.stringOrNull("title"),
             replaceRegex = raw.stringOrNull("replaceRegex"),
             imageDecode = raw.stringOrNull("imageDecode"),
+            imageStyle = raw.stringOrNull("imageStyle"),
+            sourceRegex = raw.stringOrNull("sourceRegex"),
+            webJs = raw.stringOrNull("webJs"),
+            payAction = raw.stringOrNull("payAction"),
+            callBackJs = raw.stringOrNull("callBackJs"),
         )
     }
 }

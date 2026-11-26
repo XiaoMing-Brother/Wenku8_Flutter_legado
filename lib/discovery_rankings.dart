@@ -59,7 +59,8 @@ class DiscoveryRankingsPageState extends State<DiscoveryRankingsPage> {
   bool _loading = false;
   bool _loaded = false;
   int _generation = 0;
-  final _firstPages = <String, ({DateTime saved, OfficialRankingPage result})>{};
+  final _firstPages =
+      <String, ({DateTime saved, OfficialRankingPage result})>{};
   // 番茄官方榜单目录（动态，来自 core）；为空时回落写死的 officialRankings。
   List<OfficialRanking> _fanqieBoards = const [];
   List<OfficialCategory> _fanqieCoreCategories = const [];
@@ -178,8 +179,12 @@ class DiscoveryRankingsPageState extends State<DiscoveryRankingsPage> {
       }
     });
     try {
-      final fromCache = cached != null && DateTime.now().difference(cached.saved) < const Duration(minutes: 5);
-      final result = fromCache ? cached.result : library
+      final fromCache =
+          cached != null &&
+          DateTime.now().difference(cached.saved) < const Duration(minutes: 5);
+      final result = fromCache
+          ? cached.result
+          : library
           ? await OfficialBookService.fanqieLibrary(
               gender: _fanqieLibraryGender,
               categoryId: _fanqieLibraryCategoryId.isEmpty
@@ -192,12 +197,21 @@ class DiscoveryRankingsPageState extends State<DiscoveryRankingsPage> {
       if (!mounted || generation != _generation) return;
       if (reset && !fromCache) {
         _firstPages.remove(key);
-        if (result.books.isNotEmpty) _firstPages[key] = (saved: DateTime.now(), result: result);
+        if (result.books.isNotEmpty) {
+          _firstPages[key] = (saved: DateTime.now(), result: result);
+        }
         if (_firstPages.length > 24) _firstPages.remove(_firstPages.keys.first);
       }
-      final ids = {if (!reset) for (final book in _items) book.id};
-      final next = [for (final book in result.books)
-        if (book.title.trim().isNotEmpty && ids.add(OfficialBookService.idFor(book))) book.toNovel()];
+      final ids = {
+        if (!reset)
+          for (final book in _items) book.id,
+      };
+      final next = [
+        for (final book in result.books)
+          if (book.title.trim().isNotEmpty &&
+              ids.add(OfficialBookService.idFor(book)))
+            book.toNovel(),
+      ];
       final items = [if (!reset) ..._items, ...next];
       setState(() {
         _items = List.unmodifiable(items);
@@ -824,10 +838,16 @@ class _FanqieCategoryPickerState extends State<_FanqieCategoryPicker> {
                 const SizedBox(width: 12),
                 Expanded(
                   child: categories.isEmpty && !showAll
-                      ? const ContentNotice(
+                      ? ContentNotice(
                           icon: CupertinoIcons.search,
                           title: '没有匹配的分类',
                           message: '换个关键词再试试。',
+                          secondaryAction: searching
+                              ? GlassTextButton(
+                                  onPressed: () => setState(_query.clear),
+                                  child: const AppText('清除搜索'),
+                                )
+                              : null,
                         )
                       : GridView.builder(
                           key: ValueKey(

@@ -299,20 +299,16 @@ class _DictionaryLookupSheetState extends State<DictionaryLookupSheet> {
 
   @override
   Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.fromLTRB(20, 4, 20, 12),
+    padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Row(
           children: [
             Expanded(
-              child: AppText(
-                _picking ? '选词查词' : '词典',
-                style: const TextStyle(
-                  fontSize: 20,
-                  height: 1.3,
-                  fontWeight: FontWeight.w700,
-                ),
+              child: ArchiveSection(
+                title: _picking ? '选词查词' : '词典',
+                code: 'READER / DICTIONARY',
               ),
             ),
             ArchiveIconButton(
@@ -458,7 +454,6 @@ class _DictionaryLookupSheetState extends State<DictionaryLookupSheet> {
   }
 
   Widget _localGroup(BuildContext context, DictionaryLookupGroup group) {
-    final rank = _groups.indexOf(group) + 1;
     return Padding(
       padding: const EdgeInsets.only(bottom: 24),
       child: Column(
@@ -466,8 +461,7 @@ class _DictionaryLookupSheetState extends State<DictionaryLookupSheet> {
         children: [
           ArchiveSection(
             title: group.dictionary.name,
-            code:
-                '${rank.toString().padLeft(2, '0')} / ${_formatLabel(group.dictionary.format).toUpperCase()}',
+            code: 'DICTIONARY / LOCAL',
           ),
           const SizedBox(height: 14),
           if (group.error case final error?)
@@ -523,12 +517,16 @@ class _DictionaryLookupSheetState extends State<DictionaryLookupSheet> {
                   runSpacing: 4,
                   children: definition.related
                       .map(
-                        (word) => TextButton(
+                        (word) => GlassTextButton(
+                          compact: true,
                           onPressed: () {
                             _query.text = word;
                             _search();
                           },
-                          child: AppText(word),
+                          child: AppText(
+                            word,
+                            style: const TextStyle(fontSize: 13),
+                          ),
                         ),
                       )
                       .toList(),
@@ -547,10 +545,7 @@ class _DictionaryLookupSheetState extends State<DictionaryLookupSheet> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          ArchiveSection(
-            title: group.rule.name,
-            code: '${_ruleGroups.indexOf(group) + 1} / ONLINE DICT',
-          ),
+          ArchiveSection(title: group.rule.name, code: 'DICTIONARY / ONLINE'),
           const SizedBox(height: 14),
           if (group.error case final error?)
             AppText(
@@ -721,7 +716,7 @@ class _DictionaryManagementSheetState extends State<DictionaryManagementSheet> {
   Widget build(BuildContext context) => AnimatedBuilder(
     animation: widget.store,
     builder: (context, _) => Padding(
-      padding: const EdgeInsets.fromLTRB(24, 8, 24, 20),
+      padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -828,20 +823,12 @@ class _DictionaryManagementSheetState extends State<DictionaryManagementSheet> {
                           onTap: _busy ? null : () => _rename(item),
                           child: Row(
                             children: [
-                              ReorderableDragStartListener(
+                              ArchiveReorderHandle(
                                 index: index,
                                 enabled: !_busy,
-                                child: Padding(
-                                  padding: const EdgeInsets.only(right: 12),
-                                  child: Semantics(
-                                    label: '拖动调整${item.name}的优先级',
-                                    child: const ArchiveIcon(
-                                      CupertinoIcons.line_horizontal_3,
-                                      size: 18,
-                                    ),
-                                  ),
-                                ),
+                                label: '拖动调整${item.name}的优先级',
                               ),
+                              const SizedBox(width: 4),
                               Expanded(
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,

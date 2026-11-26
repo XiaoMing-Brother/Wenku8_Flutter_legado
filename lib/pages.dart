@@ -78,6 +78,8 @@ import 'listening/custom_tts_page.dart';
 import 'listening/reader_target.dart';
 import 'local_platform.dart';
 import 'local_books.dart';
+import 'publisher_fonts.dart';
+import 'user_fonts.dart' show followAppFont;
 import 'local_library_page.dart';
 import 'local_library_preferences.dart';
 import 'local_book_editor.dart';
@@ -103,6 +105,7 @@ import 'reader_handoff_navigation.dart';
 import 'reader_background.dart';
 import 'reader_content.dart';
 import 'reader_chapter_heading.dart';
+import 'reader_chapter_title.dart';
 import 'reader_rich_content.dart';
 import 'reader_scroll_stream.dart';
 import 'discovery_rankings.dart';
@@ -1891,15 +1894,10 @@ class NovelRow extends StatelessWidget {
   final String? code;
 
   @override
-  Widget build(BuildContext context) => JellyTapSurface(
-    onTap: onTap,
-    child: Container(
-      padding: const EdgeInsets.symmetric(vertical: 13),
-      decoration: BoxDecoration(
-        border: Border(
-          bottom: BorderSide(color: Theme.of(context).dividerColor),
-        ),
-      ),
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.only(bottom: 14),
+    child: ContentPanel(
+      onTap: onTap,
       child: Row(
         children: [
           Stack(
@@ -1945,6 +1943,7 @@ class NovelRow extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
                     fontSize: 12,
+                    height: 1.4,
                     color: Theme.of(context).colorScheme.onSurfaceVariant,
                   ),
                 ),
@@ -1971,7 +1970,8 @@ class NovelRow extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
                       fontSize: 12,
-                      color: Theme.of(context).colorScheme.primary,
+                      height: 1.4,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
                     ),
                   ),
                 ],
@@ -2004,61 +2004,88 @@ class ShelfPage extends StatefulWidget {
   final VoidCallback? onSearch;
   final HomeNavigation? navigation;
 
-  Widget buildHeader(BuildContext context, {VoidCallback? search}) =>
-      AnimatedBuilder(
-        animation: state.navigationChanges,
-        builder: (context, _) => Row(
-          children: [
-            Expanded(
-              child: const ArchiveMasthead(
-                title: '书架',
-                code: 'LIBRARY / BOOKSHELF',
+  Widget buildHeader(BuildContext context, {VoidCallback? search}) {
+    final local = state.combinedShelf && repository is OfflineNovelRepository
+        ? (repository as OfflineNovelRepository).local
+        : null;
+    final searchAction = onSearch ?? search;
+    return AnimatedBuilder(
+      animation: state.navigationChanges,
+      builder: (context, _) => Row(
+        children: [
+          const Expanded(
+            child: ArchiveMasthead(title: '书架', code: 'LIBRARY / BOOKSHELF'),
+          ),
+          if (local != null)
+            LocalBookImportButton(
+              books: local,
+              library: state,
+              onSearch: searchAction,
+              onImportBookList: () => pushNovelPage<void>(
+                context,
+                BookListImportPage(state: state, repository: repository),
+                reduceMotion: state.reduceMotion,
               ),
-            ),
-            GlassIconButton(
-              key: const ValueKey('shelf-search-entry'),
-              icon: CupertinoIcons.search,
-              label: '搜索图书',
-              onPressed: onSearch ?? search,
-            ),
-            if (state.combinedShelf && repository is OfflineNovelRepository)
-              if ((repository as OfflineNovelRepository).local
-                  case final local?)
-                LocalBookImportButton(
+              onManage: () => pushNovelPage<void>(
+                context,
+                LocalLibraryPage(
                   books: local,
-                  library: state,
-                  onImportBookList: () => pushNovelPage<void>(
-                    context,
-                    BookListImportPage(state: state, repository: repository),
-                    reduceMotion: state.reduceMotion,
+                  state: state,
+                  onOpen: (page, book) => openDetail(
+                    page,
+                    book,
+                    state,
+                    repository,
+                    entry: ReadingEntry.local,
                   ),
-                  onManage: () => pushNovelPage<void>(
-                    context,
-                    LocalLibraryPage(
-                      books: local,
-                      state: state,
-                      onOpen: (page, book) => openDetail(
-                        page,
-                        book,
-                        state,
-                        repository,
-                        entry: ReadingEntry.local,
-                      ),
-                      onOpenWithCover: (page, book, tag) => openDetail(
-                        page,
-                        book,
-                        state,
-                        repository,
-                        coverHeroTag: tag,
-                        entry: ReadingEntry.local,
-                      ),
-                    ),
-                    reduceMotion: state.reduceMotion,
+                  onOpenWithCover: (page, book, tag) => openDetail(
+                    page,
+                    book,
+                    state,
+                    repository,
+                    coverHeroTag: tag,
+                    entry: ReadingEntry.local,
                   ),
                 ),
-          ],
-        ),
-      );
+                reduceMotion: state.reduceMotion,
+              ),
+            )
+          else
+            GlassMenuAnchor(
+              child: Builder(
+                builder: (anchor) => GlassIconButton(
+                  key: const ValueKey('shelf-actions'),
+                  icon: CupertinoIcons.ellipsis,
+                  label: '书架操作',
+                  onPressed: searchAction == null
+                      ? null
+                      : () => _openSearchMenu(anchor, searchAction),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _openSearchMenu(BuildContext anchor, VoidCallback search) async {
+    final action = await showGlassMenu<String>(
+      context: anchor,
+      reduceMotion: state.reduceMotion,
+      builder: (menu) => Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          GlassMenuItem(
+            label: '搜索图书',
+            icon: CupertinoIcons.search,
+            onPressed: () => Navigator.pop(menu, 'search'),
+          ),
+        ],
+      ),
+    );
+    if (anchor.mounted && action == 'search') search();
+  }
 
   @override
   State<ShelfPage> createState() => _ShelfPageState();
@@ -2599,54 +2626,45 @@ class _ShelfPageState extends State<ShelfPage>
                         saved.isEmpty &&
                         index == leadingCount) {
                       return Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 90),
-                        child: Column(
-                          children: [
-                            ArchiveIcon.symbol(
-                              ArchiveSymbol.shelf,
-                              key: const ValueKey('empty-shelf-icon'),
-                              ambient: true,
-                              color: Theme.of(
-                                context,
-                              ).colorScheme.onSurfaceVariant,
-                              size: 34,
-                            ),
-                            const SizedBox(height: 18),
-                            AppText(
-                              all.isNotEmpty ||
-                                      state.combinedShelf &&
-                                          state.shelfSourceFilter != 'all'
-                                  ? '没有符合条件的书'
-                                  : _cacheOnly
-                                  ? '没有可离线阅读的书'
-                                  : state.shelf.isEmpty
-                                  ? '书架还空着'
-                                  : '没有符合条件的书',
-                              style: const TextStyle(
-                                fontSize: 17,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                            const SizedBox(height: 8),
-                            AppText(
-                              _cacheOnly
-                                  ? state.combinedShelf
-                                        ? '已缓存的收藏和本地导入书籍会显示在这里'
-                                        : '已缓存正文的收藏会显示在这里，本地导入请到「本地」阅读'
-                                  : state.combinedShelf && all.isEmpty
-                                  ? '收藏喜欢的书，或点击右上角更多按钮导入书籍'
-                                  : state.shelf.isEmpty
-                                  ? '在发现页收藏喜欢的书'
-                                  : '试试其他关键词或切回全部',
-                              textAlign: TextAlign.center,
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: Theme.of(
-                                  context,
-                                ).colorScheme.onSurfaceVariant,
-                              ),
-                            ),
-                          ],
+                        padding: const EdgeInsets.symmetric(vertical: 40),
+                        child: SizedBox(
+                          height: 220,
+                          child: ContentNotice(
+                            icon: CupertinoIcons.book,
+                            title:
+                                all.isNotEmpty ||
+                                    state.combinedShelf &&
+                                        state.shelfSourceFilter != 'all'
+                                ? '没有符合条件的书'
+                                : _cacheOnly
+                                ? '没有可离线阅读的书'
+                                : state.shelf.isEmpty
+                                ? '书架还空着'
+                                : '没有符合条件的书',
+                            message: _cacheOnly
+                                ? state.combinedShelf
+                                      ? '已缓存的收藏和本地导入书籍会显示在这里'
+                                      : '已缓存正文的收藏会显示在这里，本地导入请到「本地」阅读'
+                                : state.combinedShelf && all.isEmpty
+                                ? '收藏喜欢的书，或点击右上角更多按钮导入书籍'
+                                : state.shelf.isEmpty
+                                ? '在发现页收藏喜欢的书'
+                                : '试试其他关键词或切回全部',
+                            secondaryAction:
+                                state.shelf.isNotEmpty &&
+                                    (state.shelfFilter != 'all' ||
+                                        state.shelfSourceFilter != 'all')
+                                ? GlassTextButton(
+                                    onPressed: () => unawaited(
+                                      state.setShelfView(
+                                        filter: 'all',
+                                        source: 'all',
+                                      ),
+                                    ),
+                                    child: const AppText('清除筛选'),
+                                  )
+                                : null,
+                          ),
                         ),
                       );
                     }
@@ -2896,12 +2914,14 @@ class _ShelfPageState extends State<ShelfPage>
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          GlassMenuAnchor(
-            child: Builder(
-              builder: (buttonContext) => GlassIconButton(
-                icon: CupertinoIcons.ellipsis,
-                label: '${book.title}书架操作',
-                onPressed: () => _bookMenu(buttonContext, book.id, book: book),
+          Center(
+            child: GlassMenuAnchor(
+              child: Builder(
+                builder: (buttonContext) => CompactRowMenuButton(
+                  label: '${book.title}书架操作',
+                  onPressed: () =>
+                      _bookMenu(buttonContext, book.id, book: book),
+                ),
               ),
             ),
           ),
@@ -3416,19 +3436,6 @@ class SettingsPage extends StatelessWidget {
           const Divider(height: 22),
           _toggleSetting(
             context,
-            keyName: 'settings-calligraphy-splash-once',
-            icon: CupertinoIcons.sun_max,
-            title: '每日仅显示一次',
-            description: '当天已显示过后，再次冷启动不再显示，次日恢复',
-            value: state.calligraphySplashOncePerDay,
-            enabled: state.calligraphySplashEnabled,
-            onChanged: state.setCalligraphySplashOncePerDay,
-          ),
-          const Divider(height: 22),
-          _calligraphySplashTextRow(context),
-          const Divider(height: 22),
-          _toggleSetting(
-            context,
             keyName: 'settings-open-recent-on-launch',
             icon: CupertinoIcons.clock,
             title: '启动时继续阅读',
@@ -3595,7 +3602,7 @@ class SettingsPage extends StatelessWidget {
   ];
 
   List<Widget> _effectsOptions(BuildContext context) => [
-    sectionHeader(context, '显示流畅度', ''),
+    sectionHeader(context, '显示流畅度', '', code: 'SYSTEM / PERFORMANCE'),
     const SizedBox(height: 14),
     const FrameRateOptions(),
     const SizedBox(height: 14),
@@ -3621,38 +3628,36 @@ class SettingsPage extends StatelessWidget {
       ),
     ),
     const SizedBox(height: 24),
-    sectionHeader(context, '视觉效果', '玻璃外观 · 实时预览'),
+    sectionHeader(context, '视觉效果', '玻璃外观 · 实时预览', code: 'SYSTEM / APPEARANCE'),
     const SizedBox(height: 14),
     ContentPanel(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          _glassSettingLabel(context, '模糊度', '${state.glassBlur.round()}'),
-          AppControls.slider(
-            context,
-            key: const ValueKey('glass-blur-slider'),
+          ReaderValueSlider(
+            sliderKey: const ValueKey('glass-blur-slider'),
+            label: '模糊度',
             value: state.glassBlur,
             min: 0,
             max: 24,
             divisions: 24,
-            onChanged: (value) => state.setGlassBlur(value, persist: false),
-            onChangeEnd: state.setGlassBlur,
+            format: (value) => '${value.round()} px',
+            onPreview: (value) => state.setGlassBlur(value, persist: false),
+            onCommitted: (value) => state.setGlassBlur(value),
+            stepper: true,
           ),
-          const Divider(height: 22),
-          _glassSettingLabel(
-            context,
-            '不透明度',
-            '${(state.glassOpacity * 100).round()}%',
-          ),
-          AppControls.slider(
-            context,
-            key: const ValueKey('glass-opacity-slider'),
+          const SizedBox(height: 8),
+          ReaderValueSlider(
+            sliderKey: const ValueKey('glass-opacity-slider'),
+            label: '不透明度',
             value: state.glassOpacity,
             min: 0,
             max: 1,
             divisions: 100,
-            onChanged: (value) => state.setGlassOpacity(value, persist: false),
-            onChangeEnd: state.setGlassOpacity,
+            format: (value) => '${(value * 100).round()}%',
+            onPreview: (value) => state.setGlassOpacity(value, persist: false),
+            onCommitted: (value) => state.setGlassOpacity(value),
+            stepper: true,
           ),
           GlassTextButton(
             onPressed: () async {
@@ -3665,7 +3670,7 @@ class SettingsPage extends StatelessWidget {
       ),
     ),
     const SizedBox(height: 24),
-    sectionHeader(context, '交互动效', ''),
+    sectionHeader(context, '交互动效', '', code: 'SYSTEM / MOTION'),
     const SizedBox(height: 14),
     ContentPanel(
       child: Column(
@@ -3701,7 +3706,7 @@ class SettingsPage extends StatelessWidget {
       ),
     ),
     const SizedBox(height: 24),
-    sectionHeader(context, '触感反馈', ''),
+    sectionHeader(context, '触感反馈', '', code: 'SYSTEM / HAPTICS'),
     const SizedBox(height: 14),
     ContentPanel(
       key: const ValueKey('settings-haptics'),
@@ -3730,7 +3735,7 @@ class SettingsPage extends StatelessWidget {
 
   List<Widget> _dataOptions(BuildContext context) => [
     if (repository case final NovelRepository source) ...[
-      sectionHeader(context, '阅读记录', ''),
+      sectionHeader(context, '阅读记录', '', code: 'SYSTEM / READING LOG'),
       const SizedBox(height: 14),
       ContentPanel(
         onTap: () => openReadingHistory(context, state, source),
@@ -3751,7 +3756,7 @@ class SettingsPage extends StatelessWidget {
       const SizedBox(height: 24),
     ],
     if (repository case final OfflineNovelRepository offline) ...[
-      sectionHeader(context, '离线阅读', ''),
+      sectionHeader(context, '离线阅读', '', code: 'SYSTEM / OFFLINE'),
       const SizedBox(height: 14),
       ContentPanel(
         onTap: () => pushNovelPage<void>(
@@ -3780,7 +3785,7 @@ class SettingsPage extends StatelessWidget {
       ),
       const SizedBox(height: 24),
     ],
-    sectionHeader(context, '备份与清理', ''),
+    sectionHeader(context, '备份与清理', '', code: 'SYSTEM / STORAGE'),
     const SizedBox(height: 14),
     ContentPanel(
       key: const ValueKey('settings-backup'),
@@ -3859,24 +3864,6 @@ class SettingsPage extends StatelessWidget {
             _savePreference(context, () => state.setTheme(value)),
       );
 
-  Widget _glassSettingLabel(BuildContext context, String title, String value) =>
-      Row(
-        children: [
-          Expanded(
-            child: AppText(
-              title,
-              style: const TextStyle(fontWeight: FontWeight.w600),
-            ),
-          ),
-          AppText(
-            value,
-            style: TextStyle(
-              color: Theme.of(context).colorScheme.onSurfaceVariant,
-            ),
-          ),
-        ],
-      );
-
   Widget _toggleSetting(
     BuildContext context, {
     required String keyName,
@@ -3937,109 +3924,6 @@ class SettingsPage extends StatelessWidget {
       if (context.mounted) showNovelFeedback(context, '设置保存失败，请重试');
     }
   }
-
-  Widget _calligraphySplashTextRow(BuildContext context) {
-    final text = state.calligraphySplashText;
-    final preview = text.isEmpty
-        ? '默认：欲买桂花同载酒 / 终不似少年游'
-        : text.replaceAll('\n', ' / ');
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Row(
-          children: [
-            const ArchiveIcon(CupertinoIcons.text_quote, size: 21),
-            const SizedBox(width: 12),
-            Expanded(
-              child: AppText(
-                '开屏文字',
-                style: const TextStyle(fontWeight: FontWeight.w600),
-              ),
-            ),
-            const SizedBox(width: 12),
-            GlassTextButton(
-              key: const ValueKey('settings-calligraphy-splash-text'),
-              compact: true,
-              onPressed: state.calligraphySplashEnabled
-                  ? () => _editCalligraphySplashText(context)
-                  : null,
-              child: const AppText('编辑'),
-            ),
-          ],
-        ),
-        Padding(
-          padding: const EdgeInsets.only(left: 33, top: 4),
-          child: AppText(
-            preview,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              fontSize: 12,
-              height: 1.6,
-              color: Theme.of(context).colorScheme.onSurfaceVariant,
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Future<void> _editCalligraphySplashText(BuildContext context) async {
-    final controller = TextEditingController(text: state.calligraphySplashText);
-    try {
-      final value = await showJellySheet<String>(
-        context: context,
-        reduceMotion: state.effectiveReduceMotion,
-        builder: (sheet) => ListView(
-          padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
-          children: [
-            const ArchiveSection(title: '开屏文字', code: 'SYSTEM / LAUNCH TEXT'),
-            const SizedBox(height: 10),
-            AppText(
-              '竖排显示在启动页，换行可分列；留空使用默认诗句「欲买桂花同载酒 / 终不似少年游」。',
-              style: TextStyle(
-                fontSize: 12,
-                height: 1.6,
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
-              ),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: controller,
-              minLines: 2,
-              maxLines: 4,
-              autofocus: true,
-              decoration: const InputDecoration(
-                border: OutlineInputBorder(),
-                hintText: '欲买桂花同载酒\n终不似少年游',
-              ),
-            ),
-            const SizedBox(height: 16),
-            GlassTextButton(
-              key: const ValueKey('calligraphy-splash-text-save'),
-              onPressed: () => Navigator.pop(sheet, controller.text),
-              child: const AppText(
-                '保存',
-                style: TextStyle(fontWeight: FontWeight.w600),
-              ),
-            ),
-            const SizedBox(height: 6),
-            GlassTextButton(
-              onPressed: () => Navigator.pop(sheet),
-              child: const AppText('取消'),
-            ),
-          ],
-        ),
-      );
-      if (value == null || !context.mounted) return;
-      await _savePreference(
-        context,
-        () => state.setCalligraphySplashText(value),
-      );
-    } finally {
-      controller.dispose();
-    }
-  }
 }
 
 class InlineSearchResults extends StatelessWidget {
@@ -4096,14 +3980,7 @@ class InlineSearchResults extends StatelessWidget {
       ),
       slivers: [
         SliverPadding(
-          padding: EdgeInsets.fromLTRB(
-            24,
-            MediaQuery.paddingOf(context).top +
-                FrostedHeader.toolbarHeight +
-                20,
-            24,
-            MediaQuery.paddingOf(context).bottom + 24,
-          ),
+          padding: featurePadding(context),
           sliver: SliverMainAxisGroup(
             slivers: [
               if (allowBlockedTags)
@@ -4393,7 +4270,7 @@ class InlineSearchResults extends StatelessWidget {
                 FrostedHeader.toolbarHeight +
                 20,
             22,
-            MediaQuery.paddingOf(context).bottom + 24,
+            MediaQuery.paddingOf(context).bottom + 32,
           ),
           itemCount: books.length + 2,
           itemBuilder: (context, index) {
@@ -4865,17 +4742,19 @@ class _DetailPageState extends State<DetailPage> with TickerProviderStateMixin {
   List<({NovelVolume? volume, int? chapter})> _directory() {
     // Provisional cached chapters can predate volume metadata. Wait for the
     // displayed directory before choosing its initially expanded volume.
-    if (isLoading || loadError != null) return const [];
-    final volumes = NovelVolume.of(novel.directoryChapters);
+    if (!_catalogueExpanded || isLoading || loadError != null) return const [];
+    final volumes = novel.directoryVolumes;
     if (_directoryBook != novel.id) {
       _expandedVolumes.clear();
       _directoryVolumeKeys.clear();
     }
-    final current = novel.directoryIndexFor(
-      _resumeChapter ?? 0,
-      paragraph: state.positionFor(novel.id)?.paragraphIndex ?? 0,
-      offset: state.positionFor(novel.id)?.textOffset ?? 0,
-    );
+    final current =
+        _resumeDirectory ??
+        novel.directoryIndexFor(
+          _resumeChapter ?? 0,
+          paragraph: state.positionFor(novel.id)?.paragraphIndex ?? 0,
+          offset: state.positionFor(novel.id)?.textOffset ?? 0,
+        );
     for (final volume in volumes) {
       if (current >= volume.start &&
           current < volume.end &&
@@ -4988,7 +4867,7 @@ class _DetailPageState extends State<DetailPage> with TickerProviderStateMixin {
       Expanded(
         child: ArchiveSection(
           title: '目录',
-          code: '02 / CONTENTS',
+          code: 'LIBRARY / CONTENTS',
           subtitle: _directoryCountLabel,
         ),
       ),
@@ -5105,7 +4984,7 @@ class _DetailPageState extends State<DetailPage> with TickerProviderStateMixin {
   @override
   Widget build(BuildContext context) {
     _resumeChapter = _recordedChapter;
-    _resumeDirectory = _resumeChapter == null
+    _resumeDirectory = !_catalogueExpanded || _resumeChapter == null
         ? null
         : novel.directoryIndexFor(
             _resumeChapter!,
@@ -5217,7 +5096,15 @@ class _DetailPageState extends State<DetailPage> with TickerProviderStateMixin {
                                                 _directoryHeading(context),
                                                 if (novel.chapters.isEmpty) ...[
                                                   const SizedBox(height: 14),
-                                                  const AppText('暂无章节'),
+                                                  const SizedBox(
+                                                    height: 180,
+                                                    child: ContentNotice(
+                                                      icon: CupertinoIcons
+                                                          .list_bullet,
+                                                      title: '暂无章节',
+                                                      message: '目录加载后会显示在这里。',
+                                                    ),
+                                                  ),
                                                 ],
                                                 const SizedBox(height: 8),
                                               ],
@@ -5334,10 +5221,14 @@ class _DetailPageState extends State<DetailPage> with TickerProviderStateMixin {
       final coverWidth = wide ? 150.0 : 118.0;
       final cover = Semantics(
         button: true,
-        label: novelCoverUrl(novel)?.isNotEmpty == true ? '查看小说封面，长按更换' : '更换封面',
+        label: novelCoverUrl(novel)?.isNotEmpty == true
+            ? '查看小说封面，长按更换'
+            : '更换封面',
         child: GestureDetector(
           key: const ValueKey('detail-view-cover'),
-          onTap: novelCoverUrl(novel)?.isNotEmpty == true ? _viewCover : _changeCover,
+          onTap: novelCoverUrl(novel)?.isNotEmpty == true
+              ? _viewCover
+              : _changeCover,
           onLongPress: _changeCover,
           child: NovelCover(
             transitionNovel ?? novel,
@@ -5931,7 +5822,7 @@ class _DetailPageState extends State<DetailPage> with TickerProviderStateMixin {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const ArchiveSection(title: '简介', code: '01 / SYNOPSIS'),
+          const ArchiveSection(title: '简介', code: 'LIBRARY / SYNOPSIS'),
           const SizedBox(height: 14),
           AnimatedSize(
             duration: _reduceMotion ? Duration.zero : NovelMotion.enter,
@@ -6183,9 +6074,9 @@ class _DetailPageState extends State<DetailPage> with TickerProviderStateMixin {
   }
 
   String get _directoryCountLabel {
-    final volumes = NovelVolume.of(
-      novel.directoryChapters,
-    ).where((volume) => volume.title.isNotEmpty).length;
+    final volumes = novel.directoryVolumes
+        .where((volume) => volume.title.isNotEmpty)
+        .length;
     return '${volumes > 0 ? '$volumes 卷 · ' : ''}$_chapterCountLabel';
   }
 
@@ -6235,23 +6126,15 @@ class _DetailPageState extends State<DetailPage> with TickerProviderStateMixin {
       final cached = _cacheLabel(ids);
       return Semantics(
         expanded: expanded,
-        child: JellyTapSurface(
-          key: ValueKey('detail-volume-${volume.key}'),
-          onTap: () => _changeDirectory(() {
-            if (!_expandedVolumes.add(volume.key)) {
-              _expandedVolumes.remove(volume.key);
-            }
-          }),
-          child: Container(
-            padding: const EdgeInsets.symmetric(vertical: 18),
-            decoration: BoxDecoration(
-              border: Border(
-                bottom: BorderSide(
-                  color: Theme.of(context).dividerColor,
-                  width: .7,
-                ),
-              ),
-            ),
+        child: Padding(
+          padding: const EdgeInsets.only(bottom: 14),
+          child: ContentPanel(
+            key: ValueKey('detail-volume-${volume.key}'),
+            onTap: () => _changeDirectory(() {
+              if (!_expandedVolumes.add(volume.key)) {
+                _expandedVolumes.remove(volume.key);
+              }
+            }),
             child: Row(
               children: [
                 Expanded(
@@ -6261,7 +6144,7 @@ class _DetailPageState extends State<DetailPage> with TickerProviderStateMixin {
                       AppText(
                         volume.title,
                         style: const TextStyle(
-                          fontWeight: FontWeight.w700,
+                          fontWeight: FontWeight.w600,
                           fontSize: 16,
                           height: 1.45,
                         ),
@@ -6270,8 +6153,8 @@ class _DetailPageState extends State<DetailPage> with TickerProviderStateMixin {
                       AppText(
                         '${volume.length} ${novel.navigation?.entries.isNotEmpty == true ? '项' : '章'}${cached == null ? '' : ' · $cached'}',
                         style: TextStyle(
-                          fontSize: 13,
-                          height: 1.5,
+                          fontSize: 12,
+                          height: 1.4,
                           color: Theme.of(context).colorScheme.onSurfaceVariant,
                         ),
                       ),
@@ -6310,24 +6193,16 @@ class _DetailPageState extends State<DetailPage> with TickerProviderStateMixin {
     final entry = novel.directory[index];
     final current = _resumeDirectory == index;
     return _cacheReactive(
-      () => JellyTapSurface(
-        key: ValueKey('detail-directory-entry-$index'),
-        onTap: () => _openReader(
-          context,
-          entry.chapter,
-          target: novel.navigation?.entries.isNotEmpty == true
-              ? entry.target
-              : null,
-        ),
-        child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 16),
-          decoration: BoxDecoration(
-            border: Border(
-              bottom: BorderSide(
-                color: Theme.of(context).dividerColor,
-                width: .7,
-              ),
-            ),
+      () => Padding(
+        padding: const EdgeInsets.only(bottom: 14),
+        child: ContentPanel(
+          key: ValueKey('detail-directory-entry-$index'),
+          onTap: () => _openReader(
+            context,
+            entry.chapter,
+            target: novel.navigation?.entries.isNotEmpty == true
+                ? entry.target
+                : null,
           ),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.center,
@@ -6338,6 +6213,7 @@ class _DetailPageState extends State<DetailPage> with TickerProviderStateMixin {
                   (index + 1).toString().padLeft(2, '0'),
                   style: TextStyle(
                     fontSize: 12,
+                    height: 1.4,
                     color: Theme.of(context).colorScheme.onSurfaceVariant,
                   ),
                 ),
@@ -6349,7 +6225,7 @@ class _DetailPageState extends State<DetailPage> with TickerProviderStateMixin {
                     AppText(
                       entry.title,
                       style: const TextStyle(
-                        fontWeight: FontWeight.w500,
+                        fontWeight: FontWeight.w600,
                         fontSize: 14,
                         height: 1.5,
                       ),
@@ -6360,6 +6236,7 @@ class _DetailPageState extends State<DetailPage> with TickerProviderStateMixin {
                         '上次阅读',
                         style: TextStyle(
                           fontSize: 12,
+                          height: 1.4,
                           color: Theme.of(context).colorScheme.onSurfaceVariant,
                         ),
                       ),
@@ -6395,9 +6272,9 @@ class _DetailPageState extends State<DetailPage> with TickerProviderStateMixin {
               if (!LibraryWorkspace.close(context)) Navigator.pop(context);
             },
     ),
-    title: const AppText(
-      '图书详情',
-      style: TextStyle(fontSize: 18, height: 1.2, fontWeight: FontWeight.w700),
+    title: ArchiveRouteTitle(
+      title: novel.title.trim().isEmpty ? '图书详情' : novel.title,
+      code: 'LIBRARY / BOOK DETAIL',
     ),
     actions: [
       if (_sourceSwitching || _refreshing)
@@ -6431,7 +6308,8 @@ class _DetailPageState extends State<DetailPage> with TickerProviderStateMixin {
         : null;
     final saved = offline?.cache.book(novel.id);
     final bookUrl = novel.source?.bookUrl.trim() ?? '';
-    final onlineActions = !isLocalBook(novel.id) && !isLoading && loadError == null;
+    final onlineActions =
+        !isLocalBook(novel.id) && !isLoading && loadError == null;
     final action = await showGlassMenu<String>(
       context: anchor,
       reduceMotion: _reduceMotion,
@@ -6532,10 +6410,15 @@ class _DetailPageState extends State<DetailPage> with TickerProviderStateMixin {
             ? await local.restoreCover(book.id)
             : await local.setCover(book.id, (await store.file(choice)).path);
         await store.select(book.id, null);
-        await state.setShelfMembership(book.id, state.contains(book.id), novel: updated);
+        await state.setShelfMembership(
+          book.id,
+          state.contains(book.id),
+          novel: updated,
+        );
         await store.releaseUnused(choice);
       } else {
-        final restore = choice == PersonalCovers.original &&
+        final restore =
+            choice == PersonalCovers.original &&
             book.source?.customCoverUrl.isNotEmpty != true;
         await store.select(book.id, restore ? null : choice);
       }
@@ -7108,13 +6991,13 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Padding(
-            padding: const EdgeInsets.fromLTRB(24, 8, 14, 4),
+            padding: const EdgeInsets.fromLTRB(24, 8, 24, 4),
             child: Row(
               children: [
                 const Expanded(
-                  child: AppText(
-                    '换源',
-                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+                  child: ArchiveSection(
+                    title: '换源',
+                    code: 'LIBRARY / SOURCE SWITCH',
                   ),
                 ),
                 if (library != null)
@@ -7296,23 +7179,16 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
     }
     final muted = Theme.of(context).colorScheme.onSurfaceVariant;
     if (visible.isEmpty) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 32),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const AppText('没有匹配筛选条件的候选'),
-              const SizedBox(height: 8),
-              GlassTextButton(
-                onPressed: () {
-                  _filter.clear();
-                  setState(() => _filterQuery = '');
-                },
-                child: const AppText('清空筛选'),
-              ),
-            ],
-          ),
+      return ContentNotice(
+        icon: CupertinoIcons.search,
+        title: '没有匹配筛选条件的候选',
+        message: '调整书名、作者或来源筛选后再试。',
+        secondaryAction: GlassTextButton(
+          onPressed: () {
+            _filter.clear();
+            setState(() => _filterQuery = '');
+          },
+          child: const AppText('清空筛选'),
         ),
       );
     }
@@ -7552,13 +7428,13 @@ class _PendingBookMatchSheetState extends State<_PendingBookMatchSheet> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Padding(
-            padding: const EdgeInsets.fromLTRB(24, 8, 14, 4),
+            padding: const EdgeInsets.fromLTRB(24, 8, 24, 4),
             child: Row(
               children: [
                 const Expanded(
-                  child: AppText(
-                    '匹配书源',
-                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+                  child: ArchiveSection(
+                    title: '匹配书源',
+                    code: 'LIBRARY / SOURCE MATCH',
                   ),
                 ),
                 GlassIconButton(
@@ -7784,12 +7660,21 @@ class _ReaderPageState extends State<ReaderPage>
       widget.state.readerFontFamilyFor(widget.novel.id);
   late final _bookFontReady = _prepareBookFont();
   ReplaceRuleStore get _replaceRules => ReplaceRuleStore.shared;
+  final _pausedReplaceIds = ValueNotifier<Set<String>>(const {});
+  int _replaceSessionRevision = 0;
+
+  void _sessionReplacesChanged() {
+    _replaceSessionRevision++;
+    _replaceRulesChanged();
+  }
+
   bool get _replaceRulesActive => widget.state.replaceRulesEnabledFor(
     widget.novel.id,
     fallback: _replaceRules.enabled,
   );
-  String get _replaceRuleSignature =>
-      _replaceRulesActive ? _replaceRules.signature : 'off';
+  String get _replaceRuleSignature => _replaceRulesActive
+      ? '${_replaceRules.signature}:$_replaceSessionRevision'
+      : 'off';
   Novel? _titleProjectionBase;
   Novel? _titleProjectionCache;
   String? _titleProjectionSignature;
@@ -7810,13 +7695,18 @@ class _ReaderPageState extends State<ReaderPage>
       titles: true,
       bookTitle: base.title,
       origin: origin,
+      excludedIds: _pausedReplaceIds.value,
     );
     if (rules.isEmpty) {
       _titleProjectionCache = base;
       return base;
     }
-    String title(String value) =>
-        _replaceRules.applyTitle(value, bookTitle: base.title, origin: origin);
+    String title(String value) => _replaceRules.applyTitle(
+      value,
+      bookTitle: base.title,
+      origin: origin,
+      excludedIds: _pausedReplaceIds.value,
+    );
     final navigation = base.navigation;
     final projected = Novel(
       id: base.id,
@@ -7859,12 +7749,15 @@ class _ReaderPageState extends State<ReaderPage>
   }
 
   String _displayChapterTitle(String value) {
-    if (!_replaceRulesActive) return value;
-    return _replaceRules.applyTitle(
-      value,
-      bookTitle: _sourceBook.title,
-      origin: ReplaceRuleStore.originFor(_sourceBook),
-    );
+    final display = !_replaceRulesActive
+        ? value
+        : _replaceRules.applyTitle(
+            value,
+            bookTitle: _sourceBook.title,
+            origin: ReplaceRuleStore.originFor(_sourceBook),
+            excludedIds: _pausedReplaceIds.value,
+          );
+    return readerChapterDisplayName(display, display);
   }
 
   Future<void> _prepareBookFont() async {
@@ -8429,11 +8322,14 @@ class _ReaderPageState extends State<ReaderPage>
     if (showControls && mounted) _showChrome(true);
   }
 
-  int _contentTapDirection(TapUpDetails details) {
+  ReaderTapAction _contentTapAction(TapUpDetails details) {
     final prefs = _readerPreferences;
-    if (!prefs.tapPaging) return 0;
+    if (!prefs.tapPaging) return ReaderTapAction.controls;
     final x = details.localPosition.dx / MediaQuery.sizeOf(context).width;
     final y = details.localPosition.dy / MediaQuery.sizeOf(context).height;
+    if (!prefs.tapBothSidesNext && prefs.tapLayout == ReaderTapLayout.custom) {
+      return prefs.tapGrid[ReaderTapAction.cell(x, y)];
+    }
     final direction = prefs.tapBothSidesNext
         ? (x < .28 || x > .72 ? 1 : 0)
         : switch (prefs.tapLayout) {
@@ -8445,12 +8341,17 @@ class _ReaderPageState extends State<ReaderPage>
                   : 0,
             ReaderTapLayout.rightHand => x > .4 ? (y < .3 ? -1 : 1) : 0,
             ReaderTapLayout.leftHand => x < .6 ? (y < .3 ? -1 : 1) : 0,
+            ReaderTapLayout.custom => 0,
           };
-    return !prefs.tapBothSidesNext &&
+    final page =
+        !prefs.tapBothSidesNext &&
             prefs.mode == ReaderMode.vertical &&
             prefs.tapLayout == ReaderTapLayout.standard
         ? -direction
         : direction;
+    if (page < 0) return ReaderTapAction.previous;
+    if (page > 0) return ReaderTapAction.next;
+    return ReaderTapAction.controls;
   }
 
   VoidCallback? _previewContentTap(TapUpDetails details) {
@@ -8463,7 +8364,7 @@ class _ReaderPageState extends State<ReaderPage>
         _autoRunning ||
         listening?.active != true ||
         listening?.novel?.id != widget.novel.id ||
-        _contentTapDirection(details) != 0) {
+        _contentTapAction(details) != ReaderTapAction.controls) {
       return null;
     }
     final original = _chromeTarget;
@@ -8476,7 +8377,7 @@ class _ReaderPageState extends State<ReaderPage>
     };
   }
 
-  void _contentTap(TapUpDetails details) {
+  Future<void> _contentTap(TapUpDetails details) async {
     _cancelExitRequest();
     if (_selection.value) {
       AppHaptics.play(context, HapticCue.selection);
@@ -8488,12 +8389,49 @@ class _ReaderPageState extends State<ReaderPage>
       _stopAutoScroll(showControls: true);
       return;
     }
-    final direction = _contentTapDirection(details);
-    if (direction != 0) {
-      _pageBy(direction);
-      return;
+    switch (_contentTapAction(details)) {
+      case ReaderTapAction.previous:
+        _pageBy(-1);
+      case ReaderTapAction.next:
+        _pageBy(1);
+      case ReaderTapAction.controls:
+        _toggleChrome();
+      case ReaderTapAction.none:
+        return;
+      case ReaderTapAction.previousChapter:
+        if (_ready) _go(_chapter - 1);
+      case ReaderTapAction.nextChapter:
+        if (_ready) _go(_chapter + 1);
+      case ReaderTapAction.catalogue:
+        if (_sourceBook.chapters.isNotEmpty) _catalogue();
+      case ReaderTapAction.find:
+        if (_ready) _findInChapter();
+      case ReaderTapAction.bookmark:
+        if (!_ready) return;
+        try {
+          final saved = await _addBookmark();
+          if (mounted) {
+            showNovelFeedback(context, saved == null ? '当前位置暂不能添加书签' : '已添加书签');
+          }
+        } catch (_) {
+          if (mounted) showNovelFeedback(context, '书签保存失败，请重试');
+        }
+      case ReaderTapAction.playback:
+        final listening = _listening;
+        final snapshot = listening?.snapshot.value;
+        if (listening == null ||
+            snapshot == null ||
+            !snapshot.active ||
+            snapshot.novel?.id != widget.novel.id) {
+          showNovelFeedback(context, '请先开始朗读本书');
+          return;
+        }
+        try {
+          await (snapshot.playing ? listening.pause() : listening.resume());
+        } catch (_) {
+          if (mounted) showNovelFeedback(context, '听书操作失败，请重试');
+        }
     }
-    _toggleChrome();
   }
 
   @override
@@ -8530,6 +8468,7 @@ class _ReaderPageState extends State<ReaderPage>
     widget.state.readerSettingsChanges.addListener(_paperChanged);
     widget.state.illustrationChanges.addListener(_illustrationLayoutChanged);
     _replaceRules.addListener(_replaceRulesChanged);
+    _pausedReplaceIds.addListener(_sessionReplacesChanged);
     _replaceSignature = _replaceRuleSignature;
     unawaited(_loadReplaceRules());
     _autoScroll = createTicker(_autoTick);
@@ -8635,6 +8574,7 @@ class _ReaderPageState extends State<ReaderPage>
     _releaseFeedbackHeader?.call();
     widget.state.readerSettingsChanges.removeListener(_paperChanged);
     _replaceRules.removeListener(_replaceRulesChanged);
+    _pausedReplaceIds.dispose();
     _idleSave?.cancel();
     _savePosition(notify: false, finalSave: true);
     _highlightTimer?.cancel();
@@ -9365,6 +9305,7 @@ class _ReaderPageState extends State<ReaderPage>
       body,
       bookTitle: _sourceBook.title,
       origin: ReplaceRuleStore.originFor(_sourceBook),
+      excludedIds: _pausedReplaceIds.value,
     );
   }
 
@@ -10812,6 +10753,53 @@ class _ReaderPageState extends State<ReaderPage>
     });
   }
 
+  LocalBookStore? get _readerLocalStore =>
+      widget.repository is OfflineNovelRepository
+      ? (widget.repository as OfflineNovelRepository).local
+      : null;
+
+  /// 「使用出版方字体」：从本书原 EPUB 提取并去混淆内嵌字体，注册后用其作为本书阅读字体。
+  Future<void> _setUsePublisherFont(bool use) async {
+    final bookId = widget.novel.id;
+    final id = publisherFontId(bookId);
+    if (!use) {
+      await widget.state.setReaderTypeface(followAppFont, bookId: bookId);
+      if (mounted) setState(() {});
+      return;
+    }
+    final store = _readerLocalStore;
+    if (store == null) {
+      if (mounted) {
+        showNovelFeedback(context, '仅本地导入的图书支持出版方字体');
+        setState(() {});
+      }
+      return;
+    }
+    try {
+      final bytes = await store.originalBytes(bookId);
+      if (bytes == null) {
+        if (mounted) showNovelFeedback(context, '找不到本书的原书文件');
+        return;
+      }
+      final info = extractPublisherFontFromEpub(bytes);
+      if (info == null) {
+        if (mounted) showNovelFeedback(context, '本书没有可还原的出版方字体');
+        return;
+      }
+      await widget.state.fonts.registerPublisherFont(
+        id: id,
+        name: info.name,
+        extension: info.extension,
+        bytes: info.bytes,
+      );
+      await widget.state.setReaderTypeface(id, bookId: bookId);
+    } catch (error) {
+      if (mounted) showNovelFeedback(context, '出版方字体加载失败：$error');
+    } finally {
+      if (mounted) setState(() {});
+    }
+  }
+
   void _applyTypography({
     double? fontSize,
     double? lineHeight,
@@ -12217,7 +12205,9 @@ class _ReaderPageState extends State<ReaderPage>
       preferences.copyWith(
         themeMode: nextNight == appDark
             ? ReaderThemeMode.follow
-            : nextNight ? ReaderThemeMode.night : ReaderThemeMode.day,
+            : nextNight
+            ? ReaderThemeMode.night
+            : ReaderThemeMode.day,
       ),
       true,
     );
@@ -12574,9 +12564,16 @@ class _ReaderPageState extends State<ReaderPage>
     }
   }
 
-  Future<void> _openReviews({int? paraIndex, InlineReview? inline, int? sourceChapter}) async {
+  Future<void> _openReviews({
+    int? paraIndex,
+    InlineReview? inline,
+    int? sourceChapter,
+  }) async {
     if (_sourceBook.chapters.isEmpty) return;
-    final index = (sourceChapter ?? _chapter).clamp(0, _sourceBook.chapters.length - 1);
+    final index = (sourceChapter ?? _chapter).clamp(
+      0,
+      _sourceBook.chapters.length - 1,
+    );
     final chapter = _sourceBook.chapters[index];
     if (_reviewDemo &&
         (ChapterReviewCache.shared
@@ -12714,16 +12711,16 @@ class _ReaderPageState extends State<ReaderPage>
           MediaQuery.textScalerOf(context).scale(preferences.statusFontSize) *
           1.4;
       final tipBase = ReaderTipContext(
-        bookName: widget.novel.title,
-        chapterTitle: readerInformationTitle(
-          _displayChapterTitle(chapter.title),
-          _sourceBook.directoryIndexFor(_chapter) + 1,
-        ),
+        bookName: readerBookDisplayName(widget.novel.title),
+        chapterTitle: readerChapterHeadingText(chapter.title),
+        readProgress: _sourceBook.chapters.isEmpty
+            ? ''
+            : '${((_chapter + 1) * 100 / _sourceBook.chapters.length).round()}%',
       );
       final tipInfoStyle = TextStyle(
         fontSize: preferences.statusFontSize,
         height: 1.3,
-        color: preferences.controlForeground(dark),
+        color: preferences.chromeForeground(dark),
       );
       return Positioned(
         top: footer
@@ -12774,6 +12771,7 @@ class _ReaderPageState extends State<ReaderPage>
                     tips: ReaderPreferences.fixedFooterTips,
                     baseContext: tipBase,
                     style: tipInfoStyle,
+                    equalSlots: true,
                   ),
           ),
         ),
@@ -12841,6 +12839,16 @@ class _ReaderPageState extends State<ReaderPage>
                           vertical: _readerMode == ReaderMode.vertical,
                           onBookmark: _saveQuote,
                           onDictionary: _lookupQuote,
+                          onReplace: (selection) {
+                            _selection.clear();
+                            showReaderReplaceEditor(
+                              context,
+                              bookTitle: _sourceBook.title,
+                              selectedText: selection.text,
+                              reduceMotion: widget.state.reduceMotion,
+                              active: _replaceRulesActive,
+                            );
+                          },
                           onIllustrations: _volumeIllustrations,
                           onSelect: () {
                             _stopAutoScroll();
@@ -12856,10 +12864,14 @@ class _ReaderPageState extends State<ReaderPage>
                               onPreview: _previewContentTap,
                               child: _opening
                                   ? ReaderBackground(
-                                      night: _readerPreferences.usesNight(appDark),
+                                      night: _readerPreferences.usesNight(
+                                        appDark,
+                                      ),
                                       store: widget.state.backgrounds,
                                       preferences: _readerPreferences,
-                                      paper: _readerPreferences.background(appDark),
+                                      paper: _readerPreferences.background(
+                                        appDark,
+                                      ),
                                       reduceMotion: widget.state.reduceMotion,
                                       child: _BookOpeningPage(
                                         novel: _sourceBook,
@@ -12986,36 +12998,35 @@ class _ReaderPageState extends State<ReaderPage>
           ? CrossAxisAlignment.center
           : CrossAxisAlignment.start,
       children: [
-        Row(
-          children: [
-            AppText(
-              _authoredDirectory
-                  ? '目录 ${_sourceBook.directoryIndexFor(index) + 1} / ${_sourceBook.directory.length}'
-                  : '第 ${index + 1} 章',
-              style: TextStyle(
-                color: prefs.foreground(dark).withValues(alpha: .65),
-                fontSize: 12,
-                fontWeight: FontWeight.w500,
-              ),
+        Align(
+          alignment: prefs.titlePosition == ReaderTitlePosition.center
+              ? Alignment.center
+              : Alignment.centerLeft,
+          child: AppText(
+            _authoredDirectory
+                ? '目录 ${_sourceBook.directoryIndexFor(index) + 1} / ${_sourceBook.directory.length}'
+                : readerChapterLabel(
+                    _displayBook.readingTitleFor(index),
+                    readerIsSectionTitle(_displayBook.readingTitleFor(index))
+                        ? ''
+                        : '第 ${index + 1} 章',
+                  ),
+            style: TextStyle(
+              color: prefs.foreground(dark).withValues(alpha: .85),
+              fontSize: (fontSize * .72).clamp(12.0, 20.0),
+              fontWeight: FontWeight.w500,
             ),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Align(
-                alignment: Alignment.centerRight,
-                child: ArchiveCode(
-                  _authoredDirectory
-                      ? 'EPUB / TEXT'
-                      : 'CH.${(index + 1).toString().padLeft(3, '0')} / TEXT',
-                  color: prefs.foreground(dark).withValues(alpha: .65),
-                ),
-              ),
-            ),
-          ],
+          ),
         ),
         if (showTitle && prefs.showTitle) ...[
           const SizedBox(height: 12),
           AppText(
-            _displayBook.readingTitleFor(index),
+            _displayChapterTitle(
+              readerChapterDisplayName(
+                _displayBook.readingTitleFor(index),
+                _displayBook.readingTitleFor(index),
+              ),
+            ),
             key: ValueKey(
               index == _chapter
                   ? 'reader-chapter-title'
@@ -13070,7 +13081,11 @@ class _ReaderPageState extends State<ReaderPage>
     final review = reviewCount != 0 && chapter == _chapter
         ? _reviewBubble(
             reviewCount,
-            () => _openReviews(paraIndex: index, inline: content.reviews[index], sourceChapter: chapter),
+            () => _openReviews(
+              paraIndex: index,
+              inline: content.reviews[index],
+              sourceChapter: chapter,
+            ),
             key: ValueKey('reader-paragraph-bubble-$index'),
           )
         : null;
@@ -13527,7 +13542,7 @@ class _ReaderPageState extends State<ReaderPage>
                       style: TextStyle(color: prefs.foreground(dark)),
                       child: _paginated && !ready && !failed
                           ? ReaderPageSkeleton(
-                              title: _displayChapterTitle(chapter.title),
+                              title: chapter.title,
                               padding: pagedPadding,
                               style: paragraphStyle,
                               vertical: prefs.mode == ReaderMode.vertical,
@@ -13546,7 +13561,7 @@ class _ReaderPageState extends State<ReaderPage>
                               controller: _paged,
                               preferences: prefs,
                               style: paragraphStyle,
-                              title: _displayChapterTitle(chapter.title),
+                              title: chapter.title,
                               bookTitle: _sourceBook.title,
                               chrome: _chrome,
                               titleForAnchor: (anchor) =>
@@ -13581,8 +13596,11 @@ class _ReaderPageState extends State<ReaderPage>
                                       paragraph,
                                       content,
                                     ),
-                                onReviewTap: (paragraph) =>
-                                    _openReviews(paraIndex: paragraph, inline: content.reviews[paragraph], sourceChapter: chapterIndex),
+                                onReviewTap: (paragraph) => _openReviews(
+                                  paraIndex: paragraph,
+                                  inline: content.reviews[paragraph],
+                                  sourceChapter: chapterIndex,
+                                ),
                               ),
                               pageBuilderKey: rowSpec,
                               backgroundBuilder: (child) => ReaderBackground(
@@ -13639,6 +13657,7 @@ class _ReaderPageState extends State<ReaderPage>
         maxHeight: math.min(760, MediaQuery.sizeOf(context).height * .86),
         surfaceWrapper: _readerSurface,
         builder: (context) => ReaderTools(
+          pausedReplaceIds: _pausedReplaceIds,
           novel: _sourceBook,
           state: widget.state,
           position: position,
@@ -13700,6 +13719,7 @@ class _ReaderPageState extends State<ReaderPage>
           onPreferencesChanged: _applyReaderPreferences,
           onStyleScopeChanged: _applyStyleScope,
           onReaderTypefaceChanged: _applyReaderTypeface,
+          onUsePublisherFont: _setUsePublisherFont,
           languages: _unfilteredContent?.languages ?? const {},
           onHiddenLanguagesChanged: _applyHiddenLanguages,
           onIllustrations: isLocalBook(widget.novel.id)

@@ -72,8 +72,7 @@ class BookSource {
     }
     return type == 2 &&
         content != null &&
-        '${content['content'] ?? ''}'.trim().isNotEmpty &&
-        '${content['imageDecode'] ?? ''}'.trim().isEmpty;
+        '${content['content'] ?? ''}'.trim().isNotEmpty;
   }
 
   String get exploreUrl => _string('exploreUrl');
@@ -364,10 +363,19 @@ class BookSourceExploreAction {
 }
 
 class BookSourceLoginAction {
-  const BookSourceLoginAction({this.openUrl = '', this.message = ''});
+  const BookSourceLoginAction({
+    this.openUrl = '',
+    this.message = '',
+    this.values = const {},
+    this.fields = const [],
+  });
 
   final String openUrl;
   final String message;
+  final Map<String, String> values;
+
+  /// 非空表示脚本调用了 reUiView()/reLoginView()，调用方应按新表单项重建表单。
+  final List<BookSourceLoginField> fields;
 }
 
 class BookSourceBatch {

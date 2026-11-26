@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:typed_data';
 import 'dart:ui' show Color;
 
+import 'package:flutter/foundation.dart' show compute;
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:html/dom.dart' as dom;
 import 'package:html/parser.dart' as html_parser;
@@ -449,7 +450,9 @@ class OfficialBook {
       summary: summary,
       colors: const [Color(0xFF31405A), Color(0xFF1B2333)],
       coverUrl: coverUrl.isEmpty ? null : coverUrl,
-      wordCount: amount == null ? null : (amount * (count?.group(2) == null ? 1 : 10000)).round(),
+      wordCount: amount == null
+          ? null
+          : (amount * (count?.group(2) == null ? 1 : 10000)).round(),
       source: OfficialBookService.refFor(this),
     );
   }
@@ -542,7 +545,11 @@ class OfficialBookService {
 
   static const searchSites = OfficialSite.values;
 
-  static Future<OfficialRankingPage> search(OfficialSite site, String query, int page) async {
+  static Future<OfficialRankingPage> search(
+    OfficialSite site,
+    String query,
+    int page,
+  ) async {
     if (query.trim().isEmpty || (site == OfficialSite.qidian && page != 1)) {
       return OfficialRankingPage(books: const [], hasMore: false, page: page);
     }
@@ -555,68 +562,136 @@ class OfficialBookService {
       return _qidianSearch(query.trim(), page);
     }
     final uri = switch (site) {
-      OfficialSite.qimao => Uri.https('api-www.qimao.com', '/api/search/result', {'keyword': query, 'page': '$page'}),
-      OfficialSite.shuqi => Uri.https('www.shuqi.com', '/search', {'keyword': query, 'page': '$page'}),
-      OfficialSite.qidian => Uri.https('m.qidian.com', '/search', {'kw': query.trim()}),
-      // 番茄在上方已提前 return，此分支仅为让 switch 覆盖全部枚举值。
-      OfficialSite.fanqie => Uri.https('fanqienovel.com', '/api/author/search/search_book/v0', {
-        'query_word': query.trim(),
-        'query_type': '0',
-        'filter': '127,127,127,127',
-        'page_index': '${page - 1}',
-        'page_count': '10',
+      OfficialSite.qimao => Uri.https(
+        'api-www.qimao.com',
+        '/api/search/result',
+        {'keyword': query, 'page': '$page'},
+      ),
+      OfficialSite.shuqi => Uri.https('www.shuqi.com', '/search', {
+        'keyword': query,
+        'page': '$page',
       }),
+      OfficialSite.qidian => Uri.https('m.qidian.com', '/search', {
+        'kw': query.trim(),
+      }),
+      // 番茄在上方已提前 return，此分支仅为让 switch 覆盖全部枚举值。
+      OfficialSite.fanqie =>
+        Uri.https('fanqienovel.com', '/api/author/search/search_book/v0', {
+          'query_word': query.trim(),
+          'query_type': '0',
+          'filter': '127,127,127,127',
+          'page_index': '${page - 1}',
+          'page_count': '10',
+        }),
     };
-    final text = await _getText(uri, headers: {
-      'Referer': site == OfficialSite.qimao ? 'https://www.qimao.com/' : '${uri.origin}/',
-    });
+    final text = await _getText(
+      uri,
+      headers: {
+        'Referer': site == OfficialSite.qimao
+            ? 'https://www.qimao.com/'
+            : '${uri.origin}/',
+      },
+    );
     return parseSearchPage(site, text, page);
   }
 
-  static OfficialRankingPage parseSearchPage(OfficialSite site, String text, int page) {
+  static OfficialRankingPage parseSearchPage(
+    OfficialSite site,
+    String text,
+    int page,
+  ) {
     final books = <OfficialBook>[];
     final ids = <String>{};
     var hasMore = false;
-    void add(String id, String title, String author, String kind, String intro, String cover, String url) {
-      if (!RegExp(r'^\d+$').hasMatch(id) || title.isEmpty || !ids.add(id)) return;
-      books.add(OfficialBook(site: site, bookId: id, title: title, author: author,
-          kind: kind, summary: intro, coverUrl: cover.startsWith('//') ? 'https:$cover' : cover, bookUrl: url));
+    void add(
+      String id,
+      String title,
+      String author,
+      String kind,
+      String intro,
+      String cover,
+      String url,
+    ) {
+      if (!RegExp(r'^\d+$').hasMatch(id) || title.isEmpty || !ids.add(id)) {
+        return;
+      }
+      books.add(
+        OfficialBook(
+          site: site,
+          bookId: id,
+          title: title,
+          author: author,
+          kind: kind,
+          summary: intro,
+          coverUrl: cover.startsWith('//') ? 'https:$cover' : cover,
+          bookUrl: url,
+        ),
+      );
     }
+
     switch (site) {
       case OfficialSite.qimao:
         final data = _map(_map(jsonDecode(text))?['data']);
-        if (data?['search_list'] is! List) throw const FormatException('七猫搜索结果结构已变化');
+        if (data?['search_list'] is! List) {
+          throw const FormatException('七猫搜索结果结构已变化');
+        }
         for (final item in _list(data?['search_list']).whereType<Map>()) {
           final id = _string(item['book_id']);
-          add(id, _string(item['title']), _string(item['author']), _string(item['category2_name']),
-              _string(item['intro']), _string(item['image_link']), 'https://www.qimao.com/shuku/$id/');
+          add(
+            id,
+            _string(item['title']),
+            _string(item['author']),
+            _string(item['category2_name']),
+            _string(item['intro']),
+            _string(item['image_link']),
+            'https://www.qimao.com/shuku/$id/',
+          );
         }
         final meta = _map(data?['page_data']);
-        hasMore = _int(meta?['page']) == page && page * (_int(meta?['page_size']) ?? 15) < (_int(meta?['count']) ?? 0);
+        hasMore =
+            _int(meta?['page']) == page &&
+            page * (_int(meta?['page_size']) ?? 15) <
+                (_int(meta?['count']) ?? 0);
       case OfficialSite.shuqi:
         final document = html_parser.parse(text);
         if (document.querySelector('.searchlist-main, .matchbook') == null) {
           throw const FormatException('书旗搜索结果结构已变化');
         }
-        for (final row in document.querySelectorAll('.matchbook, .searchlist-main li')) {
+        for (final row in document.querySelectorAll(
+          '.matchbook, .searchlist-main li',
+        )) {
           final link = row.querySelector('a.bname, a.ellipsis');
           final id = _shuqiBookId(link?.attributes['href'] ?? '');
-          final author = row.querySelector('.bauthor, .book-autor')?.text.trim() ?? '';
-          add(id, link?.text.trim() ?? '', author.replaceFirst(RegExp(r'^作者[：:]\s*'), ''),
-              row.querySelector('.category, .lastchapter li')?.text.trim() ?? '',
-              row.querySelector('.bookDesc, .book-newc')?.text.trim() ?? '', row.querySelector('img')?.attributes['src'] ?? '',
-              'https://www.shuqi.com/book/$id.html');
+          final author =
+              row.querySelector('.bauthor, .book-autor')?.text.trim() ?? '';
+          add(
+            id,
+            link?.text.trim() ?? '',
+            author.replaceFirst(RegExp(r'^作者[：:]\s*'), ''),
+            row.querySelector('.category, .lastchapter li')?.text.trim() ?? '',
+            row.querySelector('.bookDesc, .book-newc')?.text.trim() ?? '',
+            row.querySelector('img')?.attributes['src'] ?? '',
+            'https://www.shuqi.com/book/$id.html',
+          );
         }
-        hasMore = document.querySelectorAll('.cp-wp-page a').any((link) => link.text.trim() == '下一页');
+        hasMore = document
+            .querySelectorAll('.cp-wp-page a')
+            .any((link) => link.text.trim() == '下一页');
       case OfficialSite.qidian:
         final info = _map(_pageContext(text)['bookInfo']);
         final records = info?['records'];
         if (records is! List) throw const FormatException('起点搜索页缺少书籍列表');
         for (final item in records.whereType<Map>()) {
           final id = _string(item['bid']);
-          add(id, _plainText(_string(item['bName'])), _plainText(_string(item['bAuth'])),
-              _string(item['cat']), _plainText(_string(item['desc'])),
-              _string(item['imgUrl']), 'https://m.qidian.com/book/$id/');
+          add(
+            id,
+            _plainText(_string(item['bName'])),
+            _plainText(_string(item['bAuth'])),
+            _string(item['cat']),
+            _plainText(_string(item['desc'])),
+            _string(item['imgUrl']),
+            'https://m.qidian.com/book/$id/',
+          );
         }
       case OfficialSite.fanqie:
         if (text.trim().isEmpty) throw const FormatException('番茄搜索接口返回空响应');
@@ -628,13 +703,23 @@ class OfficialBookService {
         }
         for (final item in records.whereType<Map>()) {
           final id = _string(item['book_id']);
-          add(id, _string(item['book_name']), _string(item['author']),
-              _string(item['category']), _string(item['book_abstract']),
-              _string(item['thumb_url']), 'https://fanqienovel.com/page/$id');
+          add(
+            id,
+            _string(item['book_name']),
+            _string(item['author']),
+            _string(item['category']),
+            _string(item['book_abstract']),
+            _string(item['thumb_url']),
+            'https://fanqienovel.com/page/$id',
+          );
         }
         hasMore = page * 10 < (_int(data?['total_count']) ?? 0);
     }
-    return OfficialRankingPage(books: books, hasMore: books.isNotEmpty && hasMore, page: page);
+    return OfficialRankingPage(
+      books: books,
+      hasMore: books.isNotEmpty && hasMore,
+      page: page,
+    );
   }
 
   /// 起点关键词搜索。
@@ -649,15 +734,14 @@ class OfficialBookService {
     int page,
   ) async {
     try {
-      final items = await QidianSearchWebView.instance.fetchSearchResults(query);
+      final items = await QidianSearchWebView.instance.fetchSearchResults(
+        query,
+      );
       if (items != null && items.isNotEmpty) {
         final books = <OfficialBook>[];
         final ids = <String>{};
         for (final item in items) {
-          final id = _idFromUrl(
-            _string(item['href']),
-            RegExp(r'/book/(\d+)'),
-          );
+          final id = _idFromUrl(_string(item['href']), RegExp(r'/book/(\d+)'));
           final title = _string(item['name']);
           if (id.isEmpty || title.isEmpty || !ids.add(id)) continue;
           books.add(
@@ -762,17 +846,31 @@ class OfficialBookService {
         }
       } else if (node is Map) {
         final bid = pick(node, const [
-          'book_id', 'bookId', 'book_id_str', 'bookid', 'id',
+          'book_id',
+          'bookId',
+          'book_id_str',
+          'bookid',
+          'id',
         ]);
         final title = pick(node, const [
-          'book_name', 'bookName', 'title', 'name', 'raw_book_name',
+          'book_name',
+          'bookName',
+          'title',
+          'name',
+          'raw_book_name',
         ]);
         if (RegExp(r'^\d{4,}$').hasMatch(bid) &&
             title.isNotEmpty &&
             seen.add(bid)) {
-          var cover = _string(pick(node, const [
-            'thumb_url', 'thumbUrl', 'thumbUri', 'cover', 'cover_url',
-          ]));
+          var cover = _string(
+            pick(node, const [
+              'thumb_url',
+              'thumbUrl',
+              'thumbUri',
+              'cover',
+              'cover_url',
+            ]),
+          );
           if (cover.startsWith('http://')) {
             cover = 'https://${cover.substring(7)}';
           }
@@ -789,13 +887,18 @@ class OfficialBookService {
               ),
               summary: _plainText(
                 pick(node, const [
-                  'book_abstract', 'abstract', 'description', 'summary',
+                  'book_abstract',
+                  'abstract',
+                  'description',
+                  'summary',
                 ]),
               ),
               coverUrl: cover,
               bookUrl: 'https://fanqienovel.com/page/$bid',
               wordCount: pick(node, const [
-                'word_count', 'wordNumber', 'wordCount',
+                'word_count',
+                'wordNumber',
+                'wordCount',
               ]),
             ),
           );
@@ -864,10 +967,7 @@ class OfficialBookService {
   /// 首页 `rank_with_category_data` 这张卡是男频榜（推荐/完本/巅峰/口碑），与 app 内置的
   /// 「阅读/新书」榜命名并非一一对应。仅对**能确定对应**的榜走核心，其余回落 web，避免
   /// 展示错误的榜：完本→完本榜；阅读≈推荐榜；新书/巅峰/口碑 及女频 → web。
-  static FanqieRankTab? _matchRankTab(
-    FanqieRankCatalog catalog,
-    String title,
-  ) {
+  static FanqieRankTab? _matchRankTab(FanqieRankCatalog catalog, String title) {
     if (title.contains('女频')) return null;
     if (title.contains('完本') || title.contains('完结')) {
       for (final tab in catalog.tabs) {
@@ -966,21 +1066,21 @@ class OfficialBookService {
     }
   }
 
-  static Future<OfficialRankingPage> _fanqieSearch(String query, int page) async {
+  static Future<OfficialRankingPage> _fanqieSearch(
+    String query,
+    int page,
+  ) async {
     // 优先走内嵌 Rust 核心（官方 App 协议）；核心不可用/解析为空则降级 web。
     final core = await _fanqieCoreSearch(query, page);
     if (core != null) return core;
-    final uri = Uri.https(
-      'fanqienovel.com',
-      '/api/author/search/search_book/v0',
-      {
-        'query_word': query,
-        'query_type': '0',
-        'filter': '127,127,127,127',
-        'page_index': '${page - 1}',
-        'page_count': '10',
-      },
-    );
+    final uri =
+        Uri.https('fanqienovel.com', '/api/author/search/search_book/v0', {
+          'query_word': query,
+          'query_type': '0',
+          'filter': '127,127,127,127',
+          'page_index': '${page - 1}',
+          'page_count': '10',
+        });
     final json = await _getJson(uri, headers: _fanqieHeaders);
     final data = _map(json['data']);
     final records = data?['search_book_data_list'];
@@ -1067,7 +1167,10 @@ class OfficialBookService {
           if (name.isNotEmpty) {
             title = name;
             author = _string(page['author']);
-            final categories = _fanqieCategoryNames(page['categoryV2'], const {});
+            final categories = _fanqieCategoryNames(
+              page['categoryV2'],
+              const {},
+            );
             kind = categories.isNotEmpty
                 ? categories.toSet().join(' · ')
                 : _string(page['category']);
@@ -1147,8 +1250,7 @@ class OfficialBookService {
   // 私用区（U+E000–U+F8FF）字符：字体映射没覆盖到的残留会落在这里。
   static final RegExp _fanqiePuaPattern = RegExp(r'[\uE000-\uF8FF]');
 
-  static bool _hasFanqiePua(String value) =>
-      _fanqiePuaPattern.hasMatch(value);
+  static bool _hasFanqiePua(String value) => _fanqiePuaPattern.hasMatch(value);
 
   static Uint8List? peekCover(String url) => _coverCache[url];
 
@@ -1156,7 +1258,10 @@ class OfficialBookService {
     final cached = _coverCache[url];
     if (cached != null) return cached;
     final bytes = await CoverDiskCache.shared.load(
-      'official', url, () => _downloadCover(url), bookKey: bookKey,
+      'official',
+      url,
+      () => _downloadCover(url),
+      bookKey: bookKey,
     );
     if (_coverCache.length > 160) _coverCache.remove(_coverCache.keys.first);
     return _coverCache[url] = bytes;
@@ -1215,7 +1320,10 @@ class OfficialBookService {
     if (bid.isEmpty) return null;
     var title = _decodeFanqieText(_string(item['book_name']), fontMap);
     var author = _decodeFanqieText(_string(item['author']), fontMap);
-    var intro = _decodeFanqieText(_plainText(_string(item['abstract'])), fontMap);
+    var intro = _decodeFanqieText(
+      _plainText(_string(item['abstract'])),
+      fontMap,
+    );
     var cover = _httpsUrl(_string(item['thumb_url']));
     var wordCount = _decodeFanqieText(_string(item['word_count']), fontMap);
 
@@ -2075,8 +2183,7 @@ class OfficialBookService {
     }
     final lastTitle = _string(data['lastChapterTitle']);
     final complete =
-        _string(data['creationStatus']) == '0' ||
-        lastTitle.contains('完');
+        _string(data['creationStatus']) == '0' || lastTitle.contains('完');
     final cover = _httpsUrl(_string(data['thumbUrl']));
     return OfficialBookData(
       title: _string(data['bookName']),
@@ -2116,7 +2223,39 @@ class OfficialBookService {
   static Future<List<OfficialChapter>> _qidianChapters(
     BookSourceRef ref,
   ) async {
-    final bookId = _idFromUrl(ref.tocUrl ?? ref.bookUrl, RegExp(r'/book/(\d+)'));
+    final bookId = _idFromUrl(
+      ref.tocUrl ?? ref.bookUrl,
+      RegExp(r'/book/(\d+)'),
+    );
+    final tocText = ref.tocUrl?.trim() ?? '';
+    final tocUrl = Uri.tryParse(tocText);
+    Future<List<OfficialChapter>?> mobileCatalog() async {
+      final uri = tocUrl ?? Uri.parse(ref.bookUrl);
+      try {
+        final html = await _getText(
+          uri,
+          headers: const {
+            'Cookie': _qidianCookie,
+            'Referer': 'https://m.qidian.com/',
+          },
+        );
+        final chapters = html.length > 64 * 1024
+            ? await compute(_parseQidianCatalog, html)
+            : _parseQidianCatalog(html);
+        return chapters.isEmpty ? null : chapters;
+      } on Object {
+        return null;
+      }
+    }
+
+    // 移动目录页是静态 SSR，HTTP 即可拿到完整章节，且不必在进入详情时
+    // 初始化 Android 无头 WebView（其创建会占用 UI 线程）。WebView 仅作为
+    // 移动页被反爬拦截时的兜底。
+    // 书籍页也可能带几章“最新章节”，只有 /catalog/ 才是完整目录。
+    if (tocUrl != null && tocUrl.path.contains('/catalog')) {
+      final chapters = await mobileCatalog();
+      if (chapters != null) return chapters;
+    }
     if (bookId.isNotEmpty) {
       try {
         final rows = await QidianSearchWebView.instance.fetchChapterCatalog(
@@ -2134,31 +2273,12 @@ class OfficialBookService {
           if (chapters.isNotEmpty) return chapters;
         }
       } on Object {
-        // 无头目录失败，回退移动端解析。
+        // 无头目录同样失败时按空目录处理。
       }
     }
-    final html = await _getText(
-      Uri.parse(ref.tocUrl ?? ref.bookUrl),
-      headers: const {
-        'Cookie': _qidianCookie,
-        'Referer': 'https://m.qidian.com/',
-      },
-    );
-    final document = html_parser.parse(html);
-    final chapters = <OfficialChapter>[];
-    final seen = <String>{};
-    for (final anchor in document.querySelectorAll('a[data-cid]')) {
-      final cid = anchor.attributes['data-cid']?.trim() ?? '';
-      if (cid.isEmpty || !seen.add(cid)) continue;
-      final title =
-          anchor.querySelector('h2')?.text.trim() ?? anchor.text.trim();
-      final href = anchor.attributes['href']?.trim() ?? '';
-      final url = href.startsWith('//') ? 'https:$href' : href;
-      if (title.isEmpty || url.isEmpty) continue;
-      chapters.add(OfficialChapter(title: title, url: url));
-    }
-    if (chapters.isEmpty) throw const FormatException('起点目录为空');
-    return chapters;
+    final chapters = await mobileCatalog();
+    if (chapters != null) return chapters;
+    throw const FormatException('起点目录为空');
   }
 
   static Future<List<OfficialChapter>> _fanqieChapters(
@@ -2168,11 +2288,9 @@ class OfficialBookService {
     if (bookId.isNotEmpty) {
       try {
         final json = await _getJson(
-          Uri.https(
-            'fanqienovel.com',
-            '/api/reader/directory/detail',
-            {'bookId': bookId},
-          ),
+          Uri.https('fanqienovel.com', '/api/reader/directory/detail', {
+            'bookId': bookId,
+          }),
           headers: _fanqieHeaders,
         );
         if ((_int(json['code']) ?? -1) == 0) {
@@ -2240,7 +2358,10 @@ class OfficialBookService {
 
   static Future<String> _qidianContent(String chapterUrl) async {
     if (chapterUrl.contains('www.qidian.com/chapter/')) {
-      return await QidianSearchWebView.instance.fetchChapterContent(chapterUrl) ?? '';
+      return await QidianSearchWebView.instance.fetchChapterContent(
+            chapterUrl,
+          ) ??
+          '';
     }
     final html = await _getText(
       Uri.parse(chapterUrl),
@@ -2403,4 +2524,24 @@ class OfficialBookService {
     }
     return 0x50000000 | (hash & 0x0fffffff);
   }
+}
+
+/// 大目录页的 DOM 解析放到后台 isolate，避免首次进入详情时阻塞 UI 线程。
+List<OfficialChapter> _parseQidianCatalog(String html) {
+  final document = html_parser.parse(html);
+  final chapters = <OfficialChapter>[];
+  final seen = <String>{};
+  for (final anchor in document.querySelectorAll('a[data-cid]')) {
+    // 目录页顶部还有一张带 h3 的“最新章节”卡片，它复用同一章节地址，
+    // 但不是目录项；只收 h2 章节行。
+    final title = anchor.querySelector('h2')?.text.trim() ?? '';
+    if (title.isEmpty) continue;
+    final href = anchor.attributes['href']?.trim() ?? '';
+    final url = href.startsWith('//') ? 'https:$href' : href;
+    if (url.isEmpty) continue;
+    final cid = anchor.attributes['data-cid']?.trim() ?? '';
+    if (cid.isEmpty || !seen.add(cid)) continue;
+    chapters.add(OfficialChapter(title: title, url: url));
+  }
+  return chapters;
 }

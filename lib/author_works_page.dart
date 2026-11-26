@@ -204,6 +204,7 @@ class _AuthorWorksPageState extends State<AuthorWorksPage> {
                                         _feed.totalItems == null
                                     ? '已显示 ${_feed.items.length} 部作品'
                                     : '${_feed.totalItems} 部作品'),
+                            code: 'AUTHOR / WORKS',
                           ),
                           if (!widget.localOnly)
                             BlockedTagsButton(
@@ -285,7 +286,7 @@ class _AuthorWorksPageState extends State<AuthorWorksPage> {
                   ),
                   SliverPadding(
                     padding: EdgeInsets.only(
-                      bottom: MediaQuery.paddingOf(context).bottom + 24,
+                      bottom: MediaQuery.paddingOf(context).bottom + 32,
                     ),
                     sliver: SliverToBoxAdapter(
                       child: _feed.items.isEmpty && _feed.blockedItemCount > 0

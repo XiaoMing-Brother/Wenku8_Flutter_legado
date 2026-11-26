@@ -21,15 +21,17 @@ ThemeData readerTheme(
   // Dim only the article's ink. Sliders, buttons and text selection retain
   // their readable control contrast while a user previews night text levels.
   final ink = preferences.controlForeground(appDark);
-  final look = preferences.lookFor(preferences.usesNight(appDark));
-  final accent = look.accent ?? ink;
+  final night = preferences.usesNight(appDark);
+  final look = preferences.lookFor(night);
+  final themeAccent = look.theme?.accentFor(night);
+  final accent = look.accent ?? themeAccent ?? ink;
   Color raised(double amount) => Color.lerp(paper, ink, amount)!;
   final scheme = base.colorScheme.copyWith(
     surface: paper,
     onSurface: ink,
     onSurfaceVariant: raised(.64),
     primary: accent,
-    onPrimary: look.accent == null
+    onPrimary: look.accent == null && themeAccent == null
         ? paper
         : ThemeData.estimateBrightnessForColor(accent) == Brightness.dark
         ? Colors.white
@@ -132,6 +134,7 @@ class _ReaderAppearanceState extends State<ReaderAppearance> {
       look.textColor,
       look.accent,
       look.highlight,
+      look.chromeColor,
     );
     final family = widget.state.readerFontFamilyFor(widget.bookId);
     if (_base?.brightness != widget.appTheme.brightness ||

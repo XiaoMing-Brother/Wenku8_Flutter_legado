@@ -497,6 +497,7 @@ class _BookmarkLibraryPageState extends State<BookmarkLibraryPage>
                               '${entries.length} 条记录 · ${groups.length} 本书',
                               style: TextStyle(
                                 fontSize: 12,
+                                height: 1.4,
                                 color: Theme.of(
                                   context,
                                 ).colorScheme.onSurfaceVariant,
@@ -568,8 +569,12 @@ class _BookmarkLibraryPageState extends State<BookmarkLibraryPage>
                                             const SizedBox(height: 6),
                                             AppText(
                                               '${marks.length} 条书签与标记',
-                                              style: const TextStyle(
+                                              style: TextStyle(
                                                 fontSize: 12,
+                                                height: 1.4,
+                                                color: Theme.of(
+                                                  context,
+                                                ).colorScheme.onSurfaceVariant,
                                               ),
                                             ),
                                           ],
@@ -602,59 +607,71 @@ class _BookmarkLibraryPageState extends State<BookmarkLibraryPage>
                         child: ContentPanel(
                           key: ValueKey('my-bookmark-${mark.id}'),
                           onTap: () => _open(entry.novelId, mark),
-                          child: Column(
+                          child: Row(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              if (mark.quote.isNotEmpty ||
-                                  mark.note.isNotEmpty) ...[
-                                ReaderBookmarkExcerpt(mark: mark),
-                                const SizedBox(height: 14),
-                              ],
-                              if (mark.quote.isEmpty && mark.note.isEmpty) ...[
-                                AppText(
-                                  mark.kindLabel,
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                ),
-                                const SizedBox(height: 10),
-                              ],
-                              if (_category != '_book') ...[
-                                AppText(
-                                  novel?.title ?? '书籍 ${entry.novelId}',
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                ),
-                                const SizedBox(height: 6),
-                              ],
-                              AppText(
-                                mark.chapterTitle,
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  height: 1.4,
-                                  color: Theme.of(
-                                    context,
-                                  ).colorScheme.onSurfaceVariant,
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    if (mark.quote.isNotEmpty ||
+                                        mark.note.isNotEmpty) ...[
+                                      ReaderBookmarkExcerpt(mark: mark),
+                                      const SizedBox(height: 14),
+                                    ],
+                                    if (mark.quote.isEmpty &&
+                                        mark.note.isEmpty) ...[
+                                      AppText(
+                                        mark.kindLabel,
+                                        style: const TextStyle(
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 10),
+                                    ],
+                                    if (_category != '_book') ...[
+                                      AppText(
+                                        novel?.title ?? '书籍 ${entry.novelId}',
+                                        style: const TextStyle(
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 6),
+                                    ],
+                                    AppText(
+                                      mark.chapterTitle,
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        height: 1.4,
+                                        color: Theme.of(
+                                          context,
+                                        ).colorScheme.onSurfaceVariant,
+                                      ),
+                                    ),
+                                    if (mark.category.isNotEmpty) ...[
+                                      const SizedBox(height: 6),
+                                      AppText(
+                                        '分类 · ${mark.category}',
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          height: 1.4,
+                                          color: Theme.of(
+                                            context,
+                                          ).colorScheme.onSurfaceVariant,
+                                        ),
+                                      ),
+                                    ],
+                                  ],
                                 ),
                               ),
-                              if (mark.category.isNotEmpty) ...[
-                                const SizedBox(height: 6),
-                                AppText(
-                                  '分类 · ${mark.category}',
-                                  style: const TextStyle(fontSize: 12),
-                                ),
-                              ],
-                              Align(
-                                alignment: Alignment.centerRight,
-                                child: GlassMenuAnchor(
-                                  child: Builder(
-                                    builder: (anchor) => CompactRowMenuButton(
-                                      key: ValueKey('bookmark-menu-${mark.id}'),
-                                      label: '书签 ${mark.id} 更多操作',
-                                      onPressed: () =>
-                                          _openMarkMenu(anchor, entry, novel),
-                                    ),
+                              const SizedBox(width: 8),
+                              GlassMenuAnchor(
+                                child: Builder(
+                                  builder: (anchor) => CompactRowMenuButton(
+                                    key: ValueKey('bookmark-menu-${mark.id}'),
+                                    label: '书签 ${mark.id} 更多操作',
+                                    onPressed: () =>
+                                        _openMarkMenu(anchor, entry, novel),
                                   ),
                                 ),
                               ),

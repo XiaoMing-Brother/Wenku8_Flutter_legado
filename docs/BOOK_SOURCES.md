@@ -11,7 +11,7 @@ Flutter 不解析 `ruleSearch`、`ruleBookInfo`、`ruleToc` 或 `ruleContent`。
 
 - 单个书源对象、书源数组、`sources` / `bookSources` 包装对象导入，书源总量上限 10000 个。
 - 从 `http` / `https` 链接直接下载书源 JSON 导入，单文件上限 128 MB；返回网页的链接会被拒绝。
-- 文字类型 `bookSourceType: 0`；文件类型 `3` 目前按文字规则尝试解析。
+- 文字类型 `bookSourceType: 0`；漫画类型 `2`（含 `ruleContent.imageDecode`）；音频/视频类型 `1` / `4` 按直链规则解析；文件类型 `3` 目前按文字规则尝试解析。
 - 搜索、详情、目录、正文；正文规则返回多条结果时全部拼接，`nextContentUrl` 支持并列多页与串行翻页（最多 100 页），下一页命中下一章时熔断；正文开头与目录重复的章节标题会被剥离，由阅读器单独渲染章节头。正文提取规则升级后，联网阅读会忽略旧版缓存重新抓取一次，离线仍可读旧缓存。
 - `nextTocUrl` 只返回一个有效地址时逐页跟随；返回多个时按给定顺序读取，不再跟随后续页内的分页链接。允许第一页只有分页导航，总计最多读取 20 页。`chapterList` 的 `+` 为正序、`-` 为整份目录倒序；同一章节地址跨页重复只保留一次，无地址的分卷行不会因地址为空而丢失。
 - `ruleToc.isVolume` 标记分卷；卷前章节保持未分卷。`isVip` 为真且 `isPay` 不为真时，目录显示 VIP，不阻止尝试读取；离线快照保留该标记。`formatJs` 在整份目录排序、去重后按行格式化标题，可使用 `title`、从 1 开始的 `index`、本次目录共享的 `gInt`（初始 0），以及 `chapter` 的 `index`（从 0 开始）、`title`、`url`、`baseUrl`、`bookUrl`、`tag`、`isVolume`、`isVip`、`isPay` 属性。脚本出错或返回 `null` / `undefined` 时保留原题，不影响其他章节；未实现 Legado `BookChapter` 的全部原生方法。
@@ -27,14 +27,21 @@ Flutter 不解析 `ruleSearch`、`ruleBookInfo`、`ruleToc` 或 `ruleContent`。
 - 单个书源可编辑名称、分组、搜索地址、发现地址、启用状态和发现开关；源地址作为书源身份保持不变，其他未展示的 Legado 字段继续原样保留。
 - CSS/jsoup 选择器、`tag.` / `class.` / `id.` 写法，以及 `@text` / `@html` / 属性提取。普通元素规则先在每个父节点内匹配，再分别按从 0 开始的索引筛选：`tag.a.0:-1` 选首尾，`tag.a!0:-1` 排除首尾。旧式写法中的冒号分隔多个位置，不表示连续区间。
 - 方括号支持按指定顺序选取、排除和闭区间：`tag.a[2,0]` 先取第三个再取第一个，`tag.a[!0:2]` 排除前三个，`tag.a[-1:0]` 倒序，`tag.a[::2]` 隔一个取一个。省略选择器时（如 `tag.section@[0]`）按直接子元素筛选。普通属性选择器（如 `a[data-id=2]`）仍由 jsoup 处理；显式 `@css:` 和 XPath 不套用这套元素索引。
-- JSONPath（`$.`、`@json:`）、XPath（`//`、`@xpath:`，含 `//a/@href` 属性轴）、正则（`@regex:`）和 JavaScript（`@js:`）；JS 规则返回数组时会逐项展开，避免多段正文或多个下一页地址只取到第一项。
+- JSONPath（`$.`、`@json:`）、XPath（`//`、`/` 绝对路径、`@xpath:`，含 `//a/@href` 属性轴，按无命名空间的 HTML 语义匹配）、正则（`@regex:`）和 JavaScript（`@js:`）；JS 规则返回数组时会逐项展开，避免多段正文或多个下一页地址只取到第一项。`@webjs:` 与 Legado 一致：把当前页面交给后台 WebView 执行脚本，脚本里的 `result` 是前一段规则的结果；没有宿主时退回 Rhino。
+- 规则末尾的 `##匹配##替换` 使用 Java 正则替换语义，支持 `$1`、`$2` 分组（封面地址、章节地址常用）；以 `###` 结尾时只取第一个匹配并返回替换后的片段，与 Legado 一致。CSS/XPath/JSONPath 命中多条结果时，`getString` 按换行拼接，简介、作者、标签不会只剩第一条；JS 规则保持单值。
+- XML 接口（响应 `Content-Type` 为 `application/xml`、`text/xml` 或带 `+xml`）在缺少声明时会补 `<?xml version="1.0"?>`，并按 XML 解析器解析，避免 `<item><title>` 这类标签被 HTML 解析器提升到 `head`。
+- 面向 JS 的 `book` / `chapter` 是实体对象：除字段外支持 `getVariable` / `putVariable` / `deleteVariable`（`putVariable` 返回 `true`），`chapter` 还提供从 0 开始的 `index`。`source.getHeaderMap()` 会合并登录 Header。
+- `ruleBookInfo.init` 只取第一个匹配节点作为后续字段的解析容器；地址类规则（`bookUrl` / `coverUrl` / `tocUrl` / `chapterUrl`）只取首个非空行；文本含 `&` 时按 Legado 默认做 HTML 实体反转义；`kind` 命中多条结果时用逗号拼接；字数支持 `12.3万字`、`1.2亿` 这类中文单位换算成整数。
 - `jsLib` 支持内联 JavaScript，以及 `{"名称":"https://..."}` 形式的远程脚本映射；远程脚本会在当前进程内缓存，加载失败时显示具体行和该行代码。
 - `{{key}}`、`{{page}}`、`{{baseUrl}}` 以及通用 `{{JS 表达式}}`。
 - Android 文字书源的搜索和发现共用分页判断：支持 `{{ page }}`、`{{(page - 1) * 20}}`、引用全局 `page` 的 `@js:` / `<js>` 地址，以及 `<首页,后续页>` 候选写法。页码从 1 开始，候选不足时沿用最后一项；只有有限候选且已用尽时，不再提示下一页。每页不足 10 本仍可翻页，空列表或响应明确表示末页时停止。判断脚本能否翻页不会执行脚本。
 - 请求头、POST 表单/JSON、Cookie、编码检测；搜索地址支持多行回退。
 - 书源封面和正文插图通过原生桥加载，复用书源请求头与 Cookie；正文插图可离线缓存。
+- 封面与漫画插图解密：封面下载后执行 `coverDecodeJs`，漫画正文图片执行 `ruleContent.imageDecode`。脚本里的 `result` 是图片输入流（`read()` 可读），`src` 是图片地址，`book.bookUrl` 是当前书籍地址，可从 `Packages.java.*` 调用解密库；返回字节数组后替换原图，脚本报错或返回非字节内容时保留原图。
+- 正文级 `ruleContent.webJs` / `sourceRegex`：章节地址请求会交给后台 WebView 执行页面脚本并取回结果，`sourceRegex` 用于嗅探真正的内容资源；POST 型地址会先按原方法请求一次，再把响应 HTML 交给 WebView，避免退化为 GET。
 - `java.get` / `java.post` 返回带 `body()`、`statusCode`、`url`、`headers()` 的响应对象。
-- 表单登录：解析 `loginUi`（含 `@js:`、`<js>` 动态表单）和 `loginUrl`，支持 `text`、`password`、`select`、`toggle`、`button` 行，并按 Legado 的 `layout_flexBasisPercent`、`layout_flexGrow`、`layout_wrapBefore` 排列登录卡片。搜索、详情、目录、正文、封面和插图共用该书源的登录状态。原生 HTTP 请求按书源和目标来源（协议、主机、端口）隔离 Cookie，并匹配路径、有效期和 `Secure`；不会把书源登录头自动发给外站图片地址。
+- 批量测速 `java.ajaxTest(url)` / `java.ajaxTestAll(urlList, timeout)` 支持真实超时，失败项把错误码写入 `callTime`（负数）而不是抛出异常。
+- 表单登录：解析 `loginUi`（含 `@js:`、`<js>` 动态表单）和 `loginUrl`，支持 `text`、`password`、`select`、`toggle`、`button` 行，并按 Legado 的 `layout_flexBasisPercent`、`layout_flexGrow`、`layout_wrapBefore` 排列登录卡片。首次打开表单会先用 `loginUi` 默认值回填登录信息再重建一次，依赖开关默认值的条件字段（如“自订模式”后的颜色/圆角/高度）会完整显示。搜索、详情、目录、正文、封面和插图共用该书源的登录状态。原生 HTTP 请求按书源和目标来源（协议、主机、端口）隔离 Cookie，并匹配路径、有效期和 `Secure`；不会把书源登录头自动发给外站图片地址。
 - `enabledCookieJar: false` 关闭自动接收响应的 `Set-Cookie`，不禁用显式登录 Cookie；启用时也接收各跳重定向的 Cookie。单次 URL 选项中的 Cookie 覆盖同名值，不丢弃其他已保存的 Cookie。
 - 登录或退出后，当前书源的封面、插图和失败重试缓存失效，其他书源及已下载的离线文件不变。退出前已经发出的图片请求不能通过迟到的 `Set-Cookie` 恢复该会话。
 - 登录信息、登录 Header 和 Cookie 使用 Android Keystore 加密保存；书源管理页的更多菜单可登录或退出登录，书源展开的发现区会显示当前登录状态并提供登录入口。

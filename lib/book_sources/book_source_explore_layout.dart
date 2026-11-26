@@ -42,14 +42,18 @@ List<List<BookSourceLoginCell>> buildBookSourceLoginRows(
   fields,
   maxSpan: maxSpan,
   spanOf: (field) => switch (field) {
-    _ when field.isText || field.wrapBefore || field.basisPercent >= 1 =>
+    _
+        when field.isText ||
+            field.isPassword ||
+            field.wrapBefore ||
+            field.basisPercent >= 1 =>
       maxSpan,
     _ when field.basisPercent > 0 =>
       (maxSpan * field.basisPercent).round().clamp(1, maxSpan).toInt(),
     _ when field.flexGrow > 0 => 3,
     _ => 2,
   },
-  wrapBefore: (field) => field.isText || field.wrapBefore,
+  wrapBefore: (field) => field.isText || field.isPassword || field.wrapBefore,
   withSpan: BookSourceLoginCell.new,
 );
 

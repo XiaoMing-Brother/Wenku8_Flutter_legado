@@ -54,12 +54,13 @@ class ReaderLook {
     this.textColor,
     this.accent,
     this.highlight,
+    this.chromeColor,
   });
 
   final ReaderPaper paper;
   final ReaderThemeSelection? theme;
   final String? backgroundImage;
-  final Color? baseColor, textColor, accent, highlight;
+  final Color? baseColor, textColor, accent, highlight, chromeColor;
   String get choiceKey =>
       theme == null ? 'paper:${paper.name}' : 'theme:${theme!.id}';
   String get label => theme?.name ?? paper.label;
@@ -75,6 +76,7 @@ class ReaderLook {
     if (textColor != null) 'textColor': textColor!.toARGB32(),
     if (accent != null) 'accent': accent!.toARGB32(),
     if (highlight != null) 'highlight': highlight!.toARGB32(),
+    if (chromeColor != null) 'chromeColor': chromeColor!.toARGB32(),
     if (theme != null) 'theme': theme!.toJson(),
     if (backgroundImage != null) 'backgroundImage': backgroundImage,
   };
@@ -99,6 +101,9 @@ class ReaderLook {
       textColor: json['textColor'] is int ? Color(json['textColor']) : null,
       accent: json['accent'] is int ? Color(json['accent']) : null,
       highlight: json['highlight'] is int ? Color(json['highlight']) : null,
+      chromeColor: json['chromeColor'] is int
+          ? Color(json['chromeColor'])
+          : null,
     );
   }
 }
@@ -136,11 +141,61 @@ bool readerLayoutIsPaginated(String layout) => layout
 enum ReaderTapLayout {
   standard('常规'),
   rightHand('右手'),
-  leftHand('左手');
+  leftHand('左手'),
+  custom('九宫格');
 
   const ReaderTapLayout(this.label);
   final String label;
 }
+
+enum ReaderTapAction {
+  controls('显示／隐藏控件'),
+  previous('上一页'),
+  next('下一页'),
+  previousChapter('上一章'),
+  nextChapter('下一章'),
+  catalogue('目录'),
+  bookmark('加书签'),
+  find('正文查找'),
+  playback('暂停／继续听书'),
+  none('无动作');
+
+  const ReaderTapAction(this.label);
+  final String label;
+
+  static const defaultGrid = [
+    previous,
+    controls,
+    next,
+    previous,
+    controls,
+    next,
+    previous,
+    controls,
+    next,
+  ];
+
+  static List<ReaderTapAction> readGrid(Object? raw) {
+    if (raw is! List || raw.length != 9) return defaultGrid;
+    final actions = [
+      for (final value in raw)
+        values.where((action) => action.name == value).firstOrNull,
+    ];
+    if (actions.contains(null) || !actions.contains(controls)) {
+      return defaultGrid;
+    }
+    return List.unmodifiable(actions.cast<ReaderTapAction>());
+  }
+
+  static int cell(double x, double y) =>
+      (y * 3).floor().clamp(0, 2) * 3 + (x * 3).floor().clamp(0, 2);
+}
+
+List<int> _pageKeys(Object? raw) => raw is List
+    ? List.unmodifiable(
+        raw.whereType<int>().where((code) => code > 0 && code <= 65535).toSet(),
+      )
+    : const [];
 
 enum ReaderPageEffect {
   staggered('段落接续'),
@@ -241,6 +296,9 @@ class ReaderPreferences {
     this.mode = ReaderMode.scroll,
     this.verticalLatinOrientation = ReaderVerticalLatinOrientation.rotated,
     this.tapLayout = ReaderTapLayout.standard,
+    this.tapGrid = ReaderTapAction.defaultGrid,
+    this.previousKeys = const [],
+    this.nextKeys = const [],
     this.edgeBrightness = false,
     this.pageEffect = ReaderPageEffect.staggered,
     this.pageSpeed = ReaderPageSpeed.normal,
@@ -255,6 +313,7 @@ class ReaderPreferences {
     this.titlePosition = ReaderTitlePosition.start,
     this.titleTopSpacing = 0,
     this.titleBottomSpacing = 28,
+    this.pagedChapterHeading = false,
     this.imageTap = ReaderImageTap.open,
     this.statusSideInset = 0,
     this.statusFontSize = 12,
@@ -318,8 +377,9 @@ class ReaderPreferences {
   ReaderPreferences removeCard(bool night, ReaderLook look) {
     final cards = shelf(night);
     if (cards.length <= 1 ||
-        !cards.any((card) => card.choiceKey == look.choiceKey))
+        !cards.any((card) => card.choiceKey == look.choiceKey)) {
       return this;
+    }
     final remaining = cards
         .where((card) => card.choiceKey != look.choiceKey)
         .toList();
@@ -361,6 +421,7 @@ class ReaderPreferences {
             textColor: saved.textColor,
             accent: saved.accent,
             highlight: saved.highlight,
+            chromeColor: saved.chromeColor,
           );
   }
 
@@ -425,6 +486,8 @@ class ReaderPreferences {
   final ReaderMode mode;
   final ReaderVerticalLatinOrientation verticalLatinOrientation;
   final ReaderTapLayout tapLayout;
+  final List<ReaderTapAction> tapGrid;
+  final List<int> previousKeys, nextKeys;
   final bool edgeBrightness;
   final ReaderPageEffect pageEffect;
   final ReaderPageSpeed pageSpeed;
@@ -440,6 +503,9 @@ class ReaderPreferences {
   final double titleScale, titleTopSpacing, titleBottomSpacing;
   final ReaderTextWeight titleWeight;
   final ReaderTitlePosition titlePosition;
+
+  /// 翻页模式是否在正文顶部绘制「章号 + 章名」两行标题（对标 RM 阅读页）。
+  final bool pagedChapterHeading;
   final ReaderImageTap imageTap;
   final double statusSideInset;
   final double statusFontSize, statusTopOffset;
@@ -476,7 +542,7 @@ class ReaderPreferences {
     ReaderTip.none,
   ];
 
-  /// 固定的页脚槽位：左页码 / 中书名 / 右时间+电量（用户不再配置）。
+  /// 固定的页脚槽位：左章节进度 / 中书名 / 右时间+电量（信息位固定，不允许修改）。
   static const List<ReaderTip> fixedFooterTips = [
     ReaderTip(value: ReaderTipValue.page),
     ReaderTip(value: ReaderTipValue.bookName),
@@ -576,6 +642,15 @@ class ReaderPreferences {
         : controlForeground(dark);
   }
 
+  /// 页眉页脚使用独立的弱化色；未设置时沿用正文色，保持旧主题观感。
+  Color chromeForeground(bool appDark) {
+    final night = usesNight(appDark);
+    final look = lookFor(night);
+    return look.chromeColor ??
+        look.theme?.chromeFor(night) ??
+        controlForeground(appDark);
+  }
+
   Map<String, Object?> toJson() => {
     if (nightLook != null) 'nightLook': nightLook!.toJson(),
     if (dayShelf.isNotEmpty)
@@ -608,6 +683,9 @@ class ReaderPreferences {
     'mode': mode.name,
     'verticalLatinOrientation': verticalLatinOrientation.name,
     'tapLayout': tapLayout.name,
+    'tapGrid': [for (final action in tapGrid) action.name],
+    'previousKeys': previousKeys,
+    'nextKeys': nextKeys,
     'edgeBrightness': edgeBrightness,
     'pageEffect': pageEffect.name,
     'pageSpeed': pageSpeed.name,
@@ -622,6 +700,7 @@ class ReaderPreferences {
     'titlePosition': titlePosition.name,
     'titleTopSpacing': titleTopSpacing,
     'titleBottomSpacing': titleBottomSpacing,
+    'pagedChapterHeading': pagedChapterHeading,
     'imageTap': imageTap.name,
     'statusSideInset': statusSideInset,
     'statusFontSize': statusFontSize,
@@ -684,6 +763,7 @@ class ReaderPreferences {
     final theme = rawTheme is Map
         ? ReaderThemeSelection.fromJson(Map<String, dynamic>.from(rawTheme))
         : null;
+    final previousKeys = _pageKeys(json['previousKeys']);
     return ReaderPreferences(
       paper: ReaderPaper.values.firstWhere(
         (p) => p.name == (json['paper'] ?? 'system'),
@@ -749,6 +829,7 @@ class ReaderPreferences {
       ),
       titleTopSpacing: number('titleTopSpacing', 0, 200, 0),
       titleBottomSpacing: number('titleBottomSpacing', 0, 200, 28),
+      pagedChapterHeading: json['pagedChapterHeading'] == true,
       imageTap: ReaderImageTap.values.byName(json['imageTap'] ?? 'open'),
       statusSideInset: number('statusSideInset', 0, 96, 0),
       statusFontSize: number('statusFontSize', 9, 18, 12),
@@ -764,6 +845,11 @@ class ReaderPreferences {
         json['verticalLatinOrientation'] ?? 'rotated',
       ),
       tapLayout: ReaderTapLayout.values.byName(json['tapLayout'] ?? 'standard'),
+      tapGrid: ReaderTapAction.readGrid(json['tapGrid']),
+      previousKeys: previousKeys,
+      nextKeys: _pageKeys(
+        json['nextKeys'],
+      ).where((code) => !previousKeys.contains(code)).toList(),
       edgeBrightness: json['edgeBrightness'] == true,
       hideSystemStatus: json['hideSystemStatus'] == true,
       showStatusInfo: json['showStatusInfo'] != false,
@@ -855,6 +941,9 @@ class ReaderPreferences {
     ReaderMode? mode,
     ReaderVerticalLatinOrientation? verticalLatinOrientation,
     ReaderTapLayout? tapLayout,
+    List<ReaderTapAction>? tapGrid,
+    List<int>? previousKeys,
+    List<int>? nextKeys,
     bool? edgeBrightness,
     ReaderPageEffect? pageEffect,
     ReaderPageSpeed? pageSpeed,
@@ -869,6 +958,7 @@ class ReaderPreferences {
     ReaderTitlePosition? titlePosition,
     double? titleTopSpacing,
     double? titleBottomSpacing,
+    bool? pagedChapterHeading,
     ReaderImageTap? imageTap,
     double? statusSideInset,
     double? statusFontSize,
@@ -915,6 +1005,9 @@ class ReaderPreferences {
     verticalLatinOrientation:
         verticalLatinOrientation ?? this.verticalLatinOrientation,
     tapLayout: tapLayout ?? this.tapLayout,
+    tapGrid: tapGrid ?? this.tapGrid,
+    previousKeys: previousKeys ?? this.previousKeys,
+    nextKeys: nextKeys ?? this.nextKeys,
     edgeBrightness: edgeBrightness ?? this.edgeBrightness,
     pageEffect: pageEffect ?? this.pageEffect,
     pageSpeed: pageSpeed ?? this.pageSpeed,
@@ -929,6 +1022,7 @@ class ReaderPreferences {
     titlePosition: titlePosition ?? this.titlePosition,
     titleTopSpacing: titleTopSpacing ?? this.titleTopSpacing,
     titleBottomSpacing: titleBottomSpacing ?? this.titleBottomSpacing,
+    pagedChapterHeading: pagedChapterHeading ?? this.pagedChapterHeading,
     imageTap: imageTap ?? this.imageTap,
     statusSideInset: statusSideInset ?? this.statusSideInset,
     statusFontSize: statusFontSize ?? this.statusFontSize,
@@ -985,6 +1079,9 @@ class ReaderPreferences {
     brightness: brightness,
     autoScrollSpeed: autoScrollSpeed,
     tapLayout: tapLayout,
+    tapGrid: tapGrid,
+    previousKeys: previousKeys,
+    nextKeys: nextKeys,
     edgeBrightness: edgeBrightness,
     pageEffect: pageEffect,
     pageSpeed: pageSpeed,

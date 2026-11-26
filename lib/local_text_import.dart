@@ -84,7 +84,8 @@ Stream<({String text, int heading, int start, int end})> _classified(
     await for (final line in localTextLines(chunks)) {
       final text = line.text.trim();
       if (text.isEmpty) continue;
-      final eligible = line.heading && text.length <= 90;
+      final eligible =
+          line.heading && text.length <= 90 && !localLooksLikeSiteHeader(text);
       final candidate = eligible ? defaultLocalHeadingCandidate(text) : text;
       final heading = !eligible
           ? localHeadingNone
@@ -181,12 +182,18 @@ indexTextChapters(
       .last
       .replaceFirst(RegExp(r'\.txt$', caseSensitive: false), '');
   if (title.length > 2048) title = title.substring(0, 2048);
-  void flush() {
+  void flush({bool atHeading = false}) {
     if (length == 0) return;
     if (chapters.length >= 10000) {
       throw const FormatException('TXT 章节超过 10000 个，请拆分原书后导入');
     }
-    final displayTitle = hasTitle || options.autoTitles ? title : '正文';
+    // 首个章节标题之前的正文（简介/盗版头）统一命名为「前言」，与阅读器习惯一致。
+    final leading = atHeading && !hasTitle && chapters.isEmpty;
+    final displayTitle = leading
+        ? '前言'
+        : hasTitle || options.autoTitles
+        ? title
+        : '正文';
     chapters.add(
       NovelChapter(
         part == 0 ? displayTitle : '$displayTitle · 片段 ${part + 1}',
@@ -206,14 +213,14 @@ indexTextChapters(
   await for (final line in _classified(chunks, options)) {
     final value = line.text;
     if (line.heading == localHeadingVolume) {
-      flush();
+      flush(atHeading: true);
       volume = value;
       volumeId++;
       title = value;
       hasTitle = true;
       part = 0;
     } else if (line.heading == localHeadingChapter) {
-      flush();
+      flush(atHeading: true);
       title = value;
       hasTitle = true;
       part = 0;

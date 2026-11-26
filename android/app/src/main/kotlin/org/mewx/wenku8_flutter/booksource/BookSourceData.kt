@@ -10,9 +10,14 @@ internal data class BookData(
     val lastChapter: String = "",
     val updateTime: String = "",
     val tocUrl: String = "",
+    val wordCount: String = "",
+    val durChapterTitle: String = "",
+    val durChapterIndex: Int = 0,
+    val pendingVariables: MutableMap<String, String> = mutableMapOf(),
 )
 
 internal data class ChapterData(
+    val index: Int = 0,
     val title: String = "",
     val url: String = "",
     val nextUrl: String = "",
@@ -22,6 +27,8 @@ internal data class ChapterData(
     val isVolume: Boolean = false,
     val isVip: Boolean = false,
     val isPay: Boolean = false,
+    val variableUrl: String = "",
+    val pendingVariables: MutableMap<String, String> = mutableMapOf(),
 )
 
 internal data class RuleContext(
@@ -32,4 +39,5 @@ internal data class RuleContext(
     val book: BookData? = null,
     val chapter: ChapterData? = null,
     val redirectUrl: String = "",
+    val fromBookInfo: Boolean = false,
 )

@@ -2,13 +2,11 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 
 import 'app_ui.dart';
-import 'reader_header_footer.dart';
 import 'reader_preferences.dart';
-import 'reader_tip.dart';
 
-/// 页眉 / 页脚配置（可在阅读样式弹窗内直接嵌入，无需跳转整页）。
+/// 页眉 / 页脚边距配置（信息位固定，只允许调整三区内边距）。
 ///
-/// 顶部展示实时预览，下方配置页眉、页脚与正文的内边距，改动即时回写阅读偏好。
+/// 页眉左侧固定「第几章 章节名」；页脚左进度、中书名、右时间/电量。
 class ReaderHeaderFooterConfig extends StatefulWidget {
   const ReaderHeaderFooterConfig({
     super.key,
@@ -34,43 +32,27 @@ class _ReaderHeaderFooterConfigState extends State<ReaderHeaderFooterConfig> {
     widget.onChanged(next);
   }
 
-  void _reset() => _apply(
-    _prefs.copyWith(
-      headerTips: const [ReaderTip.none, ReaderTip.none, ReaderTip.none],
-      footerTips: const [ReaderTip.none, ReaderTip.none, ReaderTip.none],
-    ),
-  );
-
   @override
   Widget build(BuildContext context) {
     return ListView(
       padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
       children: [
-        const ArchiveSection(title: '页眉与页脚', code: 'READER / HEADER'),
+        const ArchiveSection(title: '页边距', code: 'READER / PADDING'),
         const SizedBox(height: 8),
-        const ArchiveSection(title: '预览', code: 'HEADER / PREVIEW'),
-        const SizedBox(height: 8),
-        _HeaderFooterPreview(prefs: _prefs),
-        const SizedBox(height: 4),
-        Align(
-          alignment: Alignment.centerRight,
-          child: GlassTextButton(
-            key: const ValueKey('reader-header-footer-reset'),
-            compact: true,
-            onPressed: _reset,
-            child: const AppText('恢复默认'),
-          ),
+        const AppText(
+          '页眉与页脚的信息位固定：页眉左侧「第几章 章节名」；页脚左侧进度、中间书名、右侧时间/电量。此处只调整三区内边距。',
+          style: TextStyle(fontSize: 12, height: 1.6),
         ),
         const SizedBox(height: 8),
-        const ArchiveSection(title: '页眉内边距', code: 'HEADER / PADDING'),
+        const ArchiveSection(title: '页眉内边距', code: 'READER / HEADER PADDING'),
         const SizedBox(height: 4),
         ..._headerPadFields(),
         const SizedBox(height: 8),
-        const ArchiveSection(title: '页脚内边距', code: 'FOOTER / PADDING'),
+        const ArchiveSection(title: '页脚内边距', code: 'READER / FOOTER PADDING'),
         const SizedBox(height: 4),
         ..._footerPadFields(),
         const SizedBox(height: 8),
-        const ArchiveSection(title: '正文边距', code: 'BODY / PADDING'),
+        const ArchiveSection(title: '正文边距', code: 'READER / BODY PADDING'),
         const SizedBox(height: 4),
         ..._bodyPadFields(),
       ],
@@ -152,61 +134,6 @@ class _ReaderHeaderFooterConfigState extends State<ReaderHeaderFooterConfig> {
       f('左', _prefs.leftMargin, (x) => _prefs.copyWith(marginLeft: x)),
       f('右', _prefs.rightMargin, (x) => _prefs.copyWith(marginRight: x)),
     ];
-  }
-}
-
-/// 设置页顶部的页眉 / 页脚实时预览（示例数据）。
-class _HeaderFooterPreview extends StatelessWidget {
-  const _HeaderFooterPreview({required this.prefs});
-
-  final ReaderPreferences prefs;
-
-  static const _sample = ReaderTipContext(
-    bookName: '示例书名',
-    chapterTitle: '第三章 起风',
-    chapterIndex: 2,
-    chapterCount: 120,
-    pageIndex: 4,
-    pageCount: 10,
-    readProgress: '23.4%',
-    time: '09:30',
-    batteryPercent: 87,
-    hasBattery: true,
-  );
-
-  @override
-  Widget build(BuildContext context) {
-    final muted = Theme.of(context).colorScheme.onSurfaceVariant;
-    final line = TextStyle(fontSize: 12, color: muted);
-    final headerEmpty = ReaderInfoStrip.isEmpty(prefs.headerTips);
-    final footerEmpty = ReaderInfoStrip.isEmpty(prefs.footerTips);
-    return ContentPanel(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          if (headerEmpty)
-            AppText('页眉：未设置', style: line)
-          else
-            ReaderInfoStrip(
-              tips: prefs.headerTips,
-              tipContext: _sample,
-              style: line,
-            ),
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 10),
-            child: AppText('—— 正文示例 ——', style: line),
-          ),
-          if (footerEmpty)
-            AppText('页脚：未设置', style: line)
-          else
-            ReaderInfoStrip(
-              tips: prefs.footerTips,
-              tipContext: _sample,
-              style: line,
-            ),
-        ],
-      ),
-    );
   }
 }
 

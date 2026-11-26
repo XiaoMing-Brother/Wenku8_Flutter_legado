@@ -940,7 +940,7 @@ class _ReaderIllustrationGalleryState extends State<ReaderIllustrationGallery> {
           ),
           title: ArchiveRouteTitle(
             title: widget.title,
-            code: 'IMAGE / ${_page + 1} OF ${widget.urls.length}',
+            code: 'READER / ILLUSTRATION',
           ),
           actions: [if (!LocalPlatform.harmony) _saveButton(context)],
         ),

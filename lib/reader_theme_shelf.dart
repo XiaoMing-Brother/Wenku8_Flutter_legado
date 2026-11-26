@@ -46,6 +46,8 @@ class _ReaderThemeShelfState extends State<ReaderThemeShelf> {
       nightTextBrightness: widget.preferences.nightTextBrightness,
     );
     final ink = preview.foreground(group);
+    final chrome = preview.chromeForeground(group);
+    final accent = look.accent ?? look.theme?.accentFor(group) ?? ink;
     return ClipRRect(
       borderRadius: BorderRadius.circular(10),
       child: ReaderBackground(
@@ -58,34 +60,50 @@ class _ReaderThemeShelfState extends State<ReaderThemeShelf> {
         child:
             overlay ??
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
-              child: Align(
-                alignment: Alignment.centerLeft,
-                child: Text.rich(
-                  TextSpan(
-                    style: TextStyle(color: ink, fontSize: 13),
-                    children: [
-                      TextSpan(text: '雨停了，'),
-                      TextSpan(
-                        text: '长街',
-                        style: TextStyle(
-                          backgroundColor:
-                              look.highlight ?? ink.withValues(alpha: .14),
-                        ),
-                      ),
-                      const TextSpan(text: '尽头亮起一盏灯。'),
-                      TextSpan(
-                        text: '  01',
-                        style: TextStyle(
-                          color: look.accent ?? ink,
-                          fontSize: 10,
-                        ),
-                      ),
-                    ],
+              padding: const EdgeInsets.fromLTRB(8, 4, 8, 4),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text(
+                    '第一章 起风',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(color: chrome, fontSize: 8, height: 1.2),
                   ),
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                ),
+                  Expanded(
+                    child: Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text.rich(
+                        TextSpan(
+                          style: TextStyle(color: ink, fontSize: 13),
+                          children: [
+                            TextSpan(text: '雨停了，'),
+                            TextSpan(
+                              text: '长街',
+                              style: TextStyle(
+                                backgroundColor:
+                                    look.highlight ??
+                                    ink.withValues(alpha: .14),
+                              ),
+                            ),
+                            const TextSpan(text: '尽头亮起一盏灯。'),
+                            TextSpan(
+                              text: '  01',
+                              style: TextStyle(color: accent, fontSize: 10),
+                            ),
+                          ],
+                        ),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ),
+                  Text(
+                    '12 / 240',
+                    textAlign: TextAlign.right,
+                    style: TextStyle(color: chrome, fontSize: 8, height: 1.2),
+                  ),
+                ],
               ),
             ),
       ),
@@ -107,8 +125,9 @@ class _ReaderThemeShelfState extends State<ReaderThemeShelf> {
             draft.textColor,
             draft.accent,
             draft.highlight,
+            draft.chromeColor,
           ];
-          const labels = ['背景色', '正文字色', '强调色', '高亮底色'];
+          const labels = ['背景色', '正文字色', '强调色', '高亮底色', '页眉页脚色'];
           ReaderLook update({String? image, bool replaceImage = false}) =>
               ReaderLook(
                 paper: draft.paper,
@@ -118,6 +137,7 @@ class _ReaderThemeShelfState extends State<ReaderThemeShelf> {
                 textColor: colors[1],
                 accent: colors[2],
                 highlight: colors[3],
+                chromeColor: colors[4],
               );
           return ListView(
             padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
@@ -198,15 +218,12 @@ class _ReaderThemeShelfState extends State<ReaderThemeShelf> {
                 ),
               GlassTextButton(
                 onPressed: () async {
-                  var original = initial.theme;
-                  if (original != null) {
+                  final current = initial.theme;
+                  var original = current;
+                  if (current != null) {
                     try {
-                      final catalog = await LegadoReaderThemes.load();
                       original =
-                          catalog
-                              .where((item) => item.id == initial.theme!.id)
-                              .firstOrNull
-                              ?.selection ??
+                          await readerThemeSelectionById(current.id) ??
                           original;
                     } catch (_) {
                       if (sheet.mounted) showNovelFeedback(sheet, '无法读取原主题');
@@ -259,12 +276,13 @@ class _ReaderThemeShelfState extends State<ReaderThemeShelf> {
       context,
       title: '删除主题？',
       message:
-          '「${look.label}」将从本机${group ? '夜间' : '日间'}主题列表移除。${fallback}另一组主题、背景图片和阅读进度均保留。',
+          '「$look.label」将从本机${group ? '夜间' : '日间'}主题列表移除。$fallback另一组主题、背景图片和阅读进度均保留。',
       confirmLabel: '删除主题',
       reduceMotion: widget.reduceMotion,
     );
-    if (mounted && confirmed)
+    if (mounted && confirmed) {
       widget.onChanged(widget.preferences.removeCard(group, look));
+    }
   }
 
   @override
@@ -370,7 +388,7 @@ class _ReaderThemeShelfState extends State<ReaderThemeShelf> {
                 ).background(group);
             final outline = readerCardOutline(
               paper,
-              accent: look.accent ?? look.theme?.control,
+              accent: look.accent ?? look.theme?.accentFor(group),
             );
             final selected =
                 activeNight == group &&
@@ -463,7 +481,7 @@ class _ReaderThemeShelfState extends State<ReaderThemeShelf> {
                   if (selected)
                     Positioned(
                       top: 6,
-                      right: 6,
+                      left: 6,
                       child: IgnorePointer(
                         child: CircleAvatar(
                           radius: 10,
@@ -482,7 +500,7 @@ class _ReaderThemeShelfState extends State<ReaderThemeShelf> {
                     ),
                   Positioned(
                     top: 2,
-                    left: 2,
+                    right: 2,
                     child: GlassMenuAnchor(
                       child: Builder(
                         builder: (anchor) => GlassIconButton(

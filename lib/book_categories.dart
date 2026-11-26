@@ -100,7 +100,15 @@ Future<void> showBookCategories(
           children: [
             const ArchiveSection(title: '按作者分类', code: 'LIBRARY / AUTHORS'),
             const SizedBox(height: 16),
-            if (authors.isEmpty) const AppText('当前书库暂无作者信息'),
+            if (authors.isEmpty)
+              const SizedBox(
+                height: 180,
+                child: ContentNotice(
+                  icon: CupertinoIcons.person,
+                  title: '暂无作者信息',
+                  message: '书籍导入并识别作者后，会显示在这里。',
+                ),
+              ),
             for (final author in authors)
               GlassTextButton(
                 key: ValueKey('category-author-$author'),

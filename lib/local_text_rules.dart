@@ -20,6 +20,11 @@ String defaultLocalHeadingCandidate(String line) {
   return candidate;
 }
 
+/// 盗版站头部/元信息行（“第1话 · 《书名》（校对版全本） 作者：xxx”）容易被
+/// 章节正则误判为首章；这类行不应作为目录项，其后的简介正文归入「前言」。
+final _siteHeaderLine = RegExp(r'作者\s*[:：]|校对版|精校版|校对全本');
+bool localLooksLikeSiteHeader(String line) => _siteHeaderLine.hasMatch(line);
+
 /// A custom expression runs in one small, persistent rule worker per import.
 /// Only matching is timed: slow file I/O never looks like a stuck expression,
 /// and a bad rule cannot freeze the UI or strand the book-import worker.

@@ -1,15 +1,14 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
 import 'app_ui.dart';
-import 'app_interactions.dart';
 import 'book_collection_mode.dart';
 import 'book_grid_density.dart';
 import 'book_grid_density_controls.dart';
 import 'book_shelf_preferences.dart';
 import 'book_shelf_content_preferences.dart';
 import 'glass_choices.dart';
+import 'reader_tools.dart';
 import 'setting_menu.dart';
 
 /// Region-specific view sheets never change the other region's presentation.
@@ -74,7 +73,7 @@ class BookCollectionViewOptions extends StatelessWidget {
           BookCollectionViewTarget.shelf => '立体书架视图',
           BookCollectionViewTarget.collection => '列表与宫格',
         },
-        code: 'COLLECTION / VIEW',
+        code: 'LIBRARY / VIEW',
       ),
       if (target == BookCollectionViewTarget.all)
         GlassChoiceGroup<BookCollectionMode>(
@@ -252,7 +251,7 @@ class BookShelfContentOptions extends StatelessWidget {
     crossAxisAlignment: CrossAxisAlignment.stretch,
     children: [
       if (showHeader)
-      const ArchiveSection(title: '立体书架筛选', code: 'SHELF / FILTER'),
+        const ArchiveSection(title: '立体书架筛选', code: 'LIBRARY / FILTER'),
       if (showFollow) ...[
         const SizedBox(height: 16),
         _ShelfToggle(
@@ -383,7 +382,7 @@ class _ShelfToggle extends StatelessWidget {
   );
 }
 
-class _ShelfCountSetting extends StatefulWidget {
+class _ShelfCountSetting extends StatelessWidget {
   const _ShelfCountSetting({
     super.key,
     required this.label,
@@ -396,98 +395,15 @@ class _ShelfCountSetting extends StatefulWidget {
   final ValueChanged<int> onChanged;
 
   @override
-  State<_ShelfCountSetting> createState() => _ShelfCountSettingState();
-}
-
-class _ShelfCountSettingState extends State<_ShelfCountSetting> {
-  late final _text = TextEditingController(text: '${widget.value}');
-  late final _focus = FocusNode()..addListener(_focusChanged);
-
-  void _focusChanged() {
-    if (!_focus.hasFocus) _finish();
-  }
-
-  void _finish() {
-    final value = int.tryParse(_text.text);
-    if (value == null || value < 1 || value > BookShelfPreferences.maximum) {
-      _text.text = '${widget.value}';
-      showNovelFeedback(context, '请输入 1–100 本');
-      return;
-    }
-    _commit(value);
-  }
-
-  void _commit(int value) {
-    _text.text = '$value';
-    if (value != widget.value) widget.onChanged(value);
-  }
-
-  void _step(int delta) {
-    final value = int.tryParse(_text.text) ?? widget.value;
-    _commit((value + delta).clamp(1, BookShelfPreferences.maximum));
-  }
-
-  @override
-  void didUpdateWidget(_ShelfCountSetting oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (!_focus.hasFocus) _text.text = '${widget.value}';
-  }
-
-  @override
-  void dispose() {
-    _focus.removeListener(_focusChanged);
-    _focus.dispose();
-    _text.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) => Row(
-    children: [
-      Expanded(
-        child: AppText(widget.label, style: const TextStyle(fontSize: 13)),
-      ),
-      const SizedBox(width: 8),
-      GlassIconButton(
-        icon: CupertinoIcons.minus,
-        label: '减少${widget.label}',
-        onPressed: widget.value > 1 ? () => _step(-1) : null,
-      ),
-      SizedBox(
-        width: 54,
-        child: CupertinoTextField(
-          key: ValueKey('${widget.key}-input'),
-          controller: _text,
-          focusNode: _focus,
-          keyboardType: TextInputType.number,
-          textInputAction: TextInputAction.done,
-          inputFormatters: [
-            FilteringTextInputFormatter.digitsOnly,
-            LengthLimitingTextInputFormatter(3),
-          ],
-          textAlign: TextAlign.center,
-          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 2),
-          style: TextStyle(
-            color: Theme.of(context).colorScheme.onSurface,
-            fontSize: 16,
-            fontWeight: FontWeight.w600,
-          ),
-          decoration: const BoxDecoration(),
-          onTap: () => _text.selection = TextSelection(
-            baseOffset: 0,
-            extentOffset: _text.text.length,
-          ),
-          onTapOutside: (_) => _focus.unfocus(),
-          onSubmitted: (_) => _focus.unfocus(),
-        ),
-      ),
-      GlassIconButton(
-        icon: CupertinoIcons.plus,
-        label: '增加${widget.label}',
-        onPressed: widget.value < BookShelfPreferences.maximum
-            ? () => _step(1)
-            : null,
-      ),
-    ],
+  Widget build(BuildContext context) => ReaderValueSlider(
+    sliderKey: ValueKey('shelf-count-$label'),
+    label: label,
+    value: value.toDouble(),
+    min: 1,
+    max: BookShelfPreferences.maximum.toDouble(),
+    divisions: BookShelfPreferences.maximum - 1,
+    format: (value) => '${value.round()} 本',
+    onCommitted: (value) => onChanged(value.round()),
+    stepper: true,
   );
 }

@@ -356,10 +356,11 @@ class _ChangeCoverSheetState extends State<ChangeCoverSheet> {
                         spacing: 8,
                         children: [
                           for (final name in albums)
-                            ChoiceChip(
-                              label: AppText(name),
+                            GlassTextButton(
+                              compact: true,
                               selected: _album == name,
-                              onSelected: (_) => setState(() => _album = name),
+                              onPressed: () => setState(() => _album = name),
+                              child: AppText(name),
                             ),
                         ],
                       ),

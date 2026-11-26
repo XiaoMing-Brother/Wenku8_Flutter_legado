@@ -533,7 +533,7 @@ class _ReadingReportPageState extends State<ReadingReportPage> {
   Widget _controls(BuildContext context) => Column(
     crossAxisAlignment: CrossAxisAlignment.stretch,
     children: [
-      const ArchiveSection(title: '版式与配色', code: '01 / ART DIRECTION'),
+      const ArchiveSection(title: '版式与配色', code: 'REPORT / ART DIRECTION'),
       const SizedBox(height: 16),
       ReadingVisualThemePicker(
         value: _options.template.theme,
@@ -582,7 +582,7 @@ class _ReadingReportPageState extends State<ReadingReportPage> {
         ],
       ),
       const SizedBox(height: 28),
-      const ArchiveSection(title: '这段时间', code: '02 / DATE RANGE'),
+      const ArchiveSection(title: '这段时间', code: 'REPORT / DATE RANGE'),
       const SizedBox(height: 14),
       Wrap(
         spacing: 7,
@@ -621,7 +621,7 @@ class _ReadingReportPageState extends State<ReadingReportPage> {
         ),
       ),
       const SizedBox(height: 26),
-      const ArchiveSection(title: '写上你的名字', code: '03 / PERSONAL DETAILS'),
+      const ArchiveSection(title: '写上你的名字', code: 'REPORT / PERSONAL DETAILS'),
       const SizedBox(height: 14),
       _field(
         '标题',
@@ -646,7 +646,7 @@ class _ReadingReportPageState extends State<ReadingReportPage> {
         lines: 2,
       ),
       const SizedBox(height: 20),
-      const ArchiveSection(title: '分享与隐私', code: '04 / SHARING & PRIVACY'),
+      const ArchiveSection(title: '分享与隐私', code: 'REPORT / SHARING & PRIVACY'),
       const SizedBox(height: 14),
       AppText('书单显示数量', style: _caption(context)),
       Wrap(

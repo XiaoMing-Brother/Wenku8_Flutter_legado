@@ -1,12 +1,13 @@
 import 'dart:async';
 
-import 'package:flutter/material.dart';
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/services.dart';
 
 import 'app_interactions.dart';
 import 'app_ui.dart';
 import 'book_documents.dart';
 import 'catalog.dart';
+import 'glass_choices.dart';
 import 'library_state.dart';
 import 'local_books.dart';
 import 'local_book_importer.dart';
@@ -69,10 +70,7 @@ class _BookOpenMonitorState extends State<BookOpenMonitor>
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              const ArchiveSection(
-                title: '保存到本地书库',
-                code: 'LIBRARY / LOCAL',
-              ),
+              const ArchiveSection(title: '保存到本地书库', code: 'LIBRARY / LOCAL'),
               const SizedBox(height: 16),
               AppText(
                 request.name,
@@ -105,31 +103,17 @@ class _BookOpenMonitorState extends State<BookOpenMonitor>
                     ? '移动会在完整保存后删除原文件；复制会保留原文件。'
                     : '复制会保存一份到应用，不修改原文件。此来源不支持直接移动。',
               ),
-              const SizedBox(height: 24),
-              if (request.canMove) ...[
-                GlassTextButton(
-                  key: const ValueKey('book-open-move'),
-                  onPressed: () => Navigator.pop(sheet, 'move'),
-                  child: const AppText('移动到书库'),
-                ),
-                const SizedBox(height: 10),
-              ],
-              GlassTextButton(
-                key: const ValueKey('book-open-authorize'),
-                onPressed: () => Navigator.pop(sheet, 'authorize'),
-                child: const AppText('关联原文件'),
-              ),
               const SizedBox(height: 10),
-              GlassTextButton(
-                key: const ValueKey('book-open-copy'),
-                onPressed: () => Navigator.pop(sheet, 'copy'),
-                child: const AppText('复制到书库'),
-              ),
-              const SizedBox(height: 8),
-              GlassTextButton(
-                key: const ValueKey('book-open-cancel'),
-                onPressed: () => Navigator.pop(sheet),
-                child: const AppText('取消'),
+              GlassChoiceGroup<String>(
+                name: 'book-open-save',
+                label: '处理方式',
+                value: null,
+                options: {
+                  if (request.canMove) 'move': '移动到书库',
+                  'authorize': '关联原文件',
+                  'copy': '复制到书库',
+                },
+                onChanged: (choice) => Navigator.pop(sheet, choice),
               ),
             ],
           ),
@@ -306,7 +290,7 @@ class _BookOpenMonitorState extends State<BookOpenMonitor>
                   const SizedBox(
                     width: 18,
                     height: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2),
+                    child: CupertinoActivityIndicator(radius: 9),
                   ),
                   const SizedBox(width: 12),
                   Expanded(

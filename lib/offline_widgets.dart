@@ -322,14 +322,11 @@ class _OfflineVolumeCacheSheetState extends State<OfflineVolumeCacheSheet> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Padding(
-          padding: const EdgeInsets.fromLTRB(24, 8, 14, 4),
+          padding: const EdgeInsets.fromLTRB(24, 8, 24, 4),
           child: Row(
             children: [
               const Expanded(
-                child: AppText(
-                  '离线缓存',
-                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
-                ),
+                child: ArchiveSection(title: '离线缓存', code: 'OFFLINE / CACHE'),
               ),
               if (active)
                 GlassTextButton(
@@ -444,7 +441,7 @@ class _OfflineVolumeCacheSheetState extends State<OfflineVolumeCacheSheet> {
           ),
         ),
         Padding(
-          padding: const EdgeInsets.fromLTRB(18, 12, 18, 18),
+          padding: const EdgeInsets.fromLTRB(24, 12, 24, 24),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
@@ -527,7 +524,7 @@ class _OfflineCachePageState extends State<OfflineCachePage> {
   @override
   Widget build(BuildContext context) => ArchiveFeaturePage(
     title: '离线缓存',
-    code: 'ARCHIVE / LOCAL STORAGE',
+    code: 'ARCHIVE / OFFLINE CACHE',
     actions: [
       GlassMenuAnchor(
         child: Builder(
@@ -574,6 +571,7 @@ class _OfflineCachePageState extends State<OfflineCachePage> {
                             context,
                             '本地存储',
                             formatCacheBytes(widget.repository.cache.bytes),
+                            code: 'LIBRARY / LOCAL STORAGE',
                           ),
                           const SizedBox(height: 12),
                           const AppText(

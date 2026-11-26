@@ -571,8 +571,6 @@ class LibraryState extends ChangeNotifier {
         _prefs.get('calligraphySplashOncePerDay') == true;
     final splashShownDay = _prefs.get('calligraphySplashLastShownDay');
     _calligraphySplashLastShownDay = splashShownDay is int ? splashShownDay : 0;
-    final splashText = _prefs.get('calligraphySplashText');
-    _calligraphySplashText = splashText is String ? splashText : '';
     _combinedShelf = _prefs.get('combinedShelf') == true;
     _blockedTags = BlockedTags.fromRecord(
       _prefs.get(BlockedTags.preferenceKey),
@@ -804,7 +802,6 @@ class LibraryState extends ChangeNotifier {
   bool _calligraphySplashEnabled = true;
   bool _calligraphySplashOncePerDay = false;
   int _calligraphySplashLastShownDay = 0;
-  String _calligraphySplashText = '';
   bool _combinedShelf = false;
   ReaderPreferences _readerPreferences = const ReaderPreferences();
   final _bookReaderStyles = <int, ReaderBookStyle>{};
@@ -997,7 +994,6 @@ class LibraryState extends ChangeNotifier {
   bool get calligraphySplashEnabled => _calligraphySplashEnabled;
   bool get calligraphySplashOncePerDay => _calligraphySplashOncePerDay;
   int get calligraphySplashLastShownDay => _calligraphySplashLastShownDay;
-  String get calligraphySplashText => _calligraphySplashText;
   Set<ReadingEntry> get directReadingPages =>
       Set.unmodifiable(_directReadingPages);
   bool directReadingOn(ReadingEntry page) =>
@@ -1172,6 +1168,12 @@ class LibraryState extends ChangeNotifier {
 
   int? chapterForPosition(Novel novel, ReadingPosition position) {
     if (position.chapterId > 0) {
+      final hint = position.chapter;
+      if (hint >= 0 &&
+          hint < novel.chapters.length &&
+          novel.chapters[hint].id == position.chapterId) {
+        return hint;
+      }
       final index = novel.chapters.indexWhere(
         (chapter) => chapter.id == position.chapterId,
       );
@@ -1413,19 +1415,6 @@ class LibraryState extends ChangeNotifier {
         value,
       );
       _calligraphySplashOncePerDay = value;
-      if (!_disposed) _settings.notifyListeners();
-    });
-  }
-
-  Future<void> setCalligraphySplashText(String value) async {
-    if (_restoreBarrier case final barrier?) {
-      return barrier.future.then((_) => setCalligraphySplashText(value));
-    }
-    final next = value.trim();
-    await _queuePositionWrite(() async {
-      if (_calligraphySplashText == next) return;
-      await writeLibraryPreference(_prefs, 'calligraphySplashText', next);
-      _calligraphySplashText = next;
       if (!_disposed) _settings.notifyListeners();
     });
   }
@@ -3520,7 +3509,6 @@ class LibraryState extends ChangeNotifier {
     'calligraphySplashEnabled': _calligraphySplashEnabled,
     'calligraphySplashOncePerDay': _calligraphySplashOncePerDay,
     'calligraphySplashLastShownDay': _calligraphySplashLastShownDay,
-    'calligraphySplashText': _calligraphySplashText,
     'directReadingPages': [
       for (final page in ReadingEntry.values)
         if (_directReadingPages.contains(page)) page.name,
@@ -4038,9 +4026,6 @@ class LibraryState extends ChangeNotifier {
           }
           if (records['calligraphySplashLastShownDay'] case final int value) {
             _calligraphySplashLastShownDay = value;
-          }
-          if (records['calligraphySplashText'] case final String value) {
-            _calligraphySplashText = value;
           }
           if (records.containsKey('directReadingPages') ||
               records.containsKey('directReading')) {

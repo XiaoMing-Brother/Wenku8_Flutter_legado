@@ -24,8 +24,9 @@ class CurrentReleaseCard extends StatelessWidget {
         children: [
           ArchiveSection(
             title: '本版更新',
-            code:
-                'RELEASE / ${service?.installed?.version ?? currentAppVersion}',
+            code: 'RELEASE / HIGHLIGHTS',
+            subtitle:
+                '当前版本 ${service?.installed?.version ?? currentAppVersion}',
           ),
           const SizedBox(height: 12),
           for (final item in currentReleaseSummary)
@@ -73,21 +74,23 @@ Future<bool> showInstalledReleaseNotes(
   }
   final installed = updates?.installed;
   final reduced = MediaQuery.disableAnimationsOf(context);
-  final completed = await showJellySheet<bool>(
-    context: context,
-    barrierLabel: '关闭更新说明',
-    reduceMotion: reduced,
-    maxWidth: 520,
-    maxHeight: 640,
-    guardDragDismiss: automatic,
-    builder: (_) => PopScope(
-      canPop: !automatic,
-      child: _ReleaseDetails(
-        version: installed?.version ?? currentAppVersion,
-        build: installed?.build ?? currentAppBuild,
-      ),
-    ),
-  ) == true;
+  final completed =
+      await showJellySheet<bool>(
+        context: context,
+        barrierLabel: '关闭更新说明',
+        reduceMotion: reduced,
+        maxWidth: 520,
+        maxHeight: 640,
+        guardDragDismiss: automatic,
+        builder: (_) => PopScope(
+          canPop: !automatic,
+          child: _ReleaseDetails(
+            version: installed?.version ?? currentAppVersion,
+            build: installed?.build ?? currentAppBuild,
+          ),
+        ),
+      ) ==
+      true;
   if (completed && installed != null && updates != null) {
     try {
       await updates.rememberReleaseNotes(installed);

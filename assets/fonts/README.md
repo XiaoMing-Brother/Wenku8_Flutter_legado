@@ -59,6 +59,17 @@ Rebuild the heading subset with `tools/subset_reading_display_font.py`; full ups
 Noto source is not an application asset. Artwork is separately packaged as WebP;
 its high-resolution PNG sources are not listed in `pubspec.yaml`.
 
+## Splash display face
+
+- `SplashMincho`: Huiwen Mincho (汇文明朝体, symbol-width corrected build) from
+  `bosswnx/huiwenmincho-improved`, bundled as `HuiwenMincho.ttf` (24,052 B).
+  The subset keeps only the default splash poem and a space (14 codepoints);
+  custom splash text falls back to the platform serif face. The full upstream
+  face is 24,866,404 B. Regenerate with
+  `python tool/subset_splash_font.py --source <full TTF>` after installing
+  `fonttools`. License: CC0 1.0; unchanged notice in `CC0-HuiwenMincho.txt`.
+  Source: https://github.com/bosswnx/huiwenmincho-improved (retrieved 2026-11-26).
+
 ## Existing Source Han Serif preference
 
 Unmodified Adobe Source Han Serif CN variable subset font, version 2.003.

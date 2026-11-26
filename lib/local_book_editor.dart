@@ -365,7 +365,8 @@ class _LocalBookEditorState extends State<LocalBookEditor> {
                     onPressed: _busy ? null : _chooseCover,
                     child: const AppText('更换封面'),
                   ),
-                  if (widget.books.hasCustomCover(widget.book.id) || PersonalCovers.shared.choice(widget.book.id) != null)
+                  if (widget.books.hasCustomCover(widget.book.id) ||
+                      PersonalCovers.shared.choice(widget.book.id) != null)
                     GlassTextButton(
                       key: const ValueKey('local-restore-cover'),
                       compact: true,
@@ -390,7 +391,7 @@ class _LocalBookEditorState extends State<LocalBookEditor> {
       children: [
         _identity(),
         const SizedBox(height: 30),
-        const ArchiveSection(title: '书籍信息', code: '01 / PROFILE'),
+        const ArchiveSection(title: '书籍信息', code: 'LOCAL / PROFILE'),
         const SizedBox(height: 18),
         LocalBookEditField(
           label: '书名',
@@ -429,7 +430,7 @@ class _LocalBookEditorState extends State<LocalBookEditor> {
           onTap: _busy || _groups == null ? null : _chooseGroup,
         ),
         const SizedBox(height: 30),
-        const ArchiveSection(title: '本地管理', code: '02 / LIBRARY'),
+        const ArchiveSection(title: '本地管理', code: 'LOCAL / MANAGEMENT'),
         const SizedBox(height: 18),
         if (issues.isNotEmpty) ...[
           FeatureEntry(
@@ -440,7 +441,7 @@ class _LocalBookEditorState extends State<LocalBookEditor> {
             icon: CupertinoIcons.exclamationmark_triangle,
             onTap: _busy ? null : _importIssues,
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 14),
         ],
         FeatureEntry(
           key: const ValueKey('local-edit-volumes'),
@@ -452,7 +453,7 @@ class _LocalBookEditorState extends State<LocalBookEditor> {
           onTap: _busy ? null : _volumes,
         ),
         if (linked.isNotEmpty) ...[
-          const SizedBox(height: 12),
+          const SizedBox(height: 14),
           FeatureEntry(
             key: const ValueKey('local-edit-originals'),
             title: '关联原文件',

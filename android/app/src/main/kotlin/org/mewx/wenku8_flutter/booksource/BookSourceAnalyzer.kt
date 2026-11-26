@@ -13,6 +13,7 @@ import org.jsoup.Jsoup
 import org.jsoup.helper.W3CDom
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
+import org.jsoup.parser.Parser
 import org.mozilla.javascript.Context
 import org.mozilla.javascript.NativeArray
 import org.mozilla.javascript.Scriptable
@@ -68,8 +69,28 @@ internal class BookSourceAnalyzer(
         }
     }
 
-    fun getString(rule: String?, context: RuleContext): String =
-        getStrings(rule, context).firstOrNull { it.isNotBlank() } ?: ""
+    /**
+     * Legado 的 getString 会把 CSS/XPath/JSONPath 命中的多条结果用换行拼接
+     * （简介、作者、标签常常是多段），只有 JS 规则保留单值语义。
+     */
+    fun getString(rule: String?, context: RuleContext): String {
+        if (rule.isNullOrBlank()) return ""
+        val values = getStrings(rule, context).filter { it.isNotBlank() }
+        if (values.isEmpty()) return ""
+        val text = if (containsScript(rule)) values.first() else values.joinToString("\n")
+        // Legado 的 getString 默认做 HTML4 反转义（&amp;、&#39; 等），
+        // 书名/作者/地址规则经常直接从属性或 JSON 里取到转义文本。
+        return if (text.indexOf('&') >= 0) {
+            org.jsoup.parser.Parser.unescapeEntities(text, false)
+        } else {
+            text
+        }
+    }
+
+    private fun containsScript(rule: String): Boolean =
+        rule.contains("@js:", ignoreCase = true) ||
+            rule.contains("@webjs:", ignoreCase = true) ||
+            rule.contains("<js>", ignoreCase = true)
 
     fun getStrings(rule: String?, context: RuleContext): List<String> {
         if (rule.isNullOrBlank()) return emptyList()
@@ -252,19 +273,26 @@ internal class BookSourceAnalyzer(
     private fun evaluate(rule: String, context: RuleContext, elements: Boolean = false): List<Any?> {
         val trimmedRule = rule.trimStart()
         val isScript = trimmedRule.startsWith("@js:") ||
+            trimmedRule.startsWith("@webjs:", ignoreCase = true) ||
             trimmedRule.startsWith("<js>", ignoreCase = true)
-        val expanded = if (isScript) {
-            rule
-        } else {
-            expand(
-                rule,
-                key = context.key,
-                page = context.page,
-                baseUrl = context.baseUrl,
-                content = context.content,
-                book = context.book,
-                chapter = context.chapter,
-            )
+        var expanded = expand(
+            rule,
+            key = context.key,
+            page = context.page,
+            baseUrl = context.baseUrl,
+            content = context.content,
+            book = context.book,
+            chapter = context.chapter,
+        )
+        // Legado 的 @put/@get 在 JS 规则里同样会先做文本替换，不能因为
+        // 规则以 @js: 开头就跳过。
+        expanded = applyPutRules(expanded, context)
+        // @get 独占整条规则（## 之前没有其它提取规则）时，Legado 把存储值
+        // 当普通文本返回，而不是再按 CSS/JSONPath 解析一次。
+        val literalGet = !isScript && treatsGetAsLiteral(expanded)
+        expanded = applyGetRules(expanded, context)
+        if (literalGet) {
+            return listOf(applyReplacementRule(expanded))
         }
         if (!isScript) {
             // 链式 JS（`规则@js:...`）里的 || / && 属于脚本本身，不能当规则回退符拆分。
@@ -305,6 +333,9 @@ internal class BookSourceAnalyzer(
      */
     private fun flatten(values: List<Any?>): List<Any?> = values.flatMap { value ->
         when (value) {
+            // Jsoup 的 Element/Node 实现了 Iterable（遍历子孙节点），
+            // 必须先按单个节点返回，否则只命中一个容器时会被拆成子元素。
+            is Element -> listOf(value)
             is List<*> -> value
             // 用 for 循环而非嵌套 lambda：lambda 参数在再嵌一层 lambda 时
             // 会丢失 NativeArray 的智能转换，导致 value.get(index, value)
@@ -328,9 +359,9 @@ internal class BookSourceAnalyzer(
         if (trimmed.isEmpty()) return emptyList()
         // Legado 允许在任意规则后追加 @js: / <js> 对结果二次处理，
         // 例如 `.chapter-text@html@js:...` 用来还原被拆字保护的正文。
-        splitChainedJs(trimmed)?.let { (base, script) ->
-            val baseValues = if (base.isEmpty()) emptyList() else evaluatePart(base, context)
-            val previous = if (base.isEmpty()) {
+        splitChainedJs(trimmed)?.let { chained ->
+            val baseValues = if (chained.base.isEmpty()) emptyList() else evaluatePart(chained.base, context)
+            val previous = if (chained.base.isEmpty()) {
                 context.content
             } else {
                 when (baseValues.size) {
@@ -341,7 +372,12 @@ internal class BookSourceAnalyzer(
             }
             // 脚本失败时保留原始提取结果，至少让本章能显示。
             val evaluated = runCatching {
-                js.eval(script, env(context.copy(content = previous)))
+                if (chained.web) {
+                    // Legado 的 @webjs: 把整页内容交给 WebView，result 是前一段结果。
+                    js.evalWebJs(chained.script, env(context), previous)
+                } else {
+                    js.eval(chained.script, env(context.copy(content = previous)))
+                }
             }.getOrNull()
             if (evaluated != null) return listOf(evaluated)
             return baseValues
@@ -356,13 +392,13 @@ internal class BookSourceAnalyzer(
             }
             val pattern = replacement[1]
             if (pattern.isEmpty()) return values
-            val expression = runCatching { Regex(pattern) }.getOrNull() ?: return values
-            val target = replacement.getOrElse(2) { "" }
-            return values.map { expression.replace(it, target) }
+            return values.map { applyReplacement(it, pattern, replacement.getOrElse(2) { "" }, replacement.size >= 4) }
         }
         return when {
             trimmed.startsWith("@js:", ignoreCase = true) ->
                 listOf(js.eval(trimmed.substring(4), env(context)))
+            trimmed.startsWith("@webjs:", ignoreCase = true) ->
+                listOf(js.evalWebJs(trimmed.substring(7), env(context), context.content))
             trimmed.startsWith("<js>", ignoreCase = true) -> {
                 val end = trimmed.lastIndexOf("</js>")
                 val script = if (end > 4) trimmed.substring(4, end) else trimmed.substring(4)
@@ -370,20 +406,230 @@ internal class BookSourceAnalyzer(
             }
             trimmed.startsWith("@css:", ignoreCase = true) ->
                 css(trimmed.substring(5), context, elementIndices = false, elements = elements)
+            trimmed.startsWith("@@") ->
+                evaluatePart(trimmed.substring(2), context, elements)
             trimmed.startsWith("@json:", ignoreCase = true) ->
                 json(trimmed.substring(6), context)
             trimmed.startsWith("@xpath:", ignoreCase = true) ->
                 xpathChain(trimmed.substring(7), context)
             trimmed.startsWith("@regex:", ignoreCase = true) ->
                 regex(trimmed.substring(7), context)
-            trimmed.startsWith("//") ->
+            // Legado 把任何以 `/` 开头的规则都按 XPath 处理（含绝对路径）。
+            trimmed.startsWith("/") ->
                 xpathChain(trimmed, context)
             trimmed.startsWith("$.") || trimmed.startsWith("$[") ->
                 json(trimmed, context)
-            context.content is Map<*, *> ->
-                jsonField(trimmed, context.content)
+            // Legado 在 setContent 时按内容判断 isJSON：JSON 字符串或
+            // Map/List 上的普通字段规则（如 `data.name`）走 JsonPath，
+            // 不是按 HTML 选择器解析。这里保持同样判定。
+            context.content is Map<*, *> || context.content is List<*> ->
+                json(trimmed, context)
+            isJsonText(context.content) ->
+                json(trimmed, context)
             else ->
                 css(trimmed, context, elements = elements)
+        }
+    }
+
+    private fun isJsonText(content: Any?): Boolean {
+        val text = (content as? String)?.trimStart('\uFEFF', ' ', '\t', '\r', '\n') ?: return false
+        return text.startsWith("{") || text.startsWith("[")
+    }
+
+    /**
+     * Legado 用 `<?xml` 判定 XML：走 xmlParser 才能保住 `<item><title>` 这类
+     * 同名标签，否则 HTML 解析器会把 title 提升到 head。表格片段同样需要补外层。
+     */
+    private fun parseMarkup(text: String, baseUrl: String): Document {
+        var html = text
+        if (html.endsWith("</td>")) html = "<tr>$html</tr>"
+        if (html.endsWith("</tr>") || html.endsWith("</tbody>")) html = "<table>$html</table>"
+        return if (html.trimStart('\uFEFF', ' ', '\t', '\r', '\n')
+                .startsWith("<?xml", ignoreCase = true)
+        ) {
+            Jsoup.parse(html, baseUrl, Parser.xmlParser())
+        } else {
+            Jsoup.parse(html, baseUrl)
+        }
+    }
+
+    /**
+     * Legado 的 `@put:{...}` 把当前规则组解析出的值写入书源变量，后面的
+     * `@get:{key}` 才能复用。它不属于 CSS/JSONPath，必须在拆分规则前移除。
+     */
+    private fun applyPutRules(rule: String, context: RuleContext): String {
+        if (!PutRuleRegex.containsMatchIn(rule)) return rule
+        for (match in PutRuleRegex.findAll(rule)) {
+            val body = match.value.substringAfter(':').trim()
+            val values = parsePutValues(body, context)
+            for ((key, value) in values) {
+                val target = variables ?: continue
+                // Legado 在 @put 出现的位置立即求值，后续 @get 只读取结果；
+                // 延迟到 @get 再求值会重复执行随机数/时间签名等 JS 规则。
+                target.writeRule(source.key, context.book, context.chapter, key, getString(value, context))
+            }
+        }
+        return PutRuleRegex.replace(rule, "")
+    }
+
+    private fun parsePutValues(body: String, context: RuleContext): Map<String, String> {
+        if (!body.startsWith("{")) return emptyMap()
+        val json = runCatching { org.json.JSONObject(body) }.getOrNull()
+        if (json != null) {
+            return buildMap {
+                for (key in json.keys()) {
+                    val value = json.opt(key)
+                    if (value != null && value != org.json.JSONObject.NULL) {
+                        put(key, value.toString())
+                    }
+                }
+            }
+        }
+        // 大量书源写成 {@put:{book:id}} 或单引号键；Rhino 会把 id 当变量，
+        // 这里按 Legado 的宽松 JSON 语义直接拆键值，避免整组变量丢失。
+        val content = body.removePrefix("{").removeSuffix("}").trim()
+        if (content.isEmpty()) return emptyMap()
+        return buildMap {
+            for (entry in splitTopLevel(content, ",")) {
+                val colon = topLevelIndex(entry, ':')
+                if (colon <= 0) continue
+                val name = unquotePutText(entry.substring(0, colon)).trim()
+                if (name.isEmpty()) continue
+                put(name, unquotePutText(entry.substring(colon + 1)).trim())
+            }
+        }
+    }
+
+    private fun unquotePutText(value: String): String {
+        val text = value.trim()
+        if (text.length < 2) return text
+        val quote = text.first()
+        if ((quote != '"' && quote != '\'') || text.last() != quote) return text
+        val body = text.substring(1, text.length - 1)
+        val out = StringBuilder(body.length)
+        var index = 0
+        while (index < body.length) {
+            val char = body[index]
+            if (char != '\\' || index == body.lastIndex) {
+                out.append(char)
+                index++
+                continue
+            }
+            when (val next = body[index + 1]) {
+                'n' -> out.append('\n')
+                'r' -> out.append('\r')
+                't' -> out.append('\t')
+                'b' -> out.append('\b')
+                'f' -> out.append('\u000C')
+                'u' -> {
+                    val hex = body.substring(index + 2, minOf(index + 6, body.length))
+                    val code = hex.toIntOrNull(16)
+                    if (code != null) {
+                        out.append(code.toChar())
+                        index += 4
+                    } else {
+                        out.append(next)
+                    }
+                }
+                else -> out.append(next)
+            }
+            index += 2
+        }
+        return out.toString()
+    }
+
+    private fun topLevelIndex(value: String, target: Char): Int {
+        var round = 0
+        var square = 0
+        var curly = 0
+        var quote: Char? = null
+        var escaped = false
+        for (index in value.indices) {
+            val char = value[index]
+            if (escaped) {
+                escaped = false
+                continue
+            }
+            if (char == '\\') {
+                escaped = true
+                continue
+            }
+            if (quote != null) {
+                if (char == quote) quote = null
+                continue
+            }
+            if (char == '"' || char == '\'') {
+                quote = char
+                continue
+            }
+            when (char) {
+                '(' -> round++
+                ')' -> if (round > 0) round--
+                '[' -> square++
+                ']' -> if (square > 0) square--
+                '{' -> curly++
+                '}' -> if (curly > 0) curly--
+            }
+            if (char == target && round == 0 && square == 0 && curly == 0) return index
+        }
+        return -1
+    }
+
+    /**
+     * Legado 的 @get 位于 ## 之前且规则不属于 JS/JSON/XPath 时，会把结果
+     * 当成普通文本返回。这里保持同样的判定，避免把书名、作者再次当选择器。
+     */
+    private fun treatsGetAsLiteral(rule: String): Boolean {
+        val trimmed = rule.trimStart()
+        if (trimmed.startsWith("@js:", ignoreCase = true) ||
+            trimmed.startsWith("<js>", ignoreCase = true) ||
+            trimmed.startsWith("@json:", ignoreCase = true) ||
+            trimmed.startsWith("@xpath:", ignoreCase = true) ||
+            trimmed.startsWith("@css:", ignoreCase = true) ||
+            trimmed.startsWith("@regex:", ignoreCase = true) ||
+            trimmed.startsWith("/") ||
+            trimmed.startsWith("$.") ||
+            trimmed.startsWith("$[")
+        ) return false
+        val match = GetRuleRegex.find(rule) ?: return false
+        return !rule.substring(0, match.range.first).contains("##")
+    }
+
+    private fun applyReplacementRule(value: String): String {
+        val replacement = splitTopLevel(value, "##")
+        if (replacement.size < 2) return value
+        val pattern = replacement[1]
+        if (pattern.isEmpty()) return replacement[0]
+        return applyReplacement(
+            replacement[0],
+            pattern,
+            replacement.getOrElse(2) { "" },
+            replacement.size >= 4,
+        )
+    }
+
+    private fun applyReplacement(value: String, pattern: String, target: String, firstOnly: Boolean): String {
+        if (!firstOnly) {
+            val expression = runCatching { Regex(pattern) }.getOrNull()
+                ?: return value.replace(pattern, target)
+            // `##match##replace##` 使用 Java 的替换语义：$1/$2 是正则分组，
+            // 书源的封面、章节地址大量依赖这种写法。
+            return runCatching { expression.replace(value, target) }
+                .getOrElse { value.replace(pattern, target) }
+        }
+        // `##match##replace###` 只取第一个匹配，和 Legado 一样返回被替换的匹配片段。
+        val expression = runCatching { Regex(pattern) }.getOrNull() ?: return target
+        val found = runCatching { expression.find(value) }
+        if (found.isFailure) return target
+        val match = found.getOrNull() ?: return ""
+        return runCatching { match.value.replaceFirst(expression, target) }.getOrDefault(target)
+    }
+
+    private fun applyGetRules(rule: String, context: RuleContext): String {
+        if (!GetRuleRegex.containsMatchIn(rule)) return rule
+        return GetRuleRegex.replace(rule) { match ->
+            val key = match.groupValues[1].trim()
+            variables?.readRule(source.key, context.book, context.chapter, key).orEmpty()
         }
     }
 
@@ -391,21 +637,33 @@ internal class BookSourceAnalyzer(
      * 拆分规则末尾的 JS 处理段。`@js:` 之后的全部内容都是脚本；
      * `<js>...</js>` 作为后缀时同样处理。脚本在规则最前面时由调用方直接执行。
      */
-    private fun splitChainedJs(rule: String): Pair<String, String>? {
-        // 整条规则就是脚本时交给常规 @js:/<js> 分支，避免把脚本内的 "@js:" 当分隔符。
+    private data class ChainedScript(val base: String, val script: String, val web: Boolean)
+
+    private fun splitChainedJs(rule: String): ChainedScript? {
+        // 整条规则就是脚本时交给常规 @js:/@webjs:/<js> 分支，
+        // 避免把脚本内的 "@js:" 当分隔符。
         if (rule.startsWith("@js:", ignoreCase = true) ||
+            rule.startsWith("@webjs:", ignoreCase = true) ||
             rule.startsWith("<js>", ignoreCase = true)
         ) {
             return null
         }
         JsTagRegex.find(rule)?.let { match ->
             if (match.range.first > 0) {
-                return rule.substring(0, match.range.first).trim() to match.groupValues[1]
+                return ChainedScript(
+                    rule.substring(0, match.range.first).trim(),
+                    match.groupValues[1],
+                    web = false,
+                )
             }
         }
+        val webJs = rule.indexOf("@webjs:", startIndex = 1, ignoreCase = true)
         val at = rule.indexOf("@js:", startIndex = 1, ignoreCase = true)
+        if (webJs > 0 && (at < 0 || webJs < at)) {
+            return ChainedScript(rule.substring(0, webJs).trim(), rule.substring(webJs + 7), web = true)
+        }
         if (at > 0) {
-            return rule.substring(0, at).trim() to rule.substring(at + 4)
+            return ChainedScript(rule.substring(0, at).trim(), rule.substring(at + 4), web = false)
         }
         return null
     }
@@ -521,6 +779,7 @@ internal class BookSourceAnalyzer(
         book = context.book,
         chapter = context.chapter,
         redirectUrl = context.redirectUrl,
+        fromBookInfo = context.fromBookInfo,
         variables = variables,
     )
 
@@ -528,7 +787,7 @@ internal class BookSourceAnalyzer(
         val roots = when (val content = context.content) {
             is Element -> listOf(content)
             is Document -> listOf(content)
-            is String -> listOf(Jsoup.parse(content, context.baseUrl))
+            is String -> listOf(parseMarkup(content, context.baseUrl))
             else -> return emptyList()
         }
         var current: List<Any?> = roots
@@ -731,34 +990,17 @@ internal class BookSourceAnalyzer(
         return if (result is List<*>) result else listOf(result)
     }
 
-    private fun jsonField(rule: String, content: Any?): List<Any?> {
-        var current: Any? = content
-        for (part in rule.split('.')) {
-            if (part.isEmpty()) continue
-            current = when (current) {
-                is Map<*, *> -> current[part]
-                is List<*> -> current.mapNotNull { item ->
-                    (item as? Map<*, *>)?.get(part)
-                }
-                else -> return emptyList()
-            }
-        }
-        return when (val value = current) {
-            null -> emptyList()
-            is List<*> -> value
-            else -> listOf(value)
-        }
-    }
-
     private fun xpath(rule: String, context: RuleContext): List<Any?> {
         val document = when (val content = context.content) {
-            is String -> Jsoup.parse(content, context.baseUrl)
-            is Element -> Jsoup.parse(content.outerHtml(), context.baseUrl)
+            is String -> parseMarkup(content, context.baseUrl)
+            is Element -> parseMarkup(content.outerHtml(), context.baseUrl)
             is Document -> content
             else -> return emptyList()
         }
         return try {
-            val dom = W3CDom().fromJsoup(document)
+            // Jsoup 1.15+ 默认给 HTML 元素加 XHTML 命名空间，普通 `//div`
+            // 会匹配不到；Legado 的 XPath 语义不带命名空间。
+            val dom = W3CDom().namespaceAware(false).fromJsoup(document)
             val expression = XPathFactory.newInstance().newXPath().compile(rule)
             val nodes = expression.evaluate(dom, XPathConstants.NODESET) as NodeList
             (0 until nodes.length).mapNotNull { index ->
@@ -766,7 +1008,7 @@ internal class BookSourceAnalyzer(
             }
         } catch (_: Exception) {
             try {
-                val dom = W3CDom().fromJsoup(document)
+                val dom = W3CDom().namespaceAware(false).fromJsoup(document)
                 val value = XPathFactory.newInstance().newXPath().evaluate(rule, dom)
                 if (value.isBlank()) emptyList() else listOf(value)
             } catch (_: Exception) {
@@ -813,6 +1055,14 @@ internal class BookSourceAnalyzer(
         )
         private val JsTagRegex = Regex(
             """<js>([\s\S]*?)</js>\s*$""",
+            RegexOption.IGNORE_CASE,
+        )
+        private val PutRuleRegex = Regex(
+            """@put:\{[^}]*\}""",
+            setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL),
+        )
+        private val GetRuleRegex = Regex(
+            """@get:\{\s*([^}]+?)\s*\}""",
             RegexOption.IGNORE_CASE,
         )
         private val HeadingTags = setOf("h1", "h2", "h3", "h4", "h5", "h6")

@@ -65,7 +65,10 @@ class ReadingMomentsSettingsPage extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 28),
-                const ArchiveSection(title: '纪念方式', code: '01 / CELEBRATIONS'),
+                const ArchiveSection(
+                  title: '纪念方式',
+                  code: 'LIBRARY / CELEBRATIONS',
+                ),
                 const SizedBox(height: 14),
                 ContentPanel(
                   child: Column(
@@ -115,7 +118,10 @@ class ReadingMomentsSettingsPage extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 28),
-                const ArchiveSection(title: '纪念图片', code: '02 / IMAGE'),
+                const ArchiveSection(
+                  title: '纪念图片',
+                  code: 'LIBRARY / KEEPSAKE IMAGE',
+                ),
                 const SizedBox(height: 14),
                 ReadingVisualThemePicker(
                   value: visual,

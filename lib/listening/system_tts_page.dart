@@ -154,45 +154,77 @@ class _SystemSpeechEnginesPanelState extends State<SystemSpeechEnginesPanel>
       voice.id == widget.selected.id;
   int get _count => _engine == null ? _engines.length : _voices?.length ?? 0;
 
-  Widget _engineRow(SystemSpeechEngine engine) => Padding(
-    padding: const EdgeInsets.only(bottom: 8),
-    child: Row(
-      children: [
-        Expanded(
-          child: GlassTextButton(
-            key: ValueKey('system-engine-${engine.id}'),
-            onPressed: () => Navigator.pop(context, engine.defaultVoice),
-            child: Row(
-              children: [
-                Expanded(
-                  child: AppText(
+  Future<void> _openEngineMenu(
+    BuildContext anchor,
+    SystemSpeechEngine engine,
+  ) async {
+    final action = await showGlassMenu<String>(
+      context: anchor,
+      reduceMotion: MediaQuery.disableAnimationsOf(context),
+      builder: (menu) => GlassMenuItem(
+        label: '查看音色',
+        icon: CupertinoIcons.slider_horizontal_3,
+        onPressed: () => Navigator.pop(menu, 'voices'),
+      ),
+    );
+    if (!mounted || action != 'voices') return;
+    await _load(engine);
+  }
+
+  Widget _engineRow(BuildContext context, SystemSpeechEngine engine) {
+    final chosen =
+        widget.selected.source == ListeningSource.system &&
+        widget.selected.engine == engine.id;
+    final muted = Theme.of(context).colorScheme.onSurfaceVariant;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 14),
+      child: ContentPanel(
+        key: ValueKey('system-engine-${engine.id}'),
+        onTap: () => Navigator.pop(context, engine.defaultVoice),
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  AppText(
                     engine.name,
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontSize: 14),
+                    style: const TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
-                ),
-                if (widget.selected.source == ListeningSource.system &&
-                    widget.selected.engine == engine.id)
-                  const ArchiveIcon(CupertinoIcons.checkmark, size: 16),
-              ],
+                  if (chosen) ...[
+                    const SizedBox(height: 4),
+                    AppText(
+                      '当前使用',
+                      style: TextStyle(fontSize: 12, height: 1.4, color: muted),
+                    ),
+                  ],
+                ],
+              ),
             ),
-          ),
+            GlassMenuAnchor(
+              child: Builder(
+                builder: (anchor) => CompactRowMenuButton(
+                  label: '${engine.name}的音色',
+                  onPressed: () => _openEngineMenu(anchor, engine),
+                ),
+              ),
+            ),
+          ],
         ),
-        GlassIconButton(
-          icon: CupertinoIcons.slider_horizontal_3,
-          label: '${engine.name}的音色',
-          onPressed: () => _load(engine),
-        ),
-      ],
-    ),
-  );
+      ),
+    );
+  }
 
-  Widget _voiceRow(SpeechVoice voice) => Padding(
-    padding: const EdgeInsets.only(bottom: 6),
-    child: GlassTextButton(
+  Widget _voiceRow(BuildContext context, SpeechVoice voice) => Padding(
+    padding: const EdgeInsets.only(bottom: 14),
+    child: ContentPanel(
       key: ValueKey('system-voice-${voice.id}'),
-      onPressed: () => Navigator.pop(context, voice),
+      onTap: () => Navigator.pop(context, voice),
       child: Row(
         children: [
           Expanded(
@@ -203,13 +235,22 @@ class _SystemSpeechEnginesPanelState extends State<SystemSpeechEnginesPanel>
                   voice.id == '@default' ? '引擎默认音色' : voice.label,
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontSize: 13),
+                  style: const TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
-                if (voice.id != '@default')
+                if (voice.id != '@default') ...[
+                  const SizedBox(height: 4),
                   AppText(
                     '${voice.locale} · ${voice.offline ? '可离线' : '需要网络'}',
-                    style: const TextStyle(fontSize: 11),
+                    style: TextStyle(
+                      fontSize: 12,
+                      height: 1.4,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
                   ),
+                ],
               ],
             ),
           ),
@@ -284,8 +325,8 @@ class _SystemSpeechEnginesPanelState extends State<SystemSpeechEnginesPanel>
               }
               if (index <= _count) {
                 return _engine == null
-                    ? _engineRow(_engines[index - 1])
-                    : _voiceRow(_voices![index - 1]);
+                    ? _engineRow(context, _engines[index - 1])
+                    : _voiceRow(context, _voices![index - 1]);
               }
               return Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,

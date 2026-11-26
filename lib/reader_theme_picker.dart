@@ -12,9 +12,9 @@ enum ReaderThemeFilter {
   final String label;
 }
 
-/// 从 Legado 内置的 LightInk 主题清单中选择一套阅读主题。
+/// 从随应用打包的纸纹主题和 Legado LightInk 主题清单中选择一套阅读主题。
 ///
-/// 清单本身随应用打包；卡片缩略图按需加载，只有确认选择后才会缓存原图。
+/// 纸纹随应用打包；Legado 卡片缩略图按需加载，只有确认选择后才会缓存原图。
 class ReaderThemePicker extends StatefulWidget {
   const ReaderThemePicker({
     super.key,
@@ -55,20 +55,40 @@ class _ReaderThemePickerState extends State<ReaderThemePicker> {
       if (themes == null) {
         return const Padding(
           padding: EdgeInsets.fromLTRB(24, 4, 24, 24),
-          child: Center(child: CircularProgressIndicator()),
+          child: Center(child: CupertinoActivityIndicator()),
         );
       }
-      final visible = themes
-          .where((theme) {
-            if (_filter == ReaderThemeFilter.day && theme.isNightTheme) {
-              return false;
-            }
-            if (_filter == ReaderThemeFilter.night && !theme.isNightTheme) {
-              return false;
-            }
-            return true;
-          })
-          .toList(growable: false);
+      final night = _filter == ReaderThemeFilter.night;
+      final visible = <_ThemeCardData>[
+        for (final theme in readerPaperThemes)
+          _ThemeCardData(
+            id: theme.id,
+            name: theme.name,
+            author: '内置纸纹',
+            paper: theme.paperFor(night),
+            foreground: theme.inkFor(night),
+            control: theme.accentFor(night),
+            selection: theme.selection,
+            asset: theme.textureFor(night),
+          ),
+        for (final theme in themes)
+          if (night == theme.isNightTheme)
+            _ThemeCardData(
+              id: theme.id,
+              name: theme.name,
+              author: theme.author.trim().isNotEmpty
+                  ? theme.author
+                  : '${theme.downloadCount} 次下载',
+              paper: theme.background.a == 0
+                  ? Theme.of(context).colorScheme.surfaceContainer
+                  : theme.background,
+              foreground: theme.content,
+              control: theme.control,
+              secondary: theme.secondary,
+              selection: theme.selection,
+              imageUrl: theme.thumbnailUrl,
+            ),
+      ];
       return Padding(
         padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
         child: Column(
@@ -76,7 +96,7 @@ class _ReaderThemePickerState extends State<ReaderThemePicker> {
           children: [
             const ArchiveSection(
               title: '内置主题',
-              code: 'READER / LEGADO THEMES',
+              code: 'READER / THEME LIBRARY',
               centeredTitle: true,
             ),
             const SizedBox(height: 8),
@@ -120,7 +140,7 @@ class _ReaderThemePickerState extends State<ReaderThemePicker> {
                       message: '当前分类暂时没有主题。',
                     )
                   : GridView.builder(
-                      key: ValueKey(('reader-legado-theme-grid', _filter)),
+                      key: ValueKey(('reader-theme-grid', _filter)),
                       padding: const EdgeInsets.only(bottom: 24),
                       itemCount: visible.length,
                       gridDelegate:
@@ -150,6 +170,28 @@ class _ReaderThemePickerState extends State<ReaderThemePicker> {
   );
 }
 
+class _ThemeCardData {
+  const _ThemeCardData({
+    required this.id,
+    required this.name,
+    required this.author,
+    required this.paper,
+    required this.foreground,
+    required this.selection,
+    this.control,
+    this.secondary,
+    this.imageUrl,
+    this.asset,
+  });
+
+  final int id;
+  final String name, author;
+  final Color paper, foreground;
+  final Color? control, secondary;
+  final ReaderThemeSelection selection;
+  final String? imageUrl, asset;
+}
+
 class _ThemeCard extends StatelessWidget {
   const _ThemeCard({
     required this.theme,
@@ -158,19 +200,16 @@ class _ThemeCard extends StatelessWidget {
     required this.onTap,
   });
 
-  final LegadoReaderTheme theme;
+  final _ThemeCardData theme;
   final bool selected;
   final Color? accent;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    final hasImage = theme.thumbnailUrl != null;
-    final scheme = Theme.of(context).colorScheme;
-    final paper = theme.background.a == 0
-        ? scheme.surfaceContainer
-        : theme.background;
-    final foreground = theme.content;
+    final hasImage = theme.asset != null || theme.imageUrl != null;
+    final paper = theme.paper;
+    final foreground = theme.foreground;
     final control = accent ?? theme.control ?? readerCardOutline(paper);
     return JellyTapSurface(
       tapKey: ValueKey('reader-theme-${theme.id}'),
@@ -198,7 +237,7 @@ class _ThemeCard extends StatelessWidget {
                       foreground,
                       control,
                       theme.secondary ?? foreground,
-                      theme.directory ?? paper,
+                      Color.lerp(paper, foreground, .18)!,
                       paper,
                     ])
                       Expanded(
@@ -271,9 +310,7 @@ class _ThemeCard extends StatelessWidget {
                       ],
                     ),
                     AppText(
-                      theme.author.trim().isNotEmpty
-                          ? theme.author
-                          : '${theme.downloadCount} 次下载',
+                      theme.author,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
@@ -313,23 +350,28 @@ class _ThemeCard extends StatelessWidget {
 class _ThemePreview extends StatelessWidget {
   const _ThemePreview({required this.theme});
 
-  final LegadoReaderTheme theme;
+  final _ThemeCardData theme;
 
   @override
   Widget build(BuildContext context) {
-    final urls = theme.imageCandidates;
-    if (urls.isEmpty) return const SizedBox.expand();
-    Widget image(int index) {
-      if (index >= urls.length) return const SizedBox.expand();
-      return Image.network(
-        urls[index],
+    final asset = theme.asset;
+    if (asset != null) {
+      return Image.asset(
+        asset,
         fit: BoxFit.cover,
-        cacheWidth: 300,
+        cacheWidth: 360,
         filterQuality: FilterQuality.low,
-        errorBuilder: (_, _, _) => image(index + 1),
+        errorBuilder: (_, _, _) => const SizedBox.expand(),
       );
     }
-
-    return image(0);
+    final url = theme.imageUrl;
+    if (url == null) return const SizedBox.expand();
+    return Image.network(
+      url,
+      fit: BoxFit.cover,
+      cacheWidth: 300,
+      filterQuality: FilterQuality.low,
+      errorBuilder: (_, _, _) => const SizedBox.expand(),
+    );
   }
 }

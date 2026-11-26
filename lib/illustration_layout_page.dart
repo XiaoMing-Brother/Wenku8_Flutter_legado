@@ -111,6 +111,22 @@ class _IllustrationLayoutPageState extends State<IllustrationLayoutPage> {
     }
   }
 
+  Future<void> _openPlacementMenu(
+    BuildContext anchor,
+    IllustrationPlacement placement,
+  ) async {
+    final remove = await showGlassMenu<bool>(
+      context: anchor,
+      reduceMotion: widget.state.reduceMotion,
+      builder: (menu) => GlassMenuItem(
+        label: '移除插图位置',
+        icon: CupertinoIcons.trash,
+        onPressed: () => Navigator.pop(menu, true),
+      ),
+    );
+    if (remove == true) await _remove(placement);
+  }
+
   Future<void> _chooseParagraph() async {
     final source = widget.source;
     if (source == null) return;
@@ -124,27 +140,25 @@ class _IllustrationLayoutPageState extends State<IllustrationLayoutPage> {
       context: context,
       reduceMotion: widget.state.reduceMotion,
       heightFactor: .78,
-      builder: (sheet) => ListView.builder(
+      builder: (sheet) => ListView.separated(
         padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
         itemCount: ids.length + 1,
+        separatorBuilder: (_, _) => const SizedBox(height: 14),
         itemBuilder: (_, index) {
           if (index == 0) {
-            return const Padding(
-              padding: EdgeInsets.only(bottom: 12),
-              child: ArchiveSection(
-                title: '选择段落',
-                code: 'ILLUSTRATIONS / ANCHOR',
-              ),
+            return const ArchiveSection(
+              title: '选择段落',
+              code: 'ILLUSTRATIONS / ANCHOR',
             );
           }
           final id = ids[index - 1];
-          return GlassTextButton(
-            onPressed: () => Navigator.pop(sheet, id),
+          return ContentPanel(
+            onTap: () => Navigator.pop(sheet, id),
             child: AppText(
               source.paragraphs[id],
               maxLines: 3,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 13, height: 1.65),
+              style: const TextStyle(fontSize: 14, height: 1.5),
             ),
           );
         },
@@ -159,10 +173,44 @@ class _IllustrationLayoutPageState extends State<IllustrationLayoutPage> {
     }
   }
 
+  Future<void> _openPageActions(BuildContext anchor) async {
+    if (widget.source == null || _saving) return;
+    final action = await showGlassMenu<String>(
+      context: anchor,
+      reduceMotion: widget.state.reduceMotion,
+      builder: (menu) => Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          GlassMenuItem(
+            key: const ValueKey('illustration-placement-action'),
+            label: _paragraph == null ? '手动修正插图位置' : '更换段落',
+            icon: CupertinoIcons.photo,
+            onPressed: () => Navigator.pop(menu, 'paragraph'),
+          ),
+        ],
+      ),
+    );
+    if (!mounted || action != 'paragraph') return;
+    await _chooseParagraph();
+  }
+
   @override
   Widget build(BuildContext context) => ArchiveFeaturePage(
     title: '插图排版',
     code: 'ILLUSTRATIONS / PLACEMENT',
+    actions: [
+      if (widget.source != null)
+        GlassMenuAnchor(
+          child: Builder(
+            builder: (anchor) => GlassIconButton(
+              key: const ValueKey('illustration-placement-actions'),
+              icon: CupertinoIcons.ellipsis,
+              label: '插图排版操作',
+              onPressed: _saving ? null : () => _openPageActions(anchor),
+            ),
+          ),
+        ),
+    ],
     child: AnimatedBuilder(
       animation: widget.state.illustrationChanges,
       builder: (context, _) {
@@ -176,18 +224,10 @@ class _IllustrationLayoutPageState extends State<IllustrationLayoutPage> {
               builder: (context, snapshot) => ListView(
                 padding: featurePadding(context),
                 children: [
-                  if (widget.source != null)
-                    GlassTextButton(
-                      onPressed: _saving ? null : _chooseParagraph,
-                      child: AppText(_paragraph == null ? '手动修正插图位置' : '更换段落'),
-                    ),
                   if (_paragraph != null) ...[
-                    const AppText(
-                      '放在这个段落之后',
-                      style: TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.w600,
-                      ),
+                    const ArchiveSection(
+                      title: '放在这个段落之后',
+                      code: 'ILLUSTRATIONS / ANCHOR',
                     ),
                     const SizedBox(height: 12),
                     ContentPanel(
@@ -199,9 +239,9 @@ class _IllustrationLayoutPageState extends State<IllustrationLayoutPage> {
                       ),
                     ),
                     const SizedBox(height: 18),
-                    const AppText(
-                      '选择本卷插图',
-                      style: TextStyle(fontWeight: FontWeight.w600),
+                    const ArchiveSection(
+                      title: '选择本卷插图',
+                      code: 'ILLUSTRATIONS / IMAGES',
                     ),
                     const SizedBox(height: 12),
                     if (snapshot.connectionState != ConnectionState.done)
@@ -210,13 +250,25 @@ class _IllustrationLayoutPageState extends State<IllustrationLayoutPage> {
                         child: LoadingSkeleton(layout: SkeletonLayout.library),
                       )
                     else if (snapshot.hasError) ...[
-                      const AppText('本卷插图暂未读取成功，正文和已保存的位置不受影响。'),
-                      GlassTextButton(
-                        onPressed: () => setState(() => _images = _load()),
-                        child: const AppText('重试读取'),
+                      SizedBox(
+                        height: 190,
+                        child: ContentNotice(
+                          icon: CupertinoIcons.exclamationmark_triangle,
+                          title: '插图暂未读取成功',
+                          message: '正文和已保存的位置不受影响。',
+                          onRetry: () => setState(() => _images = _load()),
+                          actionLabel: '重试读取',
+                        ),
                       ),
                     ] else if (snapshot.data!.isEmpty)
-                      const AppText('本卷没有找到独立插图章节。已有的文内插图会保留原位置。')
+                      const SizedBox(
+                        height: 190,
+                        child: ContentNotice(
+                          icon: CupertinoIcons.photo,
+                          title: '没有独立插图章节',
+                          message: '已有的文内插图会保留原位置。',
+                        ),
+                      )
                     else ...[
                       GridView.builder(
                         shrinkWrap: true,
@@ -288,7 +340,7 @@ class _IllustrationLayoutPageState extends State<IllustrationLayoutPage> {
                     ),
                   for (final placement in placements)
                     Padding(
-                      padding: const EdgeInsets.only(bottom: 12),
+                      padding: const EdgeInsets.only(bottom: 14),
                       child: ContentPanel(
                         child: Row(
                           children: [
@@ -311,7 +363,7 @@ class _IllustrationLayoutPageState extends State<IllustrationLayoutPage> {
                                     overflow: TextOverflow.ellipsis,
                                     style: const TextStyle(
                                       fontSize: 12,
-                                      height: 1.7,
+                                      height: 1.4,
                                     ),
                                   ),
                                   if (widget.source != null &&
@@ -331,10 +383,14 @@ class _IllustrationLayoutPageState extends State<IllustrationLayoutPage> {
                                 ],
                               ),
                             ),
-                            GlassIconButton(
-                              icon: CupertinoIcons.trash,
-                              label: '移除插图位置 ${placement.id}',
-                              onPressed: () => _remove(placement),
+                            GlassMenuAnchor(
+                              child: Builder(
+                                builder: (anchor) => CompactRowMenuButton(
+                                  label: '插图位置 ${placement.id} 更多操作',
+                                  onPressed: () =>
+                                      _openPlacementMenu(anchor, placement),
+                                ),
+                              ),
                             ),
                           ],
                         ),

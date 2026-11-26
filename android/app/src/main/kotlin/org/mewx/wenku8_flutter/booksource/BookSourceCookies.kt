@@ -182,6 +182,14 @@ internal class BookSourceCookies(private val key: String, private val variables:
         variables?.remove(cookieKey(key))
     }
 
+    @Synchronized fun remove(url: HttpUrl) {
+        if (!active) return
+        val origin = url.origin()
+        byOrigin[origin]?.removeAll { it.matches(url) }
+        if (byOrigin[origin].isNullOrEmpty()) byOrigin.remove(origin)
+        persist()
+    }
+
     /** 书源 key 可能是占位域名，脚本按 key 查询 Cookie 时回退到该来源已保存的会话。 */
     @Synchronized fun anyValues(): Map<String, String> = buildMap {
         if (!active) return@buildMap
