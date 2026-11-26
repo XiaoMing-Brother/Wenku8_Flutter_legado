@@ -275,8 +275,12 @@ Map<String, Object> _validateRecords(Map<String, dynamic> input) {
         'localReaderMode' ||
         'directReading' ||
         'openRecentOnLaunch' ||
+        'calligraphySplashEnabled' ||
+        'calligraphySplashOncePerDay' ||
         'combinedShelf' ||
         'checkAppUpdates' => value is bool,
+        'calligraphySplashLastShownDay' =>
+          value is int && value >= 0 && value <= 99991231,
         'appLanguage' => [
           'system',
           'simplified',
@@ -307,7 +311,9 @@ Map<String, Object> _validateRecords(Map<String, dynamic> input) {
               value is bool,
       };
       if (!valid) throw const FormatException('偏好设置格式有误');
-      output[key] = value is num ? value.toDouble() : value as Object;
+      output[key] = value is num && key != 'calligraphySplashLastShownDay'
+          ? value.toDouble()
+          : value as Object;
     } else if (key == ReadingMomentsStore.preferenceKey) {
       if (value is! String) throw const FormatException('阅读纪念记录格式有误');
       output[key] = ReadingMomentsStore.validateRecord(value);
@@ -500,7 +506,7 @@ void _validatePosition(Object? record) {
       (record['typeface'] != null && !validFontChoice(record['typeface'])) ||
       (record['layout'] != null &&
           (record['layout'] is! String ||
-              (record['layout'] as String).length > 128)) ||
+              (record['layout'] as String).length > 512)) ||
       (record['paragraphIndex'] != null &&
           (record['paragraphIndex'] is! int ||
               !_number(record['paragraphIndex'], 0, 1000000))) ||

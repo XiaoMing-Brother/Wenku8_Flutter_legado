@@ -7763,6 +7763,7 @@ class _ReaderPageState extends State<ReaderPage>
   Future<void> _prepareBookFont() async {
     try {
       await widget.state.fonts.ensureLoaded(_readerFontId);
+      await widget.state.fonts.ensureLoaded(_readerPreferences.fallbackFont);
     } catch (_) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) {
@@ -8109,6 +8110,39 @@ class _ReaderPageState extends State<ReaderPage>
   bool _typographyPreviewing = false;
   double _layoutTextScale = 1;
   double _readingInset = 0;
+  ({Size size, double ratio, bool hideStatus, EdgeInsets padding})?
+  _contentWindowInsets;
+  bool _contentInsetsLocked = false;
+
+  MediaQueryData _contentMedia(BuildContext context) {
+    final media = MediaQuery.of(context);
+    // 菜单会切换系统导航栏；展开前锁定正文安全区，避免位移和重新分页。
+    final hideStatus = _readerPreferences.hideSystemStatus;
+    if (_contentWindowInsets?.size != media.size ||
+        _contentWindowInsets?.ratio != media.devicePixelRatio ||
+        _contentWindowInsets?.hideStatus != hideStatus) {
+      _contentInsetsLocked = false;
+    }
+    if (!_contentInsetsLocked) {
+      _contentWindowInsets = (
+        size: media.size,
+        ratio: media.devicePixelRatio,
+        hideStatus: hideStatus,
+        padding: media.viewPadding,
+      );
+    }
+    final safe = _contentWindowInsets!.padding;
+    return media.copyWith(
+      viewPadding: safe,
+      padding: EdgeInsets.fromLTRB(
+        math.max(0, safe.left - media.viewInsets.left),
+        math.max(0, safe.top - media.viewInsets.top),
+        math.max(0, safe.right - media.viewInsets.right),
+        math.max(0, safe.bottom - media.viewInsets.bottom),
+      ),
+    );
+  }
+
   int _contentGeneration = 0;
   final Set<int> _reviewsRequested = <int>{};
   int _reviewRevision = 0;
@@ -9547,6 +9581,8 @@ class _ReaderPageState extends State<ReaderPage>
     }
     final changed = _chromeTarget != visible;
     if (changed) {
+      _contentMedia(context);
+      _contentInsetsLocked = true;
       unawaited(
         widget.state.setReaderChromeVisible(visible).catchError((Object _) {
           if (mounted) showNovelFeedback(context, '控件显示偏好未保存，请重试');
@@ -12698,7 +12734,7 @@ class _ReaderPageState extends State<ReaderPage>
     builder: (context) {
       if (_opening || _paginated) return const SizedBox.shrink();
       final preferences = _readerPreferences;
-      final safe = MediaQuery.viewPaddingOf(context);
+      final safe = _contentMedia(context).viewPadding;
       final dark = Theme.of(context).brightness == Brightness.dark;
       final statusInsets = !footer && preferences.hideSystemStatus
           ? ReaderStatusFooter.horizontalInsetsFor(
@@ -12728,10 +12764,7 @@ class _ReaderPageState extends State<ReaderPage>
             : (preferences.hideSystemStatus
                   ? preferences.statusTopOffset
                   : safe.top + preferences.statusTopOffset),
-        bottom: footer
-            ? MediaQuery.viewPaddingOf(context).bottom +
-                  preferences.footerPadding.bottom
-            : null,
+        bottom: footer ? safe.bottom + preferences.footerPadding.bottom : null,
         left: footer
             ? safe.left + preferences.footerPadding.left
             : safe.left + preferences.headerPadding.left,
@@ -12862,24 +12895,30 @@ class _ReaderPageState extends State<ReaderPage>
                               controller: _contentTapSurface,
                               onTapUp: _contentTap,
                               onPreview: _previewContentTap,
-                              child: _opening
-                                  ? ReaderBackground(
-                                      night: _readerPreferences.usesNight(
-                                        appDark,
-                                      ),
-                                      store: widget.state.backgrounds,
-                                      preferences: _readerPreferences,
-                                      paper: _readerPreferences.background(
-                                        appDark,
-                                      ),
-                                      reduceMotion: widget.state.reduceMotion,
-                                      child: _BookOpeningPage(
-                                        novel: _sourceBook,
-                                        mode: _readerMode,
-                                        onOpen: _openReader,
-                                      ),
-                                    )
-                                  : _article(context, chapter, appDark),
+                              child: MediaQuery(
+                                data: _contentMedia(context),
+                                child: Builder(
+                                  builder: (context) => _opening
+                                      ? ReaderBackground(
+                                          night: _readerPreferences.usesNight(
+                                            appDark,
+                                          ),
+                                          store: widget.state.backgrounds,
+                                          preferences: _readerPreferences,
+                                          paper: _readerPreferences.background(
+                                            appDark,
+                                          ),
+                                          reduceMotion:
+                                              widget.state.reduceMotion,
+                                          child: _BookOpeningPage(
+                                            novel: _sourceBook,
+                                            mode: _readerMode,
+                                            onOpen: _openReader,
+                                          ),
+                                        )
+                                      : _article(context, chapter, appDark),
+                                ),
+                              ),
                             ),
                           ),
                         ),
@@ -13175,6 +13214,7 @@ class _ReaderPageState extends State<ReaderPage>
   }
 
   Widget _scrollArticle(
+    BuildContext context,
     ReaderPreferences prefs,
     bool dark,
     TextStyle style,
@@ -13447,6 +13487,8 @@ class _ReaderPageState extends State<ReaderPage>
                 .merge(
                   TextStyle(
                     fontFamily: _readerFontFamily ?? 'Roboto',
+                    fontFamilyFallback: widget.state
+                        .readerFallbackFontFamiliesFor(widget.novel.id),
                     fontSize: _fontSize,
                     height: _lineHeight,
                     letterSpacing: prefs.letterSpacing,
@@ -13613,6 +13655,7 @@ class _ReaderPageState extends State<ReaderPage>
                               ),
                             )
                           : _scrollArticle(
+                              context,
                               prefs,
                               dark,
                               paragraphStyle,

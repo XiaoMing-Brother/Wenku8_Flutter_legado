@@ -321,6 +321,32 @@ class ReaderTextLayoutCache {
   }
 }
 
+int _paragraphBreak(
+  List<double> heights,
+  int first,
+  int end,
+  int limit,
+  double pageHeight, {
+  required bool pageHasContent,
+}) {
+  final count = end - first;
+  if (end >= limit || count == 0) return end;
+  final firstPairFits =
+      first + 1 < limit &&
+      heights[first] + heights[first + 1] <= pageHeight + .1;
+  if (count == 1 && pageHasContent && firstPairFits) return first;
+  if (limit - end != 1) return end;
+  final lastPairFits = heights[end - 1] + heights[end] <= pageHeight + .1;
+  if (count >= 3 && lastPairFits) return end - 1;
+  if (pageHasContent &&
+      heights.getRange(first, limit).fold(0.0, (a, b) => a + b) <=
+          pageHeight + .1) {
+    return first;
+  }
+  // 小页面或超高行以持续前进为先，避免反复移到下一页。
+  return end;
+}
+
 /// Actual line/glyph boundaries, not viewport-sized scroll jumps. Only the
 /// current chapter is measured, yielding between bounded chunks of work.
 Future<ReaderPagination?> paginateReader({
@@ -632,6 +658,25 @@ Future<ReaderPagination?> paginateReader({
               (line == first || line != breakLine) &&
               (height == 0 || y + height + heights[line] <= size.height + .1)) {
             height += heights[line++];
+          }
+          if (preferences.mode == ReaderMode.paged &&
+              preferences.avoidWidowsOrphans) {
+            final adjusted = _paragraphBreak(
+              heights,
+              first,
+              line,
+              breakLine > first ? breakLine : heights.length,
+              size.height,
+              pageHasContent: fragments.isNotEmpty,
+            );
+            if (adjusted == first) {
+              line = first;
+              flush();
+              continue;
+            }
+            while (line > adjusted) {
+              height -= heights[--line];
+            }
           }
           final start = (starts[first] - prefix.length).clamp(0, text.length);
           final end = (starts[line] - prefix.length).clamp(start, text.length);

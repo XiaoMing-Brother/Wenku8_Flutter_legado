@@ -4,6 +4,7 @@ import 'archive_design.dart';
 import 'personal_images.dart' show validBackgroundId;
 import 'reader_theme_presets.dart';
 import 'reader_tip.dart';
+import 'user_fonts.dart' show validFontChoice;
 
 const minimumReaderFontSize = 10.0;
 const maximumReaderFontSize = 27.0;
@@ -287,6 +288,8 @@ class ReaderPreferences {
     this.catalogueReversed = false,
     this.indentCount = 0,
     this.justify = false,
+    this.avoidWidowsOrphans = true,
+    this.fallbackFont = 'system',
     this.italic = false,
     this.tapPaging = false,
     this.tapBothSidesNext = false,
@@ -482,6 +485,8 @@ class ReaderPreferences {
   final int indentCount;
   bool get indent => indentCount > 0;
   final bool justify, italic, tapPaging, tapBothSidesNext, volumePaging;
+  final bool avoidWidowsOrphans;
+  final String fallbackFont;
   final double? brightness;
   final ReaderMode mode;
   final ReaderVerticalLatinOrientation verticalLatinOrientation;
@@ -579,6 +584,9 @@ class ReaderPreferences {
         : '${leftMargin == rightMargin && marginTop == 8 && marginBottom == 8 ? '$leftMargin' : '$leftMargin,$marginTop,$rightMargin,$marginBottom'}:$paragraphGap:$indentCount:$justify';
     final modeKey = mode == ReaderMode.scroll ? '' : ':${mode.name}';
     final gapKey = paragraphGapOverride ? ':gap=custom' : '';
+    final typographyKey =
+        '${mode == ReaderMode.paged && avoidWidowsOrphans ? ':widows=2' : ''}'
+        '${fallbackFont == 'system' ? '' : ':fallback=$fallbackFont'}';
     final textKey =
         letterSpacing == .1 && textWeight == ReaderTextWeight.regular && !italic
         ? ''
@@ -593,10 +601,10 @@ class ReaderPreferences {
         : ':title=$titleScale,${titleWeight.name},${titlePosition.name},$titleTopSpacing,$titleBottomSpacing';
     if (mode == ReaderMode.vertical &&
         verticalLatinOrientation == ReaderVerticalLatinOrientation.upright) {
-      return '$geometry$gapKey$textKey$titleKey:latin=upright$modeKey';
+      return '$geometry$gapKey$textKey$titleKey:latin=upright$modeKey$typographyKey';
     }
-    // Existing preferences retain exactly the same persisted layout key.
-    return '$geometry$gapKey$modeKey$textKey$titleKey';
+    // 新排版规则使用独立后缀，基础布局键继续兼容旧记录。
+    return '$geometry$gapKey$modeKey$textKey$titleKey$typographyKey';
   }
 
   Color background(bool appDark) {
@@ -674,6 +682,8 @@ class ReaderPreferences {
     'indent': indent,
     'indentCount': indentCount,
     'justify': justify,
+    'avoidWidowsOrphans': avoidWidowsOrphans,
+    'fallbackFont': fallbackFont,
     'italic': italic,
     'tapPaging': tapPaging,
     'tapBothSidesNext': tapBothSidesNext,
@@ -737,6 +747,7 @@ class ReaderPreferences {
     for (final key in [
       'indent',
       'justify',
+      'avoidWidowsOrphans',
       'italic',
       'tapPaging',
       'tapBothSidesNext',
@@ -751,6 +762,10 @@ class ReaderPreferences {
       if (json[key] != null && json[key] is! bool) {
         throw const FormatException('阅读偏好格式有误');
       }
+    }
+    if (json['fallbackFont'] != null &&
+        !validFontChoice(json['fallbackFont'])) {
+      throw const FormatException('补字字体记录有误');
     }
     if (json['backgroundImage'] != null &&
         !validBackgroundId(json['backgroundImage'])) {
@@ -808,6 +823,8 @@ class ReaderPreferences {
           ? (json['indent'] == true ? 2 : 0)
           : number('indentCount', 0, 4, 0).toInt(),
       justify: json['justify'] == true,
+      avoidWidowsOrphans: json['avoidWidowsOrphans'] as bool? ?? true,
+      fallbackFont: json['fallbackFont'] as String? ?? 'system',
       italic: json['italic'] == true,
       tapPaging: json['tapPaging'] == true,
       tapBothSidesNext: json['tapBothSidesNext'] == true,
@@ -931,6 +948,8 @@ class ReaderPreferences {
     int? indentCount,
     bool? indent,
     bool? justify,
+    bool? avoidWidowsOrphans,
+    String? fallbackFont,
     bool? italic,
     bool? tapPaging,
     bool? tapBothSidesNext,
@@ -995,6 +1014,8 @@ class ReaderPreferences {
     indentCount:
         indentCount ?? (indent == null ? this.indentCount : (indent ? 2 : 0)),
     justify: justify ?? this.justify,
+    avoidWidowsOrphans: avoidWidowsOrphans ?? this.avoidWidowsOrphans,
+    fallbackFont: fallbackFont ?? this.fallbackFont,
     italic: italic ?? this.italic,
     tapPaging: tapPaging ?? this.tapPaging,
     tapBothSidesNext: tapBothSidesNext ?? this.tapBothSidesNext,
@@ -1059,6 +1080,8 @@ class ReaderPreferences {
     catalogueReversed: catalogueReversed,
     indentCount: layout.indentCount,
     justify: layout.justify,
+    avoidWidowsOrphans: layout.avoidWidowsOrphans,
+    fallbackFont: layout.fallbackFont,
     italic: layout.italic,
     mode: layout.mode,
     verticalLatinOrientation: layout.verticalLatinOrientation,

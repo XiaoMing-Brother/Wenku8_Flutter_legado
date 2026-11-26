@@ -844,6 +844,7 @@ class LibraryState extends ChangeNotifier {
       await fonts.load();
       await fonts.ensureLoaded(appFontId);
       await fonts.ensureLoaded(readerFontId);
+      await fonts.ensureLoaded(_readerPreferences.fallbackFont);
       fontError = null;
       if (!_disposed) {
         _application.notifyListeners();
@@ -1036,6 +1037,16 @@ class LibraryState extends ChangeNotifier {
   }
 
   String? readerFontFamilyFor(int? id) => fonts.family(readerFontIdFor(id));
+  List<String> readerFallbackFontFamiliesFor(int? id) {
+    final choice = readerPreferencesFor(id).fallbackFont;
+    final family = fonts.family(choice);
+    return family == null ||
+            !fonts.isLoaded(choice) ||
+            family == readerFontFamilyFor(id)
+        ? const []
+        : [family];
+  }
+
   ThemeMode get theme => _theme;
   double get fontSize => _fontSize;
   double get lineHeight => _lineHeight;
@@ -1522,6 +1533,9 @@ class LibraryState extends ChangeNotifier {
         (_) => setReaderPreferences(value, persist: persist, bookId: bookId),
       );
     }
+    if (value.fallbackFont != readerPreferencesFor(bookId).fallbackFont) {
+      await fonts.ensureLoaded(value.fallbackFont);
+    }
     if (_readerStyleFor(bookId) case final style?) {
       final shared = value.withLayoutOf(_readerPreferences);
       return _setBookReaderStyle(
@@ -1561,7 +1575,10 @@ class LibraryState extends ChangeNotifier {
                   typeface: _readerTypeface,
                 ))
             .copyWith(enabled: enabled);
-    if (enabled) await fonts.ensureLoaded(_readerFontIdForStyle(style));
+    if (enabled) {
+      await fonts.ensureLoaded(_readerFontIdForStyle(style));
+      await fonts.ensureLoaded(style.preferences.fallbackFont);
+    }
     await _setBookReaderStyle(id, style);
   }
 
@@ -3213,7 +3230,9 @@ class LibraryState extends ChangeNotifier {
   Future<void> downloadReadingFont([String id = sourceHanFontId]) async {
     await fonts.downloadFont(id);
     if (_bookReaderStyles.values.any(
-      (style) => style.enabled && style.typeface == id,
+      (style) =>
+          style.enabled &&
+          (style.typeface == id || style.preferences.fallbackFont == id),
     )) {
       await fonts.ensureLoaded(id);
     }
@@ -3284,18 +3303,30 @@ class LibraryState extends ChangeNotifier {
     if (appFontChoice == id) await setAppFont('system');
     if (_readerTypeface == id) await setReaderTypeface(followAppFont);
     await _queuePositionWrite(() async {
+      final shared = _readerPreferences.fallbackFont == id
+          ? _readerPreferences.copyWith(fallbackFont: 'system')
+          : _readerPreferences;
       final changed = {
         for (final entry in _bookReaderStyles.entries)
-          if (entry.value.typeface == id)
-            entry.key: entry.value.copyWith(typeface: followAppFont),
+          if (entry.value.typeface == id ||
+              entry.value.preferences.fallbackFont == id)
+            entry.key: entry.value.copyWith(
+              typeface: entry.value.typeface == id ? followAppFont : null,
+              preferences: entry.value.preferences.fallbackFont == id
+                  ? entry.value.preferences.copyWith(fallbackFont: 'system')
+                  : null,
+            ),
       };
-      if (changed.isEmpty) return;
+      if (changed.isEmpty && identical(shared, _readerPreferences)) return;
       await _commitLibraryRecords({
+        if (!identical(shared, _readerPreferences))
+          'readerPreferences': jsonEncode(shared.toJson()),
         for (final entry in changed.entries)
           '$bookReaderStylePrefix${entry.key}': jsonEncode(
             entry.value.toJson(),
           ),
       });
+      _readerPreferences = shared;
       _bookReaderStyles.addAll(changed);
       if (!_disposed) _readerSettings.notifyListeners();
     });
@@ -3824,8 +3855,13 @@ class LibraryState extends ChangeNotifier {
           for (final choice in [
             records['appCustomFont'],
             records['readerTypeface'],
+            if (records['readerPreferences'] case final String record)
+              ReaderPreferences.fromRecord(record).fallbackFont,
             for (final style in bookStyles.values)
-              if (style.enabled) style.typeface,
+              if (style.enabled) ...[
+                style.typeface,
+                style.preferences.fallbackFont,
+              ],
           ].whereType<String>().toSet()) {
             await fonts.ensureLoaded(choice);
           }

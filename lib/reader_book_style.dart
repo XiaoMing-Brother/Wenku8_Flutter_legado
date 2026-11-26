@@ -83,6 +83,8 @@ class ReaderBookStyle {
     'indentCount',
     'indent',
     'justify',
+    'avoidWidowsOrphans',
+    'fallbackFont',
     'italic',
     'nightTextBrightness',
     'letterSpacing',

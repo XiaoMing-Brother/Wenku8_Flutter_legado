@@ -9,6 +9,7 @@ import 'book_documents.dart';
 import 'feature_pages.dart';
 import 'font_download.dart';
 import 'library_state.dart';
+import 'reader_preferences.dart';
 import 'user_fonts.dart';
 
 class FontSettingsPage extends StatefulWidget {
@@ -19,12 +20,14 @@ class FontSettingsPage extends StatefulWidget {
     this.documents,
     this.bookId,
     this.onReaderTypefaceChanged,
+    this.onReaderPreferencesChanged,
   });
   final LibraryState state;
   final bool readerOnly;
   final BookDocuments? documents;
   final int? bookId;
   final Future<void> Function(String)? onReaderTypefaceChanged;
+  final ValueChanged<ReaderPreferences>? onReaderPreferencesChanged;
   @override
   State<FontSettingsPage> createState() => _FontSettingsPageState();
 }
@@ -86,6 +89,133 @@ class _FontSettingsPageState extends State<FontSettingsPage> {
     );
     if (!mounted || value == null) return;
     await _perform(() => _applyChoice(value, reader: reader));
+  }
+
+  Future<void> _chooseFallback() async {
+    final state = widget.state;
+    final fonts = state.fonts;
+    final selected = state.readerPreferencesFor(widget.bookId).fallbackFont;
+    final choices = <String>{
+      'system',
+      ...fonts.fonts.map((font) => font.id),
+      ...downloadableFonts.map((font) => font.id),
+    }.toList();
+    final value = await showJellySheet<String>(
+      context: context,
+      reduceMotion: state.reduceMotion,
+      heightFactor: .72,
+      builder: (sheet) => Padding(
+        padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const ArchiveSection(title: '正文补字字体', code: 'TYPE / FALLBACK'),
+            const SizedBox(height: 14),
+            Expanded(
+              child: ListView.separated(
+                itemCount: choices.length,
+                separatorBuilder: (_, _) => const SizedBox(height: 14),
+                itemBuilder: (context, index) {
+                  final id = choices[index];
+                  final download = downloadableFont(id);
+                  return ContentPanel(
+                    key: ValueKey('reader-fallback-font-$id'),
+                    onTap: () => Navigator.pop(sheet, id),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              AppText(
+                                id == 'system' ? '系统自动补字' : fonts.label(id),
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                              AppText(
+                                download != null && !fonts.available(id)
+                                    ? '下载并使用 · ${download.sizeLabel}'
+                                    : '正文主字体缺字时使用',
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  height: 1.4,
+                                  color: Theme.of(
+                                    context,
+                                  ).colorScheme.onSurfaceVariant,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        if (id == selected)
+                          const ArchiveIcon(CupertinoIcons.checkmark, size: 18),
+                      ],
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (!mounted || value == null) return;
+    await _perform(() async {
+      if (downloadableFont(value) != null && !fonts.available(value)) {
+        await state.downloadReadingFont(value);
+      }
+      await fonts.ensureLoaded(value);
+      if (!mounted) return;
+      final preferences = state
+          .readerPreferencesFor(widget.bookId)
+          .copyWith(fallbackFont: value);
+      if (widget.onReaderPreferencesChanged case final change?) {
+        change(preferences);
+      } else {
+        await state.setReaderPreferences(preferences, bookId: widget.bookId);
+      }
+    });
+  }
+
+  Widget _fallbackSelection() {
+    final state = widget.state;
+    final choice = state.readerPreferencesFor(widget.bookId).fallbackFont;
+    return ContentPanel(
+      key: const ValueKey('reader-fallback-font-choice'),
+      onTap: busy ? null : _chooseFallback,
+      child: Row(
+        children: [
+          const ArchiveIcon(CupertinoIcons.textformat_abc, size: 21),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const AppText(
+                  '正文补字字体',
+                  style: TextStyle(fontWeight: FontWeight.w600),
+                ),
+                const SizedBox(height: 5),
+                AppText(
+                  '${choice == 'system' ? '系统自动补字' : state.fontLabel(choice)} · 主字体缺字时使用',
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 12,
+                    height: 1.4,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const ArchiveIcon(CupertinoIcons.chevron_right, size: 14),
+        ],
+      ),
+    );
   }
 
   Future<void> _perform(Future<void> Function() action) async {
@@ -328,6 +458,8 @@ class _FontSettingsPageState extends State<FontSettingsPage> {
                 const SizedBox(height: 16),
               ],
               _selection(reader: true),
+              const SizedBox(height: 14),
+              _fallbackSelection(),
               const SizedBox(height: 10),
               AppText(
                 '右上角可导入 TTF、OTF 字体，单款 32 MiB 以内。',

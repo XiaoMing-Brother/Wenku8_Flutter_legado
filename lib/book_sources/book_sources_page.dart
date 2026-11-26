@@ -3220,7 +3220,7 @@ class _BookSourceLoginSheetState extends State<BookSourceLoginSheet> {
 
   @override
   Widget build(BuildContext context) => SizedBox(
-    height: math.min(620, MediaQuery.sizeOf(context).height * .86),
+    height: double.infinity,
     child: Padding(
       padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
       child: Column(

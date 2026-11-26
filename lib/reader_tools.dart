@@ -1395,6 +1395,7 @@ class _ReaderToolsState extends State<ReaderTools>
               readerOnly: true,
               bookId: widget.novel.id,
               onReaderTypefaceChanged: widget.onReaderTypefaceChanged,
+              onReaderPreferencesChanged: (value) => _preferences(value),
             ),
             reduceMotion: widget.state.reduceMotion,
           ),
@@ -1618,6 +1619,15 @@ class _ReaderToolsState extends State<ReaderTools>
               _readerPreferences.justify,
               (v) => _preferences(_readerPreferences.copyWith(justify: v)),
             ),
+            if (_readerPreferences.mode == ReaderMode.paged)
+              _switch(
+                context,
+                '避免跨页孤行',
+                _readerPreferences.avoidWidowsOrphans,
+                (v) => _preferences(
+                  _readerPreferences.copyWith(avoidWidowsOrphans: v),
+                ),
+              ),
             _switch(
               context,
               '使用出版方字体',
