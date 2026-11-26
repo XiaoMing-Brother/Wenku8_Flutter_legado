@@ -8,6 +8,8 @@ import 'user_fonts.dart' show validFontChoice;
 
 const minimumReaderFontSize = 10.0;
 const maximumReaderFontSize = 27.0;
+const defaultReaderFontSize = 17.0;
+const defaultReaderLineHeight = 1.72;
 
 enum ReaderPaper {
   system('跟随外观'),
@@ -278,17 +280,17 @@ class ReaderPreferences {
     this.recentLooks = const [],
     this.dayShelf = const [],
     this.nightShelf = const [],
-    this.margin = 26,
+    this.margin = 16,
     this.marginLeft,
     this.marginRight,
-    this.marginTop = 8,
-    this.marginBottom = 8,
+    this.marginTop = 0,
+    this.marginBottom = 0,
     this.paragraphGap = 12,
     this.paragraphGapOverride = false,
     this.catalogueReversed = false,
-    this.indentCount = 0,
-    this.justify = false,
-    this.avoidWidowsOrphans = true,
+    this.indentCount = 2,
+    this.justify = true,
+    this.avoidWidowsOrphans = false,
     this.fallbackFont = 'system',
     this.italic = false,
     this.tapPaging = false,
@@ -296,7 +298,7 @@ class ReaderPreferences {
     this.volumePaging = false,
     this.brightness,
     this.autoScrollSpeed = 24,
-    this.mode = ReaderMode.scroll,
+    this.mode = ReaderMode.paged,
     this.verticalLatinOrientation = ReaderVerticalLatinOrientation.rotated,
     this.tapLayout = ReaderTapLayout.standard,
     this.tapGrid = ReaderTapAction.defaultGrid,
@@ -313,10 +315,10 @@ class ReaderPreferences {
     this.textWeight = ReaderTextWeight.regular,
     this.titleScale = 1.2,
     this.titleWeight = ReaderTextWeight.bold,
-    this.titlePosition = ReaderTitlePosition.start,
-    this.titleTopSpacing = 0,
+    this.titlePosition = ReaderTitlePosition.center,
+    this.titleTopSpacing = 95,
     this.titleBottomSpacing = 28,
-    this.pagedChapterHeading = false,
+    this.pagedChapterHeading = true,
     this.imageTap = ReaderImageTap.open,
     this.statusSideInset = 0,
     this.statusFontSize = 12,
@@ -326,10 +328,45 @@ class ReaderPreferences {
     this.backgroundFit = BoxFit.cover,
     this.headerTips = const [ReaderTip.none, ReaderTip.none, ReaderTip.none],
     this.footerTips = const [ReaderTip.none, ReaderTip.none, ReaderTip.none],
-    this.headerPadding = EdgeInsets.zero,
-    this.footerPadding = EdgeInsets.zero,
+    this.headerPadding = const EdgeInsets.symmetric(
+      horizontal: 24,
+      vertical: 8,
+    ),
+    this.footerPadding = const EdgeInsets.symmetric(
+      horizontal: 24,
+      vertical: 8,
+    ),
     this.dockActions = defaultDockActions,
   });
+
+  factory ReaderPreferences.initial() =>
+      ReaderPreferences(theme: readerPaperThemes.first.selection);
+
+  ReaderPreferences resetTypography() {
+    const defaults = ReaderPreferences();
+    return copyWith(
+      margin: defaults.margin,
+      marginTop: defaults.marginTop,
+      marginBottom: defaults.marginBottom,
+      paragraphGap: defaults.paragraphGap,
+      paragraphGapOverride: defaults.paragraphGapOverride,
+      indentCount: defaults.indentCount,
+      justify: defaults.justify,
+      avoidWidowsOrphans: defaults.avoidWidowsOrphans,
+      letterSpacing: defaults.letterSpacing,
+      textWeight: defaults.textWeight,
+      italic: defaults.italic,
+      titleScale: defaults.titleScale,
+      titleWeight: defaults.titleWeight,
+      titlePosition: defaults.titlePosition,
+      titleTopSpacing: defaults.titleTopSpacing,
+      titleBottomSpacing: defaults.titleBottomSpacing,
+      pagedChapterHeading: defaults.pagedChapterHeading,
+      headerPadding: defaults.headerPadding,
+      footerPadding: defaults.footerPadding,
+    );
+  }
+
   final ReaderPaper paper;
 
   /// Legado 远程主题；存在时覆盖 [paper] 的底色和文字色。
@@ -585,7 +622,7 @@ class ReaderPreferences {
     final modeKey = mode == ReaderMode.scroll ? '' : ':${mode.name}';
     final gapKey = paragraphGapOverride ? ':gap=custom' : '';
     final typographyKey =
-        '${mode == ReaderMode.paged && avoidWidowsOrphans ? ':widows=2' : ''}'
+        '${mode == ReaderMode.paged && avoidWidowsOrphans ? ':widows=1' : ''}'
         '${fallbackFont == 'system' ? '' : ':fallback=$fallbackFont'}';
     final textKey =
         letterSpacing == .1 && textWeight == ReaderTextWeight.regular && !italic
@@ -735,6 +772,7 @@ class ReaderPreferences {
     'dockActions': dockActions,
   };
   factory ReaderPreferences.fromJson(Map<String, dynamic> json) {
+    const defaults = ReaderPreferences();
     double number(String key, double min, double max, double fallback) {
       final value = json[key];
       if (value == null) return fallback;
@@ -805,25 +843,32 @@ class ReaderPreferences {
           ReaderLook.fromJson(look),
       ],
       themeMode: ReaderThemeMode.values.byName(json['themeMode'] ?? 'follow'),
-      margin: number('margin', 0, 200, 26),
+      margin: number('margin', 0, 200, defaults.margin),
       marginLeft: json['marginLeft'] == null
           ? null
-          : number('marginLeft', 0, 200, 26),
+          : number('marginLeft', 0, 200, defaults.margin),
       marginRight: json['marginRight'] == null
           ? null
-          : number('marginRight', 0, 200, 26),
-      marginTop: number('marginTop', 0, 200, 8),
-      marginBottom: number('marginBottom', 0, 200, 8),
+          : number('marginRight', 0, 200, defaults.margin),
+      marginTop: number('marginTop', 0, 200, defaults.marginTop),
+      marginBottom: number('marginBottom', 0, 200, defaults.marginBottom),
       paragraphGap: number('paragraphGap', 0, 32, 12),
       paragraphGapOverride:
           json['paragraphGapOverride'] as bool? ??
           number('paragraphGap', 0, 32, 12) != 12,
       catalogueReversed: json['catalogueReversed'] == true,
       indentCount: json['indentCount'] == null
-          ? (json['indent'] == true ? 2 : 0)
-          : number('indentCount', 0, 4, 0).toInt(),
-      justify: json['justify'] == true,
-      avoidWidowsOrphans: json['avoidWidowsOrphans'] as bool? ?? true,
+          ? (json['indent'] == null
+                ? defaults.indentCount
+                : (json['indent'] == true ? 2 : 0))
+          : number(
+              'indentCount',
+              0,
+              4,
+              defaults.indentCount.toDouble(),
+            ).toInt(),
+      justify: json['justify'] as bool? ?? defaults.justify,
+      avoidWidowsOrphans: json['avoidWidowsOrphans'] as bool? ?? false,
       fallbackFont: json['fallbackFont'] as String? ?? 'system',
       italic: json['italic'] == true,
       tapPaging: json['tapPaging'] == true,
@@ -842,11 +887,17 @@ class ReaderPreferences {
         json['titleWeight'] ?? 'bold',
       ),
       titlePosition: ReaderTitlePosition.values.byName(
-        json['titlePosition'] ?? 'start',
+        json['titlePosition'] ?? defaults.titlePosition.name,
       ),
-      titleTopSpacing: number('titleTopSpacing', 0, 200, 0),
+      titleTopSpacing: number(
+        'titleTopSpacing',
+        0,
+        200,
+        defaults.titleTopSpacing,
+      ),
       titleBottomSpacing: number('titleBottomSpacing', 0, 200, 28),
-      pagedChapterHeading: json['pagedChapterHeading'] == true,
+      pagedChapterHeading:
+          json['pagedChapterHeading'] as bool? ?? defaults.pagedChapterHeading,
       imageTap: ReaderImageTap.values.byName(json['imageTap'] ?? 'open'),
       statusSideInset: number('statusSideInset', 0, 96, 0),
       statusFontSize: number('statusFontSize', 9, 18, 12),
@@ -857,7 +908,7 @@ class ReaderPreferences {
           ? BoxFit.contain
           : BoxFit.cover,
       autoScrollSpeed: number('autoScrollSpeed', 8, 80, 24),
-      mode: ReaderMode.values.byName(json['mode'] ?? 'scroll'),
+      mode: ReaderMode.values.byName(json['mode'] ?? defaults.mode.name),
       verticalLatinOrientation: ReaderVerticalLatinOrientation.values.byName(
         json['verticalLatinOrientation'] ?? 'rotated',
       ),
@@ -878,8 +929,12 @@ class ReaderPreferences {
       pageSpeed: ReaderPageSpeed.values.byName(json['pageSpeed'] ?? 'normal'),
       headerTips: _readerTipsFromJson(json['headerTips']),
       footerTips: _readerTipsFromJson(json['footerTips']),
-      headerPadding: _edgeInsetsFromJson(json['headerPadding']),
-      footerPadding: _edgeInsetsFromJson(json['footerPadding']),
+      headerPadding: json['headerPadding'] == null
+          ? defaults.headerPadding
+          : _edgeInsetsFromJson(json['headerPadding']),
+      footerPadding: json['footerPadding'] == null
+          ? defaults.footerPadding
+          : _edgeInsetsFromJson(json['footerPadding']),
       dockActions: _dockActionsFromJson(json['dockActions']),
     );
   }
@@ -923,7 +978,7 @@ class ReaderPreferences {
     try {
       return ReaderPreferences.fromJson(jsonDecode(record as String));
     } catch (_) {
-      return const ReaderPreferences();
+      return ReaderPreferences.initial();
     }
   }
 
@@ -1093,6 +1148,7 @@ class ReaderPreferences {
     titlePosition: layout.titlePosition,
     titleTopSpacing: layout.titleTopSpacing,
     titleBottomSpacing: layout.titleBottomSpacing,
+    pagedChapterHeading: layout.pagedChapterHeading,
     backgroundImage: layout.backgroundImage,
     backgroundOpacity: layout.backgroundOpacity,
     backgroundFit: layout.backgroundFit,

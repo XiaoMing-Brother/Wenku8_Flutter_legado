@@ -139,28 +139,40 @@ class _BookCollectionSliverState extends State<BookCollectionSliver> {
       _columns = columns;
       _gridLayoutKey = gridLayoutKey;
       final Widget rows;
+      // 已知行高让快速滚动和恢复位置直接定位目标行，跳过此前的行布局。
       if (columns == 1) {
-        rows = SliverList.builder(
-          itemCount: widget.itemCount,
-          itemBuilder: _item,
-        );
+        rows = _geometry?.fixed == true
+            ? SliverFixedExtentList.builder(
+                itemExtent: _geometry!.rowHeight + gap,
+                itemCount: widget.itemCount,
+                itemBuilder: _item,
+              )
+            : SliverList.builder(
+                itemCount: widget.itemCount,
+                itemBuilder: _item,
+              );
       } else {
-        rows = SliverList.builder(
-          itemCount: (widget.itemCount / columns).ceil(),
-          itemBuilder: (context, row) => Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              for (var column = 0; column < columns; column++) ...[
-                if (column != 0) SizedBox(width: gap),
-                Expanded(
-                  child: row * columns + column < widget.itemCount
-                      ? _item(context, row * columns + column)
-                      : const SizedBox.shrink(),
-                ),
-              ],
+        Widget buildRow(BuildContext context, int row) => Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            for (var column = 0; column < columns; column++) ...[
+              if (column != 0) SizedBox(width: gap),
+              Expanded(
+                child: row * columns + column < widget.itemCount
+                    ? _item(context, row * columns + column)
+                    : const SizedBox.shrink(),
+              ),
             ],
-          ),
+          ],
         );
+        final rowCount = (widget.itemCount / columns).ceil();
+        rows = _geometry?.fixed == true
+            ? SliverFixedExtentList.builder(
+                itemExtent: _geometry!.rowHeight + gap,
+                itemCount: rowCount,
+                itemBuilder: buildRow,
+              )
+            : SliverList.builder(itemCount: rowCount, itemBuilder: buildRow);
       }
       if (widget.grid && !widget.gridDensity.automatic) {
         return _rows = BookGridScope(

@@ -44,6 +44,12 @@ class Novel {
   List<NovelDirectoryEntry> get directory =>
       _directoryCache[this] ??= _directory();
   List<NovelDirectoryEntry> _directory() {
+    if (navigation?.entries.isNotEmpty != true) {
+      return [
+        for (final (i, c) in chapters.indexed)
+          NovelDirectoryEntry(c.title, i, BookReadingTarget(c.id)),
+      ];
+    }
     final indices = {
       for (final (i, chapter) in chapters.indexed) chapter.id: i,
     };
@@ -70,6 +76,8 @@ class Novel {
       _directoryChaptersCache[this] ??= _directoryChapters();
 
   List<NovelChapter> _directoryChapters() {
+    // 普通网文章节已包含标题与分卷，直接复用；EPUB 保留原书导航投影。
+    if (navigation?.entries.isNotEmpty != true) return chapters;
     final result = <NovelChapter>[];
     final authored = navigation?.entries.isNotEmpty == true;
     var volumeId = 0;
@@ -129,6 +137,7 @@ class Novel {
   /// that is useful for navigation, but must not name this page after it.
   String readingTitleFor(int chapter, {int paragraph = 0, int offset = 0}) {
     if (chapters.isEmpty) return '目录为空';
+    if (navigation?.entries.isNotEmpty != true) return chapters[chapter].title;
     NovelDirectoryEntry? best;
     for (final entry in directory) {
       if (entry.chapter != chapter) continue;

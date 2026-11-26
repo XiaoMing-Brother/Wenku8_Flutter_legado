@@ -1558,7 +1558,7 @@ class CoverHeroTag {
 int novelCoverDecodeWidth(double width, double pixelRatio) =>
     (width * pixelRatio).ceil().clamp(1, 1536);
 
-class NovelCover extends StatelessWidget {
+class NovelCover extends StatefulWidget {
   const NovelCover(
     this.novel, {
     super.key,
@@ -1574,6 +1574,40 @@ class NovelCover extends StatelessWidget {
   final Object? heroTag;
   final bool isDetailCover;
   final bool fadeIn;
+
+  @override
+  State<NovelCover> createState() => _NovelCoverState();
+}
+
+class _NovelCoverState extends State<NovelCover> {
+  Novel get novel => widget.novel;
+  double get width => widget.width;
+  double get height => widget.height;
+  Object? get heroTag => widget.heroTag;
+  bool get isDetailCover => widget.isDetailCover;
+  bool get fadeIn => widget.fadeIn;
+  Object? _requestKey;
+  Future<Uint8List>? _request;
+
+  Future<Uint8List> _coverRequest(String url) {
+    final source = novel.source;
+    final key = (
+      novel.id,
+      url,
+      source?.sourceKey,
+      source?.bookUrl,
+      source?.coverUrl,
+      source?.customCoverUrl,
+      PersonalCovers.shared.choice(novel.id),
+      isDetailCover,
+    );
+    // 父级布局和其他书籍的封面通知沿用同一任务，避免反复查询磁盘缓存。
+    if (_requestKey != key) {
+      _requestKey = key;
+      _request = novelCoverBytes(novel, preferBookCache: !isDetailCover);
+    }
+    return _request!;
+  }
 
   @override
   Widget build(BuildContext context) => ListenableBuilder(
@@ -1704,7 +1738,7 @@ class NovelCover extends StatelessWidget {
               );
               return FutureBuilder<Uint8List>(
                 key: ValueKey((novel.id, url)),
-                future: novelCoverBytes(novel, preferBookCache: !isDetailCover),
+                future: _coverRequest(url),
                 initialData: peekNovelCover(novel),
                 builder: (context, snapshot) {
                   final bytes = snapshot.data;

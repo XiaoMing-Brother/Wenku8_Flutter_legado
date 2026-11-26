@@ -1,6 +1,6 @@
 part of 'local_books.dart';
 
-enum LocalMaintenanceTask { layout, covers, storage }
+enum LocalMaintenanceTask { layout, covers, storage, directory }
 
 ReaderRichBody _decodeCoordinateBody(String text) =>
     ReaderRichBody.decode(text);
@@ -183,6 +183,103 @@ Future<Map<String, dynamic>> _upgradeStoredEpub(
     return changed;
   } finally {
     stream.closeSync();
+    if (await staging.exists()) await staging.delete(recursive: true);
+  }
+}
+
+/// 按当前默认目录规则重新解析 TXT 目录（如把盗版头/简介归入「前言」）。
+/// 仅在章节数不变时改写，章节序号即原阅读位置，因此进度/书签仍按原 id 可用。
+Future<LocalMaintenanceResult> _reparseTextDirectory(
+  ({String root, int id}) job,
+) async {
+  final folder = Directory('${job.root}/${job.id}');
+  final metadata = File('${folder.path}/book.json');
+  if (!await metadata.exists()) {
+    return const LocalMaintenanceResult('找不到书籍元数据');
+  }
+  final record = jsonDecode(await metadata.readAsString()) as Map<String, dynamic>;
+  final source = Map<String, dynamic>.from(record['source'] as Map);
+  final name = (source['name'] as String?) ?? '';
+  if (!name.toLowerCase().endsWith('.txt')) {
+    return const LocalMaintenanceResult('仅 TXT 支持重新解析目录');
+  }
+  final oldChapters = (record['chapters'] as List?)?.cast<Map>() ?? const [];
+  String text;
+  final decoded = File('${folder.path}/decoded.txt');
+  if (await localTextExists(decoded)) {
+    text = await readLocalText(decoded);
+  } else {
+    final original = File('${folder.path}/original');
+    if (!await original.exists()) {
+      return const LocalMaintenanceResult('缺少原书文件，无法重新解析');
+    }
+    text = utf8.decode(await original.readAsBytes(), allowMalformed: true);
+  }
+
+  var options = const LocalImportOptions();
+  final stored = source['importOptions'];
+  if (stored is Map) {
+    try {
+      final previous = LocalImportOptions.fromJson(
+        Map<String, Object?>.from(stored),
+      );
+      options = LocalImportOptions(autoTitles: previous.autoTitles);
+    } on Object {
+      options = const LocalImportOptions();
+    }
+  }
+
+  final staging = Directory('${folder.path}/.directory-next');
+  if (await staging.exists()) await staging.delete(recursive: true);
+  await staging.create();
+  try {
+    final parsed = await indexTextChapters(
+      Stream<String>.value(text),
+      name,
+      options: options,
+      save: (index, body) =>
+          writeCompressedLocalText(File('${staging.path}/c$index.txt'), body),
+    );
+    final fresh = parsed.chapters;
+    if (fresh.length != oldChapters.length) {
+      return LocalMaintenanceResult(
+        '目录结构变化较大（${oldChapters.length} → ${fresh.length} 章），未改写；请删除后重新导入',
+      );
+    }
+    for (var i = 1; i <= fresh.length; i++) {
+      final next = File('${staging.path}/c$i.txt.gz');
+      if (!await next.exists()) {
+        throw const FormatException('重新解析的正文不完整，未改写');
+      }
+      final plain = File('${folder.path}/c$i.txt');
+      final target = File('${folder.path}/c$i.txt.gz');
+      if (await plain.exists()) await plain.delete();
+      if (await target.exists()) await target.delete();
+      await next.rename(target.path);
+    }
+    final chapters = [
+      for (var i = 0; i < fresh.length; i++)
+        {
+          'id': i + 1,
+          'title': fresh[i].title,
+          'volumeId': fresh[i].volumeId,
+          'volumeTitle': fresh[i].volumeTitle,
+        },
+    ];
+    await _maintenanceRecord(metadata, {
+      ...record,
+      'novel': {...(record['novel'] as Map), 'chapterCount': fresh.length},
+      'chapters': chapters,
+      'source': {
+        ...source,
+        'directoryReparsedAt': DateTime.now().millisecondsSinceEpoch,
+      },
+    });
+    return LocalMaintenanceResult(
+      '已重新解析目录：${fresh.length} 章（阅读位置按章节序号保留）',
+      changed: true,
+    );
+  } finally {
     if (await staging.exists()) await staging.delete(recursive: true);
   }
 }
@@ -437,6 +534,18 @@ extension LocalBookMaintenance on LocalBookStore {
         );
         return;
       }
+      if (task == LocalMaintenanceTask.directory) {
+        if (isLinkedBook(id)) {
+          result = const LocalMaintenanceResult('已关联原文件，请重新导入原文件以更新目录');
+          return;
+        }
+        result = await _reparseTextDirectory((
+          root: directory.path,
+          id: id,
+        ));
+        if (result.changed) await load();
+        return;
+      }
       if (!(source['name'] as String).toLowerCase().endsWith('.epub')) {
         result = const LocalMaintenanceResult('此项用于 EPUB，原书保留');
         return;
@@ -491,6 +600,9 @@ extension LocalBookMaintenance on LocalBookStore {
             changed: bytes > 0,
             freedBytes: bytes,
           );
+        case LocalMaintenanceTask.directory:
+          // 已在 EPUB 分支之前处理（TXT / 关联原文件）。
+          result = const LocalMaintenanceResult('目录已处理');
       }
       // Layout and compaction keep chapter identities unchanged. Only a cover
       // rebuild needs affected first-volume series refreshed, not all chapters

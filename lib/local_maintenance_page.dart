@@ -23,7 +23,8 @@ class LocalMaintenancePage extends StatefulWidget {
 }
 
 class _LocalMaintenancePageState extends State<LocalMaintenancePage> {
-  final _tasks = {...LocalMaintenanceTask.values};
+  final _tasks = {...LocalMaintenanceTask.values}
+    ..remove(LocalMaintenanceTask.directory);
   final _results = <({String title, String message, bool failed})>[];
   bool _busy = false, _stop = false;
   int _done = 0, _total = 0, _freed = 0;
@@ -32,11 +33,14 @@ class _LocalMaintenancePageState extends State<LocalMaintenancePage> {
     LocalMaintenanceTask.layout: '升级排版',
     LocalMaintenanceTask.covers: '重建封面',
     LocalMaintenanceTask.storage: '整理存储',
+    LocalMaintenanceTask.directory: '重新解析目录',
   };
   static const _descriptions = {
     LocalMaintenanceTask.layout: '补回原书注音、注释与样式，保留目录、书签和阅读位置。',
     LocalMaintenanceTask.covers: '从原书恢复缺失封面，不覆盖你选过的封面。',
     LocalMaintenanceTask.storage: '压缩 TXT 阅读副本，清理 EPUB 重复资源；原书与阅读记录保留。',
+    LocalMaintenanceTask.directory:
+        '按当前目录规则重排 TXT 章节（如把盗版头/简介归入「前言」）；仅在章节数不变时改写，阅读位置按章节序号保留。',
   };
   Future<void> _run() async {
     if (_busy || _tasks.isEmpty) return;

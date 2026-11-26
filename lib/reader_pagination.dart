@@ -329,15 +329,22 @@ int _paragraphBreak(
   double pageHeight, {
   required bool pageHasContent,
 }) {
+  const minimumLines = 1;
   final count = end - first;
   if (end >= limit || count == 0) return end;
-  final firstPairFits =
-      first + 1 < limit &&
-      heights[first] + heights[first + 1] <= pageHeight + .1;
-  if (count == 1 && pageHasContent && firstPairFits) return first;
-  if (limit - end != 1) return end;
-  final lastPairFits = heights[end - 1] + heights[end] <= pageHeight + .1;
-  if (count >= 3 && lastPairFits) return end - 1;
+  final firstLinesFit =
+      heights
+          .getRange(first, math.min(first + minimumLines, limit))
+          .fold(0.0, (a, b) => a + b) <=
+      pageHeight + .1;
+  if (count < minimumLines && pageHasContent && firstLinesFit) return first;
+  final remaining = limit - end;
+  if (remaining >= minimumLines) return end;
+  final adjusted = end - (minimumLines - remaining);
+  final lastLinesFit =
+      heights.getRange(adjusted, limit).fold(0.0, (a, b) => a + b) <=
+      pageHeight + .1;
+  if (adjusted - first >= minimumLines && lastLinesFit) return adjusted;
   if (pageHasContent &&
       heights.getRange(first, limit).fold(0.0, (a, b) => a + b) <=
           pageHeight + .1) {

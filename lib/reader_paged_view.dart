@@ -1651,8 +1651,7 @@ class _ReaderPagedViewState extends State<ReaderPagedView>
             if (widget.preferences.pagedChapterHeading &&
                 widget.preferences.showTitle &&
                 widget.preferences.mode != ReaderMode.vertical &&
-                adjacent == null &&
-                spread == 0)
+                localSpread == 0)
               Positioned(
                 left: padding.left,
                 right: padding.right,

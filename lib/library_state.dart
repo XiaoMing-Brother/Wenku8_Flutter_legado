@@ -476,11 +476,16 @@ class LibraryState extends ChangeNotifier {
 
     _fontSize = preference(
       'readerFontSize',
-      19,
+      defaultReaderFontSize,
       minimumReaderFontSize,
       maximumReaderFontSize,
     );
-    _lineHeight = preference('readerLineHeight', 1.72, 1.3, 2.2);
+    _lineHeight = preference(
+      'readerLineHeight',
+      defaultReaderLineHeight,
+      1.3,
+      2.2,
+    );
     _reduceMotion = _prefs.get('reduceMotion') == true;
     _haptics = HapticPreferences.fromRecords({
       HapticPreferences.preferenceKey: _prefs.get(
@@ -803,14 +808,14 @@ class LibraryState extends ChangeNotifier {
   bool _calligraphySplashOncePerDay = false;
   int _calligraphySplashLastShownDay = 0;
   bool _combinedShelf = false;
-  ReaderPreferences _readerPreferences = const ReaderPreferences();
+  ReaderPreferences _readerPreferences = ReaderPreferences.initial();
   final _bookReaderStyles = <int, ReaderBookStyle>{};
   int _metadataEncodes = 0;
   Future<void> _positionWrites = Future.value();
   Completer<void>? _restoreBarrier;
   ThemeMode _theme = ThemeMode.system;
-  double _fontSize = 19;
-  double _lineHeight = 1.72;
+  double _fontSize = defaultReaderFontSize;
+  double _lineHeight = defaultReaderLineHeight;
   bool _reduceMotion = false;
   HapticPreferences _haptics = const HapticPreferences();
   AppTypeface _appTypeface = AppTypeface.system;

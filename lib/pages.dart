@@ -1734,16 +1734,23 @@ class _ReaderLoaderPageState extends State<ReaderLoaderPage> {
       widget.state.readerPreferencesFor(widget.novel.id);
   late Future<Novel> _book = _load();
   Future<Novel> _load() async {
+    final entered = waitForRouteEntry(context);
     Novel? book;
     if (widget.repository case final OfflineNovelRepository offline) {
       if (widget.fromCache || offline.offline) {
+        if (!await entered) return widget.novel;
         if (!isLocalBook(widget.novel.id)) await offline.loadCache();
         book = await offline.cachedBook(widget.novel.id);
       }
     }
-    book ??= (await widget.repository.detail(
-      widget.novel,
-    )).withChapters(await widget.repository.chapters(widget.novel.id));
+    if (book == null) {
+      final detail = await widget.repository.detail(widget.novel);
+      if (!await entered || !mounted) return detail;
+      book = detail.withChapters(
+        await widget.repository.chapters(widget.novel.id),
+      );
+    }
+    if (!mounted) return book;
     if (book.tags.isEmpty && widget.novel.tags.isNotEmpty) {
       book = book.withGenre(widget.novel.genre);
     }
@@ -4618,6 +4625,7 @@ class _DetailLoaderPageState extends State<DetailLoaderPage> {
   Future<void> _seedFromCache() async {
     if (widget.repository case final OfflineNovelRepository offline) {
       try {
+        if (!await waitForRouteEntry(context)) return;
         final cached = await offline.cachedBook(widget.novel.id);
         if (mounted && cached != null && cached.chapters.isNotEmpty) {
           setState(() => _cached = cached);
@@ -4629,9 +4637,12 @@ class _DetailLoaderPageState extends State<DetailLoaderPage> {
   }
 
   Future<Novel> _load() async {
+    final entered = waitForRouteEntry(context);
     final detail = await widget.repository.detail(widget.novel);
+    if (!await entered || !mounted) return detail;
     final chapters = await widget.repository.chapters(widget.novel.id);
     final loaded = detail.withChapters(chapters);
+    if (!mounted) return loaded;
     await widget.state.rememberNovel(loaded);
     return loaded;
   }
@@ -4928,8 +4939,10 @@ class _DetailPageState extends State<DetailPage> with TickerProviderStateMixin {
       return;
     }
     if (!_introStarted) {
-      _introStarted = true;
-      if (isLoading) setState(() => _cacheSkeletonShown = true);
+      setState(() {
+        _introStarted = true;
+        if (isLoading) _cacheSkeletonShown = true;
+      });
       _intro.forward();
     }
     if (!isLoading && !_contentStarted) {
@@ -4983,6 +4996,7 @@ class _DetailPageState extends State<DetailPage> with TickerProviderStateMixin {
 
   @override
   Widget build(BuildContext context) {
+    final contentPending = isLoading || (!_introStarted && !_reduceMotion);
     _resumeChapter = _recordedChapter;
     _resumeDirectory = !_catalogueExpanded || _resumeChapter == null
         ? null
@@ -5025,7 +5039,7 @@ class _DetailPageState extends State<DetailPage> with TickerProviderStateMixin {
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
                                     _identity(context),
-                                    if (isLoading) ...[
+                                    if (contentPending) ...[
                                       const SizedBox(height: 28),
                                       const DetailSkeleton(),
                                     ] else if (loadError != null) ...[
@@ -5118,7 +5132,7 @@ class _DetailPageState extends State<DetailPage> with TickerProviderStateMixin {
                             ),
                           ),
                           if (_catalogueExpanded &&
-                              !isLoading &&
+                              !contentPending &&
                               loadError == null)
                             SliverPadding(
                               padding: EdgeInsets.symmetric(horizontal: edge)
@@ -5446,6 +5460,10 @@ class _DetailPageState extends State<DetailPage> with TickerProviderStateMixin {
   }
 
   String? get _latestChapter {
+    if (novel.navigation?.entries.isNotEmpty != true) {
+      final title = novel.chapters.lastOrNull?.title.trim();
+      return title == null || title.isEmpty ? null : title;
+    }
     final directory = novel.directory;
     if (directory.isEmpty) return null;
     final title = directory.last.title.trim();
@@ -6070,7 +6088,10 @@ class _DetailPageState extends State<DetailPage> with TickerProviderStateMixin {
 
   String get _chapterCountLabel {
     final unit = novel.navigation?.entries.isNotEmpty == true ? '项' : '章';
-    return '${novel.directory.length} $unit';
+    final count = novel.navigation?.entries.isNotEmpty == true
+        ? novel.directory.length
+        : novel.chapters.length;
+    return '$count $unit';
   }
 
   String get _directoryCountLabel {
@@ -10836,6 +10857,28 @@ class _ReaderPageState extends State<ReaderPage>
     }
   }
 
+  Future<void> _resetTypography() async {
+    final position = _currentPosition();
+    if (position != null) _prepareRestore(position);
+    try {
+      // 单书字号和边距保存到同一条记录，依次提交以保留两组修改。
+      await widget.state.setTypography(
+        fontSize: defaultReaderFontSize,
+        lineHeight: defaultReaderLineHeight,
+        bookId: widget.novel.id,
+      );
+      await widget.state.setReaderPreferences(
+        _readerPreferences.resetTypography(),
+        bookId: widget.novel.id,
+      );
+    } catch (_) {
+      if (mounted) {
+        _restoring = false;
+        showNovelFeedback(context, '排版设置保存失败，请重试');
+      }
+    }
+  }
+
   void _applyTypography({
     double? fontSize,
     double? lineHeight,
@@ -13716,29 +13759,7 @@ class _ReaderPageState extends State<ReaderPage>
             _typographyPreviewing = value;
             preview.value = value;
           },
-          onReset: () {
-            _applyTypography(fontSize: 19, lineHeight: 1.72);
-            _applyReaderPreferences(
-              _readerPreferences.copyWith(
-                margin: 26,
-                marginTop: 8,
-                marginBottom: 8,
-                paragraphGap: 12,
-                paragraphGapOverride: false,
-                letterSpacing: .1,
-                textWeight: ReaderTextWeight.regular,
-                indentCount: 0,
-                justify: false,
-                italic: false,
-                titleScale: 1.2,
-                titleWeight: ReaderTextWeight.bold,
-                titlePosition: ReaderTitlePosition.start,
-                titleTopSpacing: 0,
-                titleBottomSpacing: 28,
-              ),
-              true,
-            );
-          },
+          onReset: _resetTypography,
           initialBookmarks: bookmarks,
           initialTab: initialTab,
           scope: scope,
