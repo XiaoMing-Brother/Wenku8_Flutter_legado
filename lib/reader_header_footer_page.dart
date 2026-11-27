@@ -6,7 +6,7 @@ import 'reader_preferences.dart';
 
 /// 页眉 / 页脚边距配置（信息位固定，只允许调整三区内边距）。
 ///
-/// 页眉左侧固定「第几章 章节名」；页脚左进度、中书名、右时间/电量。
+/// 页眉左侧固定「第几章 章节名」、右侧时间；页脚左进度、中书名、右电量。
 class ReaderHeaderFooterConfig extends StatefulWidget {
   const ReaderHeaderFooterConfig({
     super.key,
@@ -40,7 +40,7 @@ class _ReaderHeaderFooterConfigState extends State<ReaderHeaderFooterConfig> {
         const ArchiveSection(title: '页边距', code: 'READER / PADDING'),
         const SizedBox(height: 8),
         const AppText(
-          '页眉与页脚的信息位固定：页眉左侧「第几章 章节名」；页脚左侧进度、中间书名、右侧时间/电量。此处只调整三区内边距。',
+          '页眉与页脚的信息位固定：页眉左侧「第几章 章节名」、右侧时间；页脚左侧进度、中间书名、右侧电量电池。此处只调整三区内边距。',
           style: TextStyle(fontSize: 12, height: 1.6),
         ),
         const SizedBox(height: 8),

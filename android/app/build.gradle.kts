@@ -88,6 +88,11 @@ android {
     }
 
     packaging {
+        // GitHub 分发的是独立 APK，压缩原生库可显著降低下载体积；
+        // 安装时会解压到应用目录，安装后占用会相应增加。
+        jniLibs {
+            useLegacyPackaging = true
+        }
         resources {
             // 阅读器只用 PDFBox 的常规加密与 POI 的 Word 读取路径，剔除
             // 未启用的抗量子算法参数表和演示文稿/表格资源。

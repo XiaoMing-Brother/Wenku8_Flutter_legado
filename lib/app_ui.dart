@@ -32,8 +32,7 @@ import 'route_identity.dart';
 import 'dock_layout.dart';
 import 'control_material_scope.dart';
 
-export 'scroll_edge_blur.dart'
-    show ProgressiveBlur, ScrollBackdropPause, ScrollEdgeProfile;
+export 'scroll_edge_blur.dart' show ProgressiveBlur, ScrollEdgeProfile;
 export 'loading_ui.dart';
 export 'motion_ui.dart';
 export 'archive_design.dart';
@@ -549,18 +548,16 @@ class GlassHeaderLayout extends StatelessWidget {
   @override
   Widget build(BuildContext context) => !showHeader
       ? body
-      : ScrollBackdropPause(
-          child: Stack(
-            children: [
-              Positioned.fill(child: body),
-              Positioned(
-                top: 0,
-                left: 0,
-                right: 0,
-                child: FrostedHeader(child: header),
-              ),
-            ],
-          ),
+      : Stack(
+          children: [
+            Positioned.fill(child: body),
+            Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              child: FrostedHeader(child: header),
+            ),
+          ],
         );
 }
 
@@ -698,7 +695,6 @@ class _LiquidGlassState extends State<LiquidGlass> {
     final tint =
         widget.tintColor ??
         GlassAppearance.tintOf(context, opacity: tintOpacity);
-    final scrollBackdropPaused = ScrollBackdropScope.pausedOf(context);
     return AnimatedScale(
       scale: _pressed && !media.disableAnimations ? .97 : 1,
       duration: media.disableAnimations || _cancelledPress
@@ -709,7 +705,6 @@ class _LiquidGlassState extends State<LiquidGlass> {
       curve: NovelMotion.settle,
       child: NativeBackdrop(
         bypass: widget.transparent,
-        forceLightweight: scrollBackdropPaused,
         effect: NativeEffect.glass,
         radius: widget.radius,
         preserveOptics: widget.preserveOptics,

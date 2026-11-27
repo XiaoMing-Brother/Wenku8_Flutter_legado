@@ -18,10 +18,19 @@ APK 的 `versionName` 与 Release Tag 一致：
 ```sh
 flutter build apk --release --split-per-abi \
   --target-platform=android-arm64 \
+  --split-debug-info=build/symbols/0.5.7.261118.1707 \
   --build-name=0.5.7.261118.1707 \
   --build-number=2026111817 \
   --dart-define=UPDATE_REPOSITORY=XiaoMing-Brother/Wenku8_Flutter_legado
 ```
+
+`--split-debug-info` 会剥离 Dart AOT 调试信息并生成
+`build/symbols/<完整版本>/app.android-arm64.symbols`，用于还原崩溃栈；
+该符号文件单独归档，不要打进 APK。
+
+`--build-number` 使用 `pubspec.yaml` 和 `currentAppBuild` 的基数；
+`--split-per-abi` 会为 arm64 产物追加 ABI 偏移，最终 `versionCode`
+以 `aapt dump badging` 的输出为准，不要把偏移后的值写回构建号。
 
 Release Tag 使用 `v<完整版本>`，附件上传到该 Release，不能使用外部下载链接。
 Android 默认只构建 `arm64-v8a`，将输出文件
@@ -30,6 +39,10 @@ Android 默认只构建 `arm64-v8a`，将输出文件
 模拟器或通用包时，才额外构建 `armeabi-v7a`、`x86_64` 或 `universal`。
 附件大小不能超过 300 MB；APK 的包名、`versionName`、`versionCode` 和签名
 必须与已安装版本兼容。
+
+原生库在 `android/app/build.gradle.kts` 中通过
+`packaging.jniLibs.useLegacyPackaging = true` 压缩，以减小 GitHub 下载体积；
+安装时 Android 会解压这些 `.so`，因此安装后占用会高于压缩前的 APK。
 
 客户端只接受 `legado-wenku8-` 附件前缀。仍在识别旧 `wenku8-` 前缀的
 旧版客户端无法通过应用内更新获取本版，需要手动安装一次新版，后续版本

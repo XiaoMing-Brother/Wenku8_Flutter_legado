@@ -400,7 +400,6 @@ class NativeBackdrop extends StatefulWidget {
     this.cullUnusedPixels = true,
     this.tightSampling = true,
     this.bypass = false,
-    this.forceLightweight = false,
     this.optimizedSampling = true,
     this.nativeEdgeBlur = true,
   });
@@ -430,10 +429,6 @@ class NativeBackdrop extends StatefulWidget {
 
   /// A live settings preview paints only its child, without a backdrop pass.
   final bool bypass;
-
-  /// Uses the painted glass face for one frame-scoped optimization, including
-  /// the current scroll activity before the material returns to its live form.
-  final bool forceLightweight;
 
   /// Retains the reference kernel for native pixel-parity checks.
   final bool optimizedSampling;
@@ -470,7 +465,6 @@ class NativeBackdrop extends StatefulWidget {
     cullUnusedPixels: cullUnusedPixels,
     tightSampling: tightSampling,
     bypass: bypass,
-    forceLightweight: forceLightweight,
     optimizedSampling: optimizedSampling,
     nativeEdgeBlur: nativeEdgeBlur,
     child: child,
@@ -509,9 +503,6 @@ class _NativeBackdropState extends State<NativeBackdrop> {
   Widget build(BuildContext context) {
     if (widget.bypass) return widget.child;
     final preferences = PerformanceScope.of(context);
-    if (widget.effect == NativeEffect.glass && widget.forceLightweight) {
-      return _lightweightGlass(false);
-    }
     if (widget.effect == NativeEffect.progressive && !preferences.edgeBlur) {
       return widget.child;
     }

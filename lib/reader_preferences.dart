@@ -577,18 +577,18 @@ class ReaderPreferences {
     'settings',
   ];
 
-  /// 固定的页眉槽位：左侧显示章节名（用户不再配置）。
+  /// 固定的页眉槽位：左侧章节名 / 右侧时间（用户不再配置）。
   static const List<ReaderTip> fixedHeaderTips = [
     ReaderTip(value: ReaderTipValue.chapterTitle),
     ReaderTip.none,
-    ReaderTip.none,
+    ReaderTip(value: ReaderTipValue.time),
   ];
 
-  /// 固定的页脚槽位：左章节进度 / 中书名 / 右时间+电量（信息位固定，不允许修改）。
+  /// 固定的页脚槽位：左章节进度 / 中书名 / 右电量（信息位固定，不允许修改）。
   static const List<ReaderTip> fixedFooterTips = [
     ReaderTip(value: ReaderTipValue.page),
     ReaderTip(value: ReaderTipValue.bookName),
-    ReaderTip(value: ReaderTipValue.timeBattery),
+    ReaderTip(value: ReaderTipValue.battery),
   ];
 
   /// 是否配置了任意自定义页眉 / 页脚；未配置时渲染层保持原有状态行。

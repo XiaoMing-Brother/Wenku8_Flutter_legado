@@ -345,7 +345,7 @@ class ReaderPaperTheme {
   );
 }
 
-/// 内置“纸间”主题。8 套主题共用 5 张日间、3 张夜间纸纹，并用不同的
+/// 内置“纸间”主题。4 套主题共用 4 张日间、3 张夜间纸纹，并用不同的
 /// 正文／强调／页眉页脚色区分。
 const readerPaperThemes = <ReaderPaperTheme>[
   ReaderPaperTheme(
@@ -377,20 +377,6 @@ const readerPaperThemes = <ReaderPaperTheme>[
     nightChrome: Color(0xFFA6A6A6),
   ),
   ReaderPaperTheme(
-    id: -103,
-    name: '雪纸',
-    dayTexture: 'assets/reader_paper/day_snow.jpg',
-    nightTexture: 'assets/reader_paper/night_charcoal.jpg',
-    dayPaper: Color(0xFFF3F2F0),
-    nightPaper: Color(0xFF181818),
-    dayInk: Color(0xFF2C2B29),
-    nightInk: Color(0xFFEAE6E2),
-    dayAccent: Color(0xFF7D4E4E),
-    nightAccent: Color(0xFFC09090),
-    dayChrome: Color(0xFF6F6460),
-    nightChrome: Color(0xFFB0A9A3),
-  ),
-  ReaderPaperTheme(
     id: -104,
     name: '净白',
     dayTexture: 'assets/reader_paper/day_clean.jpg',
@@ -417,48 +403,6 @@ const readerPaperThemes = <ReaderPaperTheme>[
     nightAccent: Color(0xFF8FAED1),
     dayChrome: Color(0xFF58626E),
     nightChrome: Color(0xFF9FACC0),
-  ),
-  ReaderPaperTheme(
-    id: -106,
-    name: '青禾',
-    dayTexture: 'assets/reader_paper/day_mist.jpg',
-    nightTexture: 'assets/reader_paper/night_charcoal.jpg',
-    dayPaper: Color(0xFFEFEEEC),
-    nightPaper: Color(0xFF181818),
-    dayInk: Color(0xFF2E332C),
-    nightInk: Color(0xFFE1E5DC),
-    dayAccent: Color(0xFF4F6343),
-    nightAccent: Color(0xFF97AB86),
-    dayChrome: Color(0xFF616A59),
-    nightChrome: Color(0xFFA1A79A),
-  ),
-  ReaderPaperTheme(
-    id: -107,
-    name: '胭纸',
-    dayTexture: 'assets/reader_paper/day_cool.jpg',
-    nightTexture: 'assets/reader_paper/night_ink.jpg',
-    dayPaper: Color(0xFFF3F3F3),
-    nightPaper: Color(0xFF161616),
-    dayInk: Color(0xFF342A2C),
-    nightInk: Color(0xFFE9DEE0),
-    dayAccent: Color(0xFF8A5562),
-    nightAccent: Color(0xFFC58F99),
-    dayChrome: Color(0xFF716467),
-    nightChrome: Color(0xFFB2A4A7),
-  ),
-  ReaderPaperTheme(
-    id: -108,
-    name: '茶烟',
-    dayTexture: 'assets/reader_paper/day_snow.jpg',
-    nightTexture: 'assets/reader_paper/night_navy.jpg',
-    dayPaper: Color(0xFFF3F2F0),
-    nightPaper: Color(0xFF121B2E),
-    dayInk: Color(0xFF332E26),
-    nightInk: Color(0xFFE5E1DA),
-    dayAccent: Color(0xFF7A603D),
-    nightAccent: Color(0xFFBFA47C),
-    dayChrome: Color(0xFF6E6455),
-    nightChrome: Color(0xFFAEA495),
   ),
 ];
 

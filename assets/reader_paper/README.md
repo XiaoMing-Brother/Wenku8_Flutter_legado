@@ -9,7 +9,7 @@ https://www.xiaohongshu.com/discovery/item/6b010c6d000000002a00eb52
 - `day_mist.jpg`：日间 · 米白纤维
 - `day_cool.jpg`：日间 · 冷白
 - `day_clean.jpg`：日间 · 净白
-- `day_snow.jpg`：日间 · 雪白
+- `day_snow.jpg`：日间 · 雪白（当前主题未使用，保留备用）
 - `day_bluegrey.jpg`：日间 · 雾蓝
 - `night_ink.jpg`：夜间 · 墨黑
 - `night_charcoal.jpg`：夜间 · 炭黑

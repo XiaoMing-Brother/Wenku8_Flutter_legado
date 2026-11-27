@@ -622,16 +622,14 @@ class HomeShellState extends State<HomeShell>
   }
 
   @override
-  Widget build(BuildContext context) => ScrollBackdropPause(
-    child: _HomeRouteBinding(
-      onChanged: _routeChanged,
-      child: PrimaryScrollController(
-        // The scaffold's iOS status-bar scroll action follows the visible page.
-        // Search has its own position and must not also move the retained tab.
-        controller: _searchMounted ? _searchScroll : _tabScrolls[_tab],
-        automaticallyInheritForPlatforms: _scrollPlatforms,
-        child: _buildWorkspace(context),
-      ),
+  Widget build(BuildContext context) => _HomeRouteBinding(
+    onChanged: _routeChanged,
+    child: PrimaryScrollController(
+      // The scaffold's iOS status-bar scroll action follows the visible page.
+      // Search has its own position and must not also move the retained tab.
+      controller: _searchMounted ? _searchScroll : _tabScrolls[_tab],
+      automaticallyInheritForPlatforms: _scrollPlatforms,
+      child: _buildWorkspace(context),
     ),
   );
 
@@ -1533,7 +1531,11 @@ class BookOpeningPage extends StatelessWidget {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     final size = MediaQuery.sizeOf(context);
-    final coverWidth = (size.width * .29).clamp(120.0, 320.0);
+    // 以 390dp 为基准的缩放因子：窄屏缩小字号避免溢出，宽屏略放大但封顶。
+    // 同时受系统字体缩放影响的上限由各 AppText 的 textScaler 自然叠加，这里只做
+    // 屏幕宽度自适应，保证「原生幻想」「2026.11.25」这类长值不会顶破三列。
+    final scale = (size.width / 390).clamp(0.82, 1.12);
+    final coverWidth = (size.width * .29).clamp(112.0, 320.0);
     final author = novel.author.trim();
     final genre = isLocalBook(novel.id) ? novel.tags.join(' · ') : _genreText;
     final facts = [
@@ -1542,18 +1544,21 @@ class BookOpeningPage extends StatelessWidget {
           value: genre,
           label: '类型',
           align: CrossAxisAlignment.start,
+          scale: scale,
         ),
       if (_updatedDate case final date?)
         _BookOpeningFact(
           value: date,
           label: '更新',
           align: CrossAxisAlignment.center,
+          scale: scale,
         ),
       if (_wordCount case final count?)
         _BookOpeningFact(
           value: _wordValue(count),
           label: _wordLabel(count),
           align: CrossAxisAlignment.end,
+          scale: scale,
         ),
     ];
     double dragDistance = 0;
@@ -1627,7 +1632,7 @@ class BookOpeningPage extends StatelessWidget {
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
-                      fontSize: 30,
+                      fontSize: 30 * scale,
                       height: 1.25,
                       fontWeight: FontWeight.w700,
                       letterSpacing: 2,
@@ -1640,7 +1645,7 @@ class BookOpeningPage extends StatelessWidget {
                       author,
                       textAlign: TextAlign.center,
                       style: TextStyle(
-                        fontSize: 17,
+                        fontSize: 17 * scale,
                         height: 1.4,
                         letterSpacing: 1,
                         color: scheme.onSurfaceVariant,
@@ -1665,7 +1670,7 @@ class BookOpeningPage extends StatelessWidget {
                     AppText(
                       epigraph,
                       style: TextStyle(
-                        fontSize: 20,
+                        fontSize: 20 * scale,
                         height: 1.6,
                         letterSpacing: .5,
                         color: scheme.onSurface,
@@ -1676,7 +1681,7 @@ class BookOpeningPage extends StatelessWidget {
                       '— ${author.isEmpty ? novel.author : author}',
                       textAlign: TextAlign.right,
                       style: TextStyle(
-                        fontSize: 17,
+                        fontSize: 17 * scale,
                         height: 1.4,
                         letterSpacing: .5,
                         color: scheme.onSurfaceVariant,
@@ -1691,7 +1696,7 @@ class BookOpeningPage extends StatelessWidget {
                     '— 本作品由起点中文网进行电子制作与发行 —',
                     textAlign: TextAlign.center,
                     style: TextStyle(
-                      fontSize: 15,
+                      fontSize: 15 * scale,
                       height: 1.7,
                       color: scheme.onSurfaceVariant,
                     ),
@@ -1701,7 +1706,7 @@ class BookOpeningPage extends StatelessWidget {
                     '版权所有·侵权必究',
                     textAlign: TextAlign.center,
                     style: TextStyle(
-                      fontSize: 15,
+                      fontSize: 15 * scale,
                       height: 1.7,
                       color: scheme.onSurfaceVariant,
                     ),
@@ -1744,11 +1749,13 @@ class _BookOpeningFact extends StatelessWidget {
     required this.value,
     required this.label,
     this.align = CrossAxisAlignment.start,
+    this.scale = 1.0,
   });
 
   final String value;
   final String label;
   final CrossAxisAlignment align;
+  final double scale;
 
   @override
   Widget build(BuildContext context) {
@@ -1758,22 +1765,31 @@ class _BookOpeningFact extends StatelessWidget {
       CrossAxisAlignment.center => TextAlign.center,
       _ => TextAlign.left,
     };
+    final alignment = switch (align) {
+      CrossAxisAlignment.end => Alignment.centerRight,
+      CrossAxisAlignment.center => Alignment.center,
+      _ => Alignment.centerLeft,
+    };
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 6),
       child: Column(
         crossAxisAlignment: align,
         mainAxisSize: MainAxisSize.min,
         children: [
-          AppText(
-            value,
-            textAlign: textAlign,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              fontSize: 24,
-              height: 1.25,
-              fontWeight: FontWeight.w500,
-              color: scheme.onSurface,
+          // 长值（如「原生幻想」「2026.11.25」）在窄屏或大字号下按需缩小，
+          // 不换行、不溢出三列。
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: alignment,
+            child: AppText(
+              value,
+              maxLines: 1,
+              style: TextStyle(
+                fontSize: 24 * scale,
+                height: 1.25,
+                fontWeight: FontWeight.w500,
+                color: scheme.onSurface,
+              ),
             ),
           ),
           const SizedBox(height: 10),
@@ -1783,7 +1799,7 @@ class _BookOpeningFact extends StatelessWidget {
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: TextStyle(
-              fontSize: 14,
+              fontSize: 14 * scale,
               height: 1.3,
               color: scheme.onSurfaceVariant,
             ),
@@ -5355,7 +5371,7 @@ class _DetailPageState extends State<DetailPage> with TickerProviderStateMixin {
               : _changeCover,
           onLongPress: _changeCover,
           child: NovelCover(
-            transitionNovel ?? novel,
+            novel,
             width: coverWidth,
             height: coverWidth * 1.4,
             heroTag: coverHeroTag,
@@ -8415,11 +8431,7 @@ class _ReaderPageState extends State<ReaderPage>
     final position = _scroll.position;
     if (position.pixels >= position.maxScrollExtent - .5) {
       if (_chapter + 1 < _sourceBook.chapters.length) {
-        if (_readerPreferences.chapterEntrance) {
-          _go(_chapter + 1, prepared: _cachedDisplay(_chapter + 1));
-        } else {
-          _scrollStream.prepareAdjacent();
-        }
+        _scrollStream.prepareAdjacent();
       } else {
         _stopAutoScroll(showControls: true);
       }
@@ -9491,7 +9503,7 @@ class _ReaderPageState extends State<ReaderPage>
     _preparedContent.removeWhere((index, _) => (index - _chapter).abs() > 1);
     _preparedDisplay.removeWhere((index, _) => (index - _chapter).abs() > 1);
     // The continuous view owns its next/previous slots and inline retry state.
-    if (!_paginated && !_readerPreferences.chapterEntrance) {
+    if (!_paginated) {
       _scrollStream.prepareAdjacent();
       return;
     }
@@ -9687,9 +9699,7 @@ class _ReaderPageState extends State<ReaderPage>
     _scrollChapterExtent -
         (_scroll.hasClients ? _scroll.position.viewportDimension : 0),
   );
-  double get _scrollChapterMaximum =>
-      !_readerPreferences.chapterEntrance &&
-          _chapter + 1 < _sourceBook.chapters.length
+  double get _scrollChapterMaximum => _chapter + 1 < _sourceBook.chapters.length
       ? _scrollChapterExtent
       : _scrollSeekMaximum;
 
@@ -9848,13 +9858,6 @@ class _ReaderPageState extends State<ReaderPage>
     if (!_scroll.hasClients) return;
     final position = _scroll.position;
     if (direction < 0 && _chapter == 0 && position.extentBefore < .5) {
-      _continueChapter(direction);
-      return;
-    }
-    if (_readerPreferences.chapterEntrance &&
-        (direction > 0
-            ? position.pixels >= position.maxScrollExtent - .5
-            : position.pixels <= position.minScrollExtent + .5)) {
       _continueChapter(direction);
       return;
     }
@@ -13427,8 +13430,7 @@ class _ReaderPageState extends State<ReaderPage>
           _chapterOverscroll = 0;
           final atBookStart =
               _chapter == 0 && notification.metrics.extentBefore < .5;
-          if ((direction < 0 && atBookStart) ||
-              (prefs.chapterEntrance && direction != 0)) {
+          if (direction < 0 && atBookStart) {
             _continueChapter(direction);
           } else if (direction > 0 &&
               notification.metrics.extentAfter < 1 &&
@@ -13493,7 +13495,8 @@ class _ReaderPageState extends State<ReaderPage>
                   controller: _scrollStream,
                   scroll: _scroll,
                   deferPreparation: true,
-                  continuous: !prefs.chapterEntrance,
+                  // 上下滚动始终连续拼接章节；入场开关只控制动画效果。
+                  continuous: true,
                   identity: _contentGeneration,
                   geometry: (
                     prefs.layoutKey,
@@ -13585,13 +13588,8 @@ class _ReaderPageState extends State<ReaderPage>
                             : 12,
                       ),
                       child: chapter + 1 < _sourceBook.chapters.length
-                          ? Center(
-                              child: prefs.chapterEntrance
-                                  ? GlassTextButton(
-                                      onPressed: () => _continueChapter(1),
-                                      child: const AppText('下一章'),
-                                    )
-                                  : const SizedBox(width: 30, child: Divider()),
+                          ? const Center(
+                              child: SizedBox(width: 30, child: Divider()),
                             )
                           : const Center(
                               child: AppText(

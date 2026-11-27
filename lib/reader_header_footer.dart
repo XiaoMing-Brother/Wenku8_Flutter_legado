@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
@@ -82,6 +83,23 @@ class ReaderInfoStrip extends StatelessWidget {
   }
 
   Widget _slot(int index, ReaderTip tip, TextAlign align) {
+    if (tip.value == ReaderTipValue.battery) {
+      if (!tipContext.hasBattery) return const SizedBox.shrink();
+      return KeyedSubtree(
+        key: slotKeys?[index],
+        child: Align(
+          alignment: _aligns[index] == TextAlign.start
+              ? Alignment.centerLeft
+              : _aligns[index] == TextAlign.center
+              ? Alignment.center
+              : Alignment.centerRight,
+          child: _ReaderBatteryMeter(
+            percent: tipContext.batteryPercent,
+            style: style,
+          ),
+        ),
+      );
+    }
     final text = tip.format(tipContext);
     if (text.isEmpty) {
       // 空槽仍占位，保持左右槽位置不因中间增删而跳动。
@@ -96,6 +114,93 @@ class ReaderInfoStrip extends StatelessWidget {
       style: style,
     );
   }
+}
+
+/// 页脚电量：百分比数字内嵌在电池轮廓中。
+class _ReaderBatteryMeter extends StatelessWidget {
+  const _ReaderBatteryMeter({required this.percent, required this.style});
+
+  final int percent;
+  final TextStyle style;
+
+  @override
+  Widget build(BuildContext context) {
+    final value = percent.clamp(0, 100);
+    final ink = style.color ?? Theme.of(context).colorScheme.onSurfaceVariant;
+    final numberSize = MediaQuery.textScalerOf(
+      context,
+    ).scale((style.fontSize ?? 12) * .72).clamp(8.0, 13.0);
+    final height = (numberSize + 6).clamp(15.0, 21.0);
+    final width = height * 2.15;
+    return Semantics(
+      label: '电量 $value%',
+      excludeSemantics: true,
+      child: SizedBox(
+        key: const ValueKey('reader-tip-battery'),
+        width: width,
+        height: height,
+        child: CustomPaint(
+          painter: _ReaderBatteryPainter(ink),
+          child: Padding(
+            padding: EdgeInsets.only(right: height * .16),
+            child: Center(
+              child: Text(
+                '$value',
+                maxLines: 1,
+                style: TextStyle(
+                  color: ink,
+                  fontFamily: style.fontFamily,
+                  fontFamilyFallback: style.fontFamilyFallback,
+                  fontSize: numberSize,
+                  height: 1,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: -.2,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ReaderBatteryPainter extends CustomPainter {
+  const _ReaderBatteryPainter(this.ink);
+
+  final Color ink;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final capWidth = math.max(1.8, size.height * .13);
+    final bodyWidth = size.width - capWidth;
+    final body = RRect.fromRectAndRadius(
+      Rect.fromLTWH(.7, 1, bodyWidth - 1.4, size.height - 2),
+      Radius.circular(size.height * .3),
+    );
+    final cap = RRect.fromRectAndRadius(
+      Rect.fromLTWH(
+        bodyWidth - 1,
+        size.height * .31,
+        capWidth + 1,
+        size.height * .38,
+      ),
+      Radius.circular(capWidth * .38),
+    );
+    canvas.drawRRect(cap, Paint()..color = ink.withValues(alpha: .34));
+
+    canvas.drawRRect(
+      body,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.15
+        ..color = ink.withValues(alpha: .5),
+    );
+  }
+
+  @override
+  bool shouldRepaint(_ReaderBatteryPainter oldDelegate) =>
+      oldDelegate.ink != ink;
 }
 
 /// 带时钟的页眉 / 页脚信息条：在基础上下文（书名 / 章节 / 页码 / 进度）上补齐
