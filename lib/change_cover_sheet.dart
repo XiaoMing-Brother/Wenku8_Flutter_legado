@@ -2,11 +2,13 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:crypto/crypto.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'app_interactions.dart';
+import 'app_search_field.dart';
 import 'app_ui.dart';
 import 'book_documents.dart';
 import 'book_sources/book_source_library.dart';
@@ -16,6 +18,7 @@ import 'catalog.dart';
 import 'cover_images.dart';
 import 'feature_pages.dart' show confirmNovelAction;
 import 'personal_images.dart';
+import 'reader_illustrations.dart';
 
 class ChangeCoverSheet extends StatefulWidget {
   const ChangeCoverSheet({
@@ -36,12 +39,32 @@ class ChangeCoverSheet extends StatefulWidget {
 class _ChangeCoverSheetState extends State<ChangeCoverSheet> {
   static const _scopeKey = 'coverSearch.scope.v1';
   final store = PersonalCovers.shared;
+  late final _query = TextEditingController(text: _initialKeyword);
+  late final _previews = ReaderIllustrationCache(request: _loadPreview);
+  final _candidates = <String, Novel>{};
+  final _imageHashes = <String, String>{};
   var _scope = const BookSourceSearchScope.all();
   String _album = '我的封面';
   String _status = '正在读取候选';
   List<Novel> _items = [];
   bool _searching = false, _saving = false, _ready = false;
+  bool _checkAuthor = false, _showPersonal = false, _tabChosen = false;
   int _generation = 0;
+
+  String get _initialKeyword => widget.book.source?.title.isNotEmpty == true
+      ? widget.book.source!.title
+      : widget.book.title;
+  bool get _hasSources =>
+      widget.library?.sources.any(
+        (source) => source.enabled && source.supported,
+      ) ??
+      false;
+  bool get _canSearch =>
+      !widget.offline &&
+      (widget.library?.sources.any(
+            (source) => source.enabled && source.supported && source.canSearch,
+          ) ??
+          false);
 
   @override
   void initState() {
@@ -52,54 +75,120 @@ class _ChangeCoverSheetState extends State<ChangeCoverSheet> {
   Future<void> _init() async {
     try {
       final text = (await SharedPreferences.getInstance()).getString(_scopeKey);
+      await store.load();
       if (!mounted) return;
       if (text != null) {
         _scope = BookSourceSearchScope.fromJson(jsonDecode(text));
       }
-      if (!widget.offline) await widget.library?.prepare();
     } on Object catch (error) {
       debugPrint('封面候选初始化失败：$error');
     }
-    if (mounted) _refresh();
+    if (!mounted) return;
+    _refresh(search: false);
+    final generation = _generation;
+    try {
+      if (!widget.offline) await widget.library?.prepare();
+    } on Object catch (error) {
+      debugPrint('封面书源初始化失败：$error');
+    }
+    if (mounted && generation == _generation) _refresh();
   }
 
-  void _refresh() {
-    final library = widget.library;
-    final cached = library?.cachedCoverCandidates(widget.book, _scope) ?? [];
+  List<Novel> _cached() =>
+      widget.library?.cachedCoverCandidates(
+        widget.book,
+        _scope,
+        keyword: _query.text.trim(),
+        checkAuthor: _checkAuthor,
+      ) ??
+      [];
+
+  void _refresh({bool search = true}) {
     setState(() {
       _ready = true;
-      _items = _merge(cached);
+      _items = _merge(_cached());
+      if (!_tabChosen) {
+        _showPersonal = !_hasSources || (widget.offline && _items.isEmpty);
+      }
       _status = widget.offline
-          ? '当前离线'
-          : library == null
+          ? '当前离线，仅显示本机候选'
+          : !_hasSources
           ? '当前没有可用书源'
-          : '已读取本机候选';
+          : '已读取本机候选 · 同作者优先';
     });
-    if (!widget.offline && library != null && _items.length <= 1) {
-      unawaited(_search());
-    }
+    if (search && _canSearch) unawaited(_search());
   }
 
   String _key(Novel book) => '${book.source?.sourceKey}\u0000${book.coverUrl}';
-  List<Novel> _merge(Iterable<Novel> books) => {
-    for (final book in books)
-      if (book.coverUrl?.isNotEmpty == true) _key(book): book,
-  }.values.toList();
+  List<Novel> _merge(Iterable<Novel> books) {
+    final unique = {
+      for (final book in books)
+        if (book.coverUrl?.isNotEmpty == true) _key(book): book,
+    };
+    _candidates.addAll(unique);
+    final indexed = unique.values.indexed.toList();
+    bool sameAuthor(Novel book) =>
+        widget.book.author.trim().isNotEmpty &&
+        sameSourceAuthor(book.author, widget.book.author);
+    indexed.sort((a, b) {
+      final author = (sameAuthor(a.$2) ? 0 : 1).compareTo(
+        sameAuthor(b.$2) ? 0 : 1,
+      );
+      return author != 0 ? author : a.$1.compareTo(b.$1);
+    });
+    return [for (final entry in indexed) entry.$2];
+  }
+
+  List<Novel> get _visibleItems {
+    final seen = <String>{};
+    return [
+      for (final book in _items)
+        if (_imageHashes[_key(book)] == null ||
+            seen.add(_imageHashes[_key(book)]!))
+          book,
+    ];
+  }
+
+  Future<Uint8List> _loadPreview(String key) async {
+    final book = _candidates[key];
+    final bytes = book == null
+        ? await store.read(key)
+        : await novelCoverBytes(
+            book,
+            original: true,
+            cachedOnly: widget.offline,
+          );
+    if (mounted && book != null) {
+      final hash = sha256.convert(bytes).toString();
+      if (_imageHashes[key] != hash) {
+        setState(() => _imageHashes[key] = hash);
+      }
+    }
+    return bytes;
+  }
 
   Future<void> _search() async {
     final library = widget.library;
-    if (library == null || widget.offline) return;
+    if (library == null || !_canSearch) return;
+    final keyword = _query.text.trim();
+    if (keyword.isEmpty) {
+      showNovelFeedback(context, '请输入书名后搜索');
+      return;
+    }
+    FocusManager.instance.primaryFocus?.unfocus();
     final generation = ++_generation;
     bool current() => mounted && generation == _generation;
-    final cached = library.cachedCoverCandidates(widget.book, _scope);
+    final cached = _cached();
     setState(() {
+      _items = _merge(cached);
       _searching = true;
-      _status = '正在搜索同名同作者的封面';
+      _status = '正在搜索封面';
     });
     try {
       final result = await library.searchSourceCandidates(
         widget.book,
-        checkAuthor: true,
+        keyword: keyword,
+        checkAuthor: _checkAuthor,
         scope: _scope,
         current: current,
         onProgress: (progress) {
@@ -115,8 +204,9 @@ class _ChangeCoverSheetState extends State<ChangeCoverSheet> {
       if (current()) {
         setState(() {
           _items = _merge([...cached, ...result.items]);
-          _status =
-              '找到 ${_items.length} 张候选封面${result.failedSources > 0 ? ' · ${result.failedSources} 个书源失败' : ''}';
+          _status = result.failedSources > 0
+              ? '${result.failedSources} 个书源失败 · 可重试'
+              : '搜索完成 · 同作者优先';
         });
       }
     } on Object {
@@ -135,6 +225,8 @@ class _ChangeCoverSheetState extends State<ChangeCoverSheet> {
   @override
   void dispose() {
     _stop();
+    _query.dispose();
+    _previews.clearMemory();
     super.dispose();
   }
 
@@ -150,14 +242,7 @@ class _ChangeCoverSheetState extends State<ChangeCoverSheet> {
     _stop();
     _scope = result;
     _refresh();
-    try {
-      await (await SharedPreferences.getInstance()).setString(
-        _scopeKey,
-        jsonEncode(result.toJson()),
-      );
-    } on Object {
-      if (mounted) showNovelFeedback(context, '本次范围已应用，但未保存');
-    }
+    await _saveScope();
   }
 
   Future<String?> _input({required bool url}) async {
@@ -206,18 +291,8 @@ class _ChangeCoverSheetState extends State<ChangeCoverSheet> {
     }
   }
 
-  Future<void> _albumMenu(BuildContext anchor) async {
+  Future<void> _deleteAlbum() async {
     final name = _album;
-    final action = await showGlassMenu<bool>(
-      context: anchor,
-      reduceMotion: widget.reduceMotion,
-      builder: (menu) => GlassMenuItem(
-        label: '删除图集',
-        icon: CupertinoIcons.trash,
-        onPressed: () => Navigator.pop(menu, true),
-      ),
-    );
-    if (!mounted || action != true) return;
     if (!await confirmNovelAction(
       context,
       title: '删除图集？',
@@ -235,6 +310,137 @@ class _ChangeCoverSheetState extends State<ChangeCoverSheet> {
     } on Object {
       if (mounted) showNovelFeedback(context, '图集删除失败，请重试');
     }
+  }
+
+  Future<void> _menu(BuildContext anchor) async {
+    final action = await showGlassMenu<String>(
+      context: anchor,
+      reduceMotion: widget.reduceMotion,
+      builder: (menu) => Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          GlassMenuItem(
+            label: '从相册选择',
+            icon: CupertinoIcons.photo,
+            onPressed: () => Navigator.pop(menu, 'pick'),
+          ),
+          GlassMenuItem(
+            label: '恢复原封面',
+            icon: CupertinoIcons.arrow_counterclockwise,
+            order: 1,
+            onPressed: () => Navigator.pop(menu, 'original'),
+          ),
+          GlassMenuItem(
+            label: '使用默认文字封面',
+            icon: CupertinoIcons.textformat,
+            order: 2,
+            onPressed: () => Navigator.pop(menu, 'default'),
+          ),
+          if (!widget.offline)
+            GlassMenuItem(
+              label: '输入图片地址',
+              icon: CupertinoIcons.link,
+              order: 3,
+              onPressed: () => Navigator.pop(menu, 'url'),
+            ),
+          GlassMenuItem(
+            label: '新建图集',
+            icon: CupertinoIcons.folder_badge_plus,
+            order: 4,
+            onPressed: () => Navigator.pop(menu, 'album'),
+          ),
+          if (_hasSources) ...[
+            GlassMenuItem(
+              label: '搜索范围：${_scope.describe(widget.library!.sources)}',
+              icon: CupertinoIcons.slider_horizontal_3,
+              order: 5,
+              onPressed: () => Navigator.pop(menu, 'scope'),
+            ),
+            if (widget.book.author.trim().isNotEmpty)
+              GlassMenuItem(
+                label: '仅同作者',
+                selected: _checkAuthor,
+                icon: CupertinoIcons.person,
+                order: 6,
+                onPressed: () => Navigator.pop(menu, 'author'),
+              ),
+          ],
+          if (_showPersonal && store.album(_album).isNotEmpty)
+            GlassMenuItem(
+              label: '删除图集',
+              icon: CupertinoIcons.trash,
+              order: 7,
+              onPressed: () => Navigator.pop(menu, 'delete'),
+            ),
+        ],
+      ),
+    );
+    if (!mounted || action == null) return;
+    switch (action) {
+      case 'pick':
+        await _choose(() => _import(_album));
+      case 'original':
+        Navigator.pop(context, PersonalCovers.original);
+      case 'default':
+        Navigator.pop(context, PersonalCovers.defaultCover);
+      case 'url':
+        await _choose(() async {
+          final url = await _input(url: true);
+          return url == null
+              ? null
+              : store.save(await prepareCoverFromUrl(url));
+        });
+      case 'album':
+        await _choose(() async {
+          final name = await _input(url: false);
+          return name == null ? null : _import(name);
+        });
+      case 'scope':
+        await _chooseScope();
+      case 'author':
+        _stop();
+        _checkAuthor = !_checkAuthor;
+        _refresh();
+      case 'delete':
+        await _deleteAlbum();
+    }
+  }
+
+  void _resetSearch() {
+    _stop();
+    _query.text = _initialKeyword;
+    _checkAuthor = false;
+    _scope = const BookSourceSearchScope.all();
+    _refresh();
+    unawaited(_saveScope());
+  }
+
+  Future<void> _saveScope() async {
+    try {
+      await (await SharedPreferences.getInstance()).setString(
+        _scopeKey,
+        jsonEncode(_scope.toJson()),
+      );
+    } on Object {
+      if (mounted) showNovelFeedback(context, '本次范围已应用，但未保存');
+    }
+  }
+
+  Future<void> _preview(String key) async {
+    final urls = _showPersonal
+        ? store.album(_album)
+        : [for (final book in _visibleItems) _key(book)];
+    await pushNovelPage<void>(
+      context,
+      ReaderIllustrationGallery(
+        urls: urls,
+        initialUrl: key,
+        cache: _previews,
+        title: '封面预览',
+        fileNamePrefix: widget.book.title,
+      ),
+      reduceMotion: widget.reduceMotion,
+    );
   }
 
   Future<void> _choose(Future<String?> Function() action) async {
@@ -255,45 +461,63 @@ class _ChangeCoverSheetState extends State<ChangeCoverSheet> {
     }
   }
 
-  Widget _grid(int count, Widget Function(int index) tile) =>
-      SliverGrid.builder(
-        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-          crossAxisCount: 3,
-          crossAxisSpacing: 12,
-          mainAxisSpacing: 12,
-          childAspectRatio: .66,
-        ),
-        itemCount: count,
-        itemBuilder: (_, index) => tile(index),
-      );
+  Widget _grid(
+    int count,
+    Widget Function(int index) tile,
+  ) => SliverGrid.builder(
+    gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
+      maxCrossAxisExtent:
+          145 * (MediaQuery.textScalerOf(context).scale(12) / 12).clamp(1, 1.4),
+      crossAxisSpacing: 12,
+      mainAxisSpacing: 12,
+      childAspectRatio: .58 / (MediaQuery.textScalerOf(context).scale(12) / 12),
+    ),
+    itemCount: count,
+    itemBuilder: (_, index) => tile(index),
+  );
 
   Widget _tile(
     String key,
     String label,
-    Future<Uint8List> Function() read,
-    Future<String?> Function() choose,
-  ) => Semantics(
+    Future<String?> Function() choose, {
+    String? subtitle,
+  }) => Semantics(
     button: true,
     label: label,
     child: GestureDetector(
+      key: ValueKey('cover-tile-$key'),
       onTap: () => _choose(choose),
+      onLongPress: () => _preview(key),
       child: Column(
         children: [
           Expanded(
             child: ClipRRect(
               borderRadius: BorderRadius.circular(8),
               child: _CoverPreview(
-                key: ValueKey((key, _generation)),
-                read: read,
+                key: ValueKey(key),
+                read: () => _previews.load(key),
+                retry: () => _previews.evict(key),
               ),
             ),
           ),
+          const SizedBox(height: 6),
           AppText(
             label,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: const TextStyle(fontSize: 12),
           ),
+          if (subtitle != null)
+            AppText(
+              subtitle,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 12,
+                height: 1.4,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+            ),
         ],
       ),
     ),
@@ -303,200 +527,257 @@ class _ChangeCoverSheetState extends State<ChangeCoverSheet> {
   Widget build(BuildContext context) {
     final albums = {_album, ...store.albums};
     final images = store.album(_album);
-    final library = widget.library;
+    final items = _visibleItems;
+    final muted = Theme.of(context).colorScheme.onSurfaceVariant;
     return AbsorbPointer(
       absorbing: _saving,
-      child: CustomScrollView(
-        slivers: [
-          SliverPadding(
-            padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
-            sliver: SliverMainAxisGroup(
-              slivers: [
-                SliverToBoxAdapter(
+      child: LayoutBuilder(
+        builder: (context, constraints) => Column(
+          children: [
+            ConstrainedBox(
+              constraints: BoxConstraints(
+                maxHeight: constraints.maxHeight * .75,
+              ),
+              child: SingleChildScrollView(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(24, 8, 24, 12),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const ArchiveSection(title: '更换封面', code: 'BOOK / COVER'),
-                      if (_saving) const LinearProgressIndicator(),
-                      Wrap(
-                        spacing: 8,
+                      Row(
                         children: [
-                          GlassTextButton(
-                            onPressed: () =>
-                                Navigator.pop(context, PersonalCovers.original),
-                            child: const AppText('恢复原封面'),
+                          const Expanded(
+                            child: ArchiveSection(
+                              title: '更换封面',
+                              code: 'BOOK / COVER',
+                            ),
                           ),
-                          GlassTextButton(
-                            onPressed: () => Navigator.pop(
+                          GlassMenuAnchor(
+                            child: Builder(
+                              builder: (anchor) => GlassIconButton(
+                                icon: CupertinoIcons.ellipsis,
+                                label: '更多封面操作',
+                                onPressed: () => _menu(anchor),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      Wrap(
+                        spacing: 12,
+                        runSpacing: 8,
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        children: [
+                          if (_hasSources)
+                            AppControls.segments<bool>(
                               context,
-                              PersonalCovers.defaultCover,
-                            ),
-                            child: const AppText('使用默认文字封面'),
-                          ),
-                          if (!widget.offline)
-                            GlassTextButton(
-                              onPressed: () => _choose(() async {
-                                final url = await _input(url: true);
-                                return url == null
-                                    ? null
-                                    : store.save(
-                                        await prepareCoverFromUrl(url),
-                                      );
-                              }),
-                              child: const AppText('输入图片地址'),
-                            ),
-                        ],
-                      ),
-                      const SizedBox(height: 18),
-                      const ArchiveSection(
-                        title: '封面图集',
-                        code: 'COVER / ALBUMS',
-                      ),
-                      Wrap(
-                        spacing: 8,
-                        children: [
-                          for (final name in albums)
-                            GlassTextButton(
-                              compact: true,
-                              selected: _album == name,
-                              onPressed: () => setState(() => _album = name),
-                              child: AppText(name),
+                              groupValue: _showPersonal,
+                              children: const {
+                                false: Padding(
+                                  padding: EdgeInsets.symmetric(
+                                    horizontal: 10,
+                                    vertical: 8,
+                                  ),
+                                  child: AppText('推荐封面'),
+                                ),
+                                true: Padding(
+                                  padding: EdgeInsets.symmetric(
+                                    horizontal: 10,
+                                    vertical: 8,
+                                  ),
+                                  child: AppText('我的图片'),
+                                ),
+                              },
+                              onValueChanged: (value) {
+                                if (value == null) return;
+                                setState(() {
+                                  _showPersonal = value;
+                                  _tabChosen = true;
+                                });
+                              },
                             ),
                         ],
                       ),
-                      Wrap(
-                        spacing: 8,
-                        children: [
-                          GlassTextButton(
-                            onPressed: () => _choose(() => _import(_album)),
-                            child: const AppText('从手机选图'),
+                      if (!_showPersonal && _hasSources) ...[
+                        const SizedBox(height: 12),
+                        if (!widget.offline)
+                          AppSearchField(
+                            inputKey: const ValueKey('cover-search-keyword'),
+                            controller: _query,
+                            hint: '输入书名搜索封面',
+                            onSubmitted: (_) => _search(),
+                            trailing: GlassIconButton(
+                              icon: _searching
+                                  ? CupertinoIcons.stop
+                                  : CupertinoIcons.search,
+                              label: _searching ? '停止搜索' : '搜索封面',
+                              onPressed: _searching
+                                  ? () => setState(() {
+                                      _stop();
+                                      _status = '搜索已停止';
+                                    })
+                                  : _search,
+                            ),
                           ),
-                          GlassTextButton(
-                            onPressed: () => _choose(() async {
-                              final name = await _input(url: false);
-                              return name == null ? null : _import(name);
-                            }),
-                            child: const AppText('新建图集'),
+                        const SizedBox(height: 8),
+                        AppText(
+                          '${items.length} 张 · $_status${_checkAuthor ? ' · 仅同作者' : ''}',
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 12,
+                            height: 1.4,
+                            color: muted,
                           ),
+                        ),
+                      ],
+                      if (_showPersonal) ...[
+                        const SizedBox(height: 8),
+                        if (albums.length > 1)
+                          Wrap(
+                            spacing: 8,
+                            children: [
+                              for (final name in albums)
+                                GlassTextButton(
+                                  compact: true,
+                                  selected: _album == name,
+                                  onPressed: () =>
+                                      setState(() => _album = name),
+                                  child: AppText(name),
+                                ),
+                            ],
+                          )
+                        else
+                          AppText(
+                            '我的图片 · ${images.length} 张',
+                            style: TextStyle(fontSize: 12, color: muted),
+                          ),
+                      ],
+                      const SizedBox(height: 6),
+                      AppText(
+                        '点按应用 · 长按预览',
+                        style: TextStyle(fontSize: 12, color: muted),
+                      ),
+                      if (_saving || (_searching && !_showPersonal)) ...[
+                        const SizedBox(height: 8),
+                        const LinearProgressIndicator(),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            Expanded(
+              child: CustomScrollView(
+                key: ValueKey(_showPersonal),
+                slivers: [
+                  SliverPadding(
+                    padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
+                    sliver: SliverMainAxisGroup(
+                      slivers: [
+                        if (_showPersonal)
                           if (images.isNotEmpty)
-                            GlassMenuAnchor(
-                              child: Builder(
-                                builder: (anchor) => CompactRowMenuButton(
-                                  label: '图集操作',
-                                  onPressed: () => _albumMenu(anchor),
+                            _grid(
+                              images.length,
+                              (index) => _tile(
+                                images[index],
+                                '图集封面 ${index + 1}',
+                                () async => images[index],
+                              ),
+                            )
+                          else
+                            const SliverToBoxAdapter(
+                              child: ContentNotice(
+                                icon: CupertinoIcons.photo,
+                                title: '还没有收藏的图片',
+                                message: '从相册选择后即可用于当前书籍，也可在其他书籍中复用。',
+                              ),
+                            )
+                        else ...[
+                          if (items.isEmpty && !_searching && _ready)
+                            SliverToBoxAdapter(
+                              child: ContentNotice(
+                                icon: CupertinoIcons.photo,
+                                title: '没有找到候选封面',
+                                message: widget.offline
+                                    ? '可切换到我的图片，或从相册选择。'
+                                    : '可修改书名、放宽匹配条件，或从相册选择。',
+                                onRetry: widget.offline ? null : _search,
+                                actionLabel: '重新搜索',
+                                secondaryAction:
+                                    _checkAuthor ||
+                                        !_scope.isAll ||
+                                        _query.text.trim() !=
+                                            _initialKeyword.trim()
+                                    ? GlassTextButton(
+                                        onPressed: _resetSearch,
+                                        child: const AppText('清除搜索条件'),
+                                      )
+                                    : null,
+                              ),
+                            ),
+                          _grid(items.length, (index) {
+                            final book = items[index];
+                            final key = _key(book);
+                            return _tile(
+                              key,
+                              book.title,
+                              () async => store.save(
+                                await preparePersonalImageBytes(
+                                  await _previews.load(key),
+                                  cover: true,
                                 ),
                               ),
-                            ),
+                              subtitle: [
+                                if (book.author.isNotEmpty) book.author,
+                                if (book.source != null)
+                                  book.source!.sourceName,
+                              ].join(' · '),
+                            );
+                          }),
                         ],
-                      ),
-                    ],
-                  ),
-                ),
-                if (images.isNotEmpty)
-                  _grid(
-                    images.length,
-                    (index) => _tile(
-                      images[index],
-                      '图集封面 ${index + 1}',
-                      () => store.read(images[index]),
-                      () async => images[index],
-                    ),
-                  )
-                else
-                  const SliverToBoxAdapter(
-                    child: ContentNotice(
-                      icon: CupertinoIcons.photo,
-                      title: '图集暂无图片',
-                      message: '从手机选图后即可在其他书籍中复用。',
+                      ],
                     ),
                   ),
-                SliverToBoxAdapter(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const SizedBox(height: 20),
-                      const ArchiveSection(
-                        title: '其他书源封面',
-                        code: 'COVER / SOURCES',
-                      ),
-                      if (_ready && library != null)
-                        Wrap(
-                          spacing: 8,
-                          children: [
-                            GlassTextButton(
-                              onPressed: _chooseScope,
-                              child: AppText(_scope.describe(library.sources)),
-                            ),
-                            if (!widget.offline)
-                              GlassTextButton(
-                                onPressed: _searching
-                                    ? () => setState(() {
-                                        _stop();
-                                        _status = '搜索已停止';
-                                      })
-                                    : _search,
-                                child: AppText(_searching ? '停止搜索' : '重新搜索'),
-                              ),
-                          ],
-                        ),
-                      AppText(_status),
-                      const SizedBox(height: 12),
-                    ],
-                  ),
-                ),
-                if (_items.isEmpty && !_searching && _ready)
-                  const SliverToBoxAdapter(
-                    child: ContentNotice(
-                      icon: CupertinoIcons.photo,
-                      title: '没有候选封面',
-                    ),
-                  ),
-                _grid(_items.length, (index) {
-                  final book = _items[index];
-                  return _tile(
-                    _key(book),
-                    book.source!.sourceName,
-                    () => novelCoverBytes(
-                      book,
-                      original: true,
-                      cachedOnly: widget.offline,
-                    ),
-                    () async => store.save(
-                      await preparePersonalImageBytes(
-                        await novelCoverBytes(
-                          book,
-                          original: true,
-                          cachedOnly: widget.offline,
-                        ),
-                        cover: true,
-                      ),
-                    ),
-                  );
-                }),
-              ],
+                ],
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
 }
 
 class _CoverPreview extends StatefulWidget {
-  const _CoverPreview({required super.key, required this.read});
+  const _CoverPreview({
+    required super.key,
+    required this.read,
+    required this.retry,
+  });
   final Future<Uint8List> Function() read;
+  final VoidCallback retry;
   @override
   State<_CoverPreview> createState() => _CoverPreviewState();
 }
 
 class _CoverPreviewState extends State<_CoverPreview> {
-  late final _bytes = widget.read();
+  late var _bytes = widget.read();
   @override
   Widget build(BuildContext context) => FutureBuilder<Uint8List>(
     future: _bytes,
     builder: (_, snapshot) {
       if (snapshot.hasError) {
-        return const Center(child: Icon(CupertinoIcons.photo));
+        return Center(
+          child: GlassTextButton(
+            onPressed: () {
+              widget.retry();
+              setState(() => _bytes = widget.read());
+            },
+            child: const AppText('重试'),
+          ),
+        );
       }
       if (!snapshot.hasData) {
         return const Center(child: CupertinoActivityIndicator());

@@ -32,7 +32,8 @@ import 'route_identity.dart';
 import 'dock_layout.dart';
 import 'control_material_scope.dart';
 
-export 'scroll_edge_blur.dart' show ProgressiveBlur, ScrollEdgeProfile;
+export 'scroll_edge_blur.dart'
+    show ProgressiveBlur, ScrollBackdropPause, ScrollEdgeProfile;
 export 'loading_ui.dart';
 export 'motion_ui.dart';
 export 'archive_design.dart';
@@ -548,16 +549,18 @@ class GlassHeaderLayout extends StatelessWidget {
   @override
   Widget build(BuildContext context) => !showHeader
       ? body
-      : Stack(
-          children: [
-            Positioned.fill(child: body),
-            Positioned(
-              top: 0,
-              left: 0,
-              right: 0,
-              child: FrostedHeader(child: header),
-            ),
-          ],
+      : ScrollBackdropPause(
+          child: Stack(
+            children: [
+              Positioned.fill(child: body),
+              Positioned(
+                top: 0,
+                left: 0,
+                right: 0,
+                child: FrostedHeader(child: header),
+              ),
+            ],
+          ),
         );
 }
 
@@ -695,6 +698,7 @@ class _LiquidGlassState extends State<LiquidGlass> {
     final tint =
         widget.tintColor ??
         GlassAppearance.tintOf(context, opacity: tintOpacity);
+    final scrollBackdropPaused = ScrollBackdropScope.pausedOf(context);
     return AnimatedScale(
       scale: _pressed && !media.disableAnimations ? .97 : 1,
       duration: media.disableAnimations || _cancelledPress
@@ -705,6 +709,7 @@ class _LiquidGlassState extends State<LiquidGlass> {
       curve: NovelMotion.settle,
       child: NativeBackdrop(
         bypass: widget.transparent,
+        forceLightweight: scrollBackdropPaused,
         effect: NativeEffect.glass,
         radius: widget.radius,
         preserveOptics: widget.preserveOptics,
@@ -1588,6 +1593,31 @@ class _NovelCoverState extends State<NovelCover> {
   bool get fadeIn => widget.fadeIn;
   Object? _requestKey;
   Future<Uint8List>? _request;
+  String? _coverChoice;
+
+  @override
+  void initState() {
+    super.initState();
+    _coverChoice = PersonalCovers.shared.choice(novel.id);
+    PersonalCovers.shared.addListener(_personalCoverChanged);
+  }
+
+  void _personalCoverChanged() {
+    final choice = PersonalCovers.shared.choice(novel.id);
+    if (choice != _coverChoice) setState(() => _coverChoice = choice);
+  }
+
+  @override
+  void didUpdateWidget(NovelCover oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _coverChoice = PersonalCovers.shared.choice(novel.id);
+  }
+
+  @override
+  void dispose() {
+    PersonalCovers.shared.removeListener(_personalCoverChanged);
+    super.dispose();
+  }
 
   Future<Uint8List> _coverRequest(String url) {
     final source = novel.source;
@@ -1610,10 +1640,7 @@ class _NovelCoverState extends State<NovelCover> {
   }
 
   @override
-  Widget build(BuildContext context) => ListenableBuilder(
-    listenable: PersonalCovers.shared,
-    builder: (context, _) => _buildCover(context),
-  );
+  Widget build(BuildContext context) => _buildCover(context);
 
   Widget _buildCover(BuildContext context) {
     final cover = _visual();
@@ -1783,12 +1810,14 @@ class _NovelCoverState extends State<NovelCover> {
           clip ? ArchiveDesign.coverRadius : 0,
         ),
       ),
-      child: !clip
-          ? face
-          : ClipRRect(
-              borderRadius: BorderRadius.circular(ArchiveDesign.coverRadius),
-              child: face,
-            ),
+      child: RepaintBoundary(
+        child: !clip
+            ? face
+            : ClipRRect(
+                borderRadius: BorderRadius.circular(ArchiveDesign.coverRadius),
+                child: face,
+              ),
+      ),
     );
   }
 }

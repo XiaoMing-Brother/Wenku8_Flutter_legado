@@ -1850,10 +1850,8 @@ class LibraryState extends ChangeNotifier {
   int chapterForNovel(Novel novel) {
     final position = _positions[novel.id];
     if (position != null && position.chapterId > 0) {
-      final index = novel.chapters.indexWhere(
-        (chapter) => chapter.id == position.chapterId,
-      );
-      if (index >= 0) return index;
+      final index = chapterForPosition(novel, position);
+      if (index != null) return index;
     }
     final count = novel.chapters.isEmpty
         ? novel.chapterCount

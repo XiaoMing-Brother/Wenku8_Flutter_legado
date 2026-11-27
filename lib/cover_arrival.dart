@@ -1,8 +1,10 @@
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
 
 import 'archive_motion.dart';
+import 'route_identity.dart';
 
 /// Wait for a decoded frame, then replace the static skeleton with one shallow
 /// diagonal cut. Recycled rows and Hero destinations reuse the presented frame.
@@ -35,7 +37,10 @@ class CoverArrival extends StatefulWidget {
 class _CoverArrivalState extends State<CoverArrival>
     with SingleTickerProviderStateMixin {
   AnimationController? _clock;
+  ModalRoute<dynamic>? _route;
   Animation<double>? _routeAnimation;
+  Animation<double>? _coveringAnimation;
+  ValueListenable<TickerModeData>? _tickerMode;
   bool _started = false;
   bool _done = false;
   bool _queued = false;
@@ -44,18 +49,45 @@ class _CoverArrivalState extends State<CoverArrival>
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    final route = ModalRoute.of(context);
-    final animation = route?.animation;
+    _route = RouteIdentity.read(context);
+    _watchActivity();
+    _prepare();
+  }
+
+  void _watchActivity() {
+    final animation = _done ? null : _route?.animation;
     if (_routeAnimation != animation) {
       _routeAnimation?.removeStatusListener(_routeChanged);
       _routeAnimation = animation;
       animation?.addStatusListener(_routeChanged);
     }
-    // Do not combine an unfinished face reveal with a new paper flight.
-    if (_started && route?.isCurrent == false) {
-      _finish();
-    } else {
-      _prepare();
+    final covering = _done ? null : _route?.secondaryAnimation;
+    if (_coveringAnimation != covering) {
+      _coveringAnimation?.removeStatusListener(_covered);
+      _coveringAnimation = covering;
+      covering?.addStatusListener(_covered);
+    }
+    final mode = _done ? null : TickerMode.getValuesNotifier(context);
+    if (_tickerMode != mode) {
+      _tickerMode?.removeListener(_activityChanged);
+      _tickerMode = mode;
+      mode?.addListener(_activityChanged);
+    }
+  }
+
+  void _covered(AnimationStatus status) {
+    if (mounted && !_done) {
+      if (_started && _route?.isCurrent == false) {
+        setState(_finish);
+      } else if (status == AnimationStatus.dismissed) {
+        setState(_prepare);
+      }
+    }
+  }
+
+  void _activityChanged() {
+    if (mounted && !_done && _tickerMode?.value.enabled == true) {
+      setState(_prepare);
     }
   }
 
@@ -68,6 +100,7 @@ class _CoverArrivalState extends State<CoverArrival>
       _started = false;
       _done = false;
       _hasFrame = false;
+      _watchActivity();
     }
     _prepare();
   }
@@ -81,6 +114,8 @@ class _CoverArrivalState extends State<CoverArrival>
   void _finish() {
     _clock?.stop();
     _done = true;
+    // 已展示的封面不再监听切页和页签状态，避免整屏封面跟着重建。
+    _watchActivity();
     if (widget.recordArrival) CoverArrival._presented[widget.bytes] = true;
   }
 
@@ -91,7 +126,7 @@ class _CoverArrivalState extends State<CoverArrival>
     _hasFrame |= widget.ready;
     if (!_hasFrame || _done) return;
     if (!widget.recordArrival) {
-      _done = true;
+      _finish();
       return;
     }
     if (CoverArrival.wasPresented(widget.bytes) ||
@@ -112,8 +147,8 @@ class _CoverArrivalState extends State<CoverArrival>
   }
 
   bool get _routeReady =>
-      TickerMode.valuesOf(context).enabled &&
-      ModalRoute.of(context)?.isCurrent != false &&
+      _tickerMode?.value.enabled != false &&
+      _route?.isCurrent != false &&
       (_routeAnimation == null ||
           _routeAnimation!.status == AnimationStatus.completed);
 
@@ -158,6 +193,8 @@ class _CoverArrivalState extends State<CoverArrival>
   @override
   void dispose() {
     _routeAnimation?.removeStatusListener(_routeChanged);
+    _coveringAnimation?.removeStatusListener(_covered);
+    _tickerMode?.removeListener(_activityChanged);
     _clock?.dispose();
     super.dispose();
   }

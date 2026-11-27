@@ -1612,7 +1612,8 @@ internal class BookSourceJs(
             null
         }
         fn("qread", 0) {
-            throw IllegalStateException("当前客户端不支持 qread")
+            // 书源用 try/catch 探测轻阅读；包装后 Rhino 才能捕获并回退。
+            throw WrappedException(IllegalStateException("当前客户端不支持 qread"))
         }
         fn("stoast", 1) { args ->
             val text = stringArg(args, 0)

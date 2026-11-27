@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart' show compute;
 import 'package:path_provider/path_provider.dart';
 
 import '../book_identity.dart';
@@ -42,7 +43,11 @@ class BookSourceIdentityStore {
   int? idFor(String sourceKey, String bookUrl) =>
       _idByKey[_key(sourceKey, bookUrl)];
 
-  Future<void> remember(int id, BookSourceRef ref) async {
+  Future<void> remember(
+    int id,
+    BookSourceRef ref, {
+    bool waitForSave = true,
+  }) async {
     if (id < bookSourceIdStart || id >= bookSourceIdEnd) return;
     final key = _key(ref.sourceKey, ref.bookUrl);
     if (identical(_byId[id], ref) && _idByKey[key] == id) return;
@@ -52,7 +57,11 @@ class BookSourceIdentityStore {
     _byKey[key] = ref;
     _idByKey[key] = id;
     if (_nextId <= id) _nextId = id + 1;
-    await _save();
+    if (waitForSave) {
+      await _save();
+    } else {
+      unawaited(_saveQuietly());
+    }
   }
 
   /// Reassigns an existing app book id to a new source coordinate.
@@ -164,7 +173,9 @@ class BookSourceIdentityStore {
           next.tocUrl != current.tocUrl ||
           next.title != current.title ||
           next.author != current.author ||
-          next.coverUrl != current.coverUrl || next.customCoverUrl != current.customCoverUrl || next.resourceType != current.resourceType) {
+          next.coverUrl != current.coverUrl ||
+          next.customCoverUrl != current.customCoverUrl ||
+          next.resourceType != current.resourceType) {
         _byKey[key] = next;
         final id = _idByKey[key];
         if (id != null) _byId[id] = next;
@@ -205,6 +216,7 @@ class BookSourceIdentityStore {
     String? title,
     String? author,
     String? coverUrl,
+    bool waitForSave = true,
   }) async {
     final next = ref.copyWith(
       tocUrl: tocUrl == null || tocUrl.isEmpty ? null : tocUrl,
@@ -222,7 +234,11 @@ class BookSourceIdentityStore {
     _byKey[key] = next;
     final id = _idByKey[key];
     if (id != null) _byId[id] = next;
-    await _save();
+    if (waitForSave) {
+      await _save();
+    } else {
+      unawaited(_saveQuietly());
+    }
     return next;
   }
 
@@ -236,21 +252,12 @@ class BookSourceIdentityStore {
     // every result on the UI isolate.
     Timer(const Duration(milliseconds: 300), () {
       _pendingSave = null;
-      final String document;
-      try {
-        document = jsonEncode({
-          'version': version,
-          'nextId': _nextId,
-          'books': [
-            for (final entry in _byId.entries)
-              {'id': entry.key, ...entry.value.toJson()},
-          ],
-        });
-      } on Object catch (error, stack) {
-        completer.completeError(error, stack);
-        return;
-      }
-      final result = _writes.then((_) => _atomicWrite(document));
+      // 先固定这一批坐标；字段投影和 JSON 编码留给后台，避免打断切页动画。
+      final snapshot = (nextId: _nextId, books: Map.of(_byId));
+      final result = _writes.then((_) async {
+        final document = await compute(_encodeIdentitySnapshot, snapshot);
+        await _atomicWrite(document);
+      });
       _writes = result.then<void>((_) {}, onError: (Object _, StackTrace _) {});
       result.then<void>(
         (_) => completer.complete(),
@@ -279,3 +286,14 @@ class BookSourceIdentityStore {
   static String _key(String sourceKey, String bookUrl) =>
       '$sourceKey\u0000$bookUrl';
 }
+
+String _encodeIdentitySnapshot(
+  ({int nextId, Map<int, BookSourceRef> books}) snapshot,
+) => jsonEncode({
+  'version': BookSourceIdentityStore.version,
+  'nextId': snapshot.nextId,
+  'books': [
+    for (final entry in snapshot.books.entries)
+      {'id': entry.key, ...entry.value.toJson()},
+  ],
+});

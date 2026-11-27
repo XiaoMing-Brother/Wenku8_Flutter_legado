@@ -1,3 +1,5 @@
+import 'dart:collection';
+
 import 'package:flutter/material.dart';
 import 'book_search.dart';
 import 'book_navigation.dart';
@@ -45,10 +47,7 @@ class Novel {
       _directoryCache[this] ??= _directory();
   List<NovelDirectoryEntry> _directory() {
     if (navigation?.entries.isNotEmpty != true) {
-      return [
-        for (final (i, c) in chapters.indexed)
-          NovelDirectoryEntry(c.title, i, BookReadingTarget(c.id)),
-      ];
+      return _ChapterDirectory(chapters);
     }
     final indices = {
       for (final (i, chapter) in chapters.indexed) chapter.id: i,
@@ -113,6 +112,9 @@ class Novel {
       List.unmodifiable(NovelVolume.of(directoryChapters));
 
   int directoryIndexFor(int chapter, {int paragraph = 0, int offset = 0}) {
+    if (navigation?.entries.isNotEmpty != true) {
+      return chapters.isEmpty ? 0 : chapter.clamp(0, chapters.length - 1);
+    }
     var best = 0;
     final rows = directory;
     var bestPosition = -1;
@@ -313,15 +315,15 @@ class NovelVolume {
   int get length => end - start;
 
   static List<NovelVolume> of(List<NovelChapter> chapters) {
+    if (chapters.isEmpty) return const [];
     final result = <NovelVolume>[];
     var start = 0;
-    while (start < chapters.length) {
-      final chapter = chapters[start];
-      var end = start + 1;
-      while (end < chapters.length &&
-          chapters[end].volumeId == chapter.volumeId &&
-          chapters[end].volumeTitle == chapter.volumeTitle) {
-        end++;
+    var chapter = chapters.first;
+    for (var end = 1; end < chapters.length; end++) {
+      final next = chapters[end];
+      if (next.volumeId == chapter.volumeId &&
+          next.volumeTitle == chapter.volumeTitle) {
+        continue;
       }
       result.add(
         NovelVolume(
@@ -332,9 +334,47 @@ class NovelVolume {
         ),
       );
       start = end;
+      chapter = next;
     }
+    result.add(
+      NovelVolume(
+        '${chapter.volumeId}:$start',
+        chapter.volumeTitle,
+        start,
+        chapters.length,
+      ),
+    );
     return result;
   }
+}
+
+/// 保留目录的 List 接口，仅为实际访问的章节创建并复用导航条目。
+class _ChapterDirectory extends ListBase<NovelDirectoryEntry> {
+  _ChapterDirectory(this.chapters);
+  final List<NovelChapter> chapters;
+  final _entries = <int, NovelDirectoryEntry>{};
+
+  @override
+  int get length => chapters.length;
+  @override
+  set length(int value) => throw UnsupportedError('目录只读');
+
+  @override
+  NovelDirectoryEntry operator [](int index) {
+    RangeError.checkValidIndex(index, this);
+    return _entries.putIfAbsent(index, () {
+      final chapter = chapters[index];
+      return NovelDirectoryEntry(
+        chapter.title,
+        index,
+        BookReadingTarget(chapter.id),
+      );
+    });
+  }
+
+  @override
+  void operator []=(int index, NovelDirectoryEntry value) =>
+      throw UnsupportedError('目录只读');
 }
 
 abstract class NovelRepository {

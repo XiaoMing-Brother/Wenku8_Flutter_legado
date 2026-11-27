@@ -55,6 +55,7 @@ import 'book_sources/qimao_review_service.dart';
 import 'reader_paragraph_review.dart';
 import 'blocked_tags_controls.dart';
 import 'catalog.dart';
+import 'book_title_page.dart';
 import 'glass_dock.dart';
 import 'home_navigation.dart';
 import 'library_state.dart';
@@ -622,14 +623,16 @@ class HomeShellState extends State<HomeShell>
   }
 
   @override
-  Widget build(BuildContext context) => _HomeRouteBinding(
-    onChanged: _routeChanged,
-    child: PrimaryScrollController(
-      // The scaffold's iOS status-bar scroll action follows the visible page.
-      // Search has its own position and must not also move the retained tab.
-      controller: _searchMounted ? _searchScroll : _tabScrolls[_tab],
-      automaticallyInheritForPlatforms: _scrollPlatforms,
-      child: _buildWorkspace(context),
+  Widget build(BuildContext context) => ScrollBackdropPause(
+    child: _HomeRouteBinding(
+      onChanged: _routeChanged,
+      child: PrimaryScrollController(
+        // The scaffold's iOS status-bar scroll action follows the visible page.
+        // Search has its own position and must not also move the retained tab.
+        controller: _searchMounted ? _searchScroll : _tabScrolls[_tab],
+        automaticallyInheritForPlatforms: _scrollPlatforms,
+        child: _buildWorkspace(context),
+      ),
     ),
   );
 
@@ -1464,8 +1467,11 @@ void openDetail(
   );
 }
 
-class _BookOpeningPage extends StatelessWidget {
-  const _BookOpeningPage({
+/// 阅读器正文开篇插屏（起点/番茄式「书封首屏」）：封面、书名、作者、三列元数据、
+/// 简介，以及「来源 + 开始阅读」。打开书正式进正文前显示这一屏。
+class BookOpeningPage extends StatelessWidget {
+  const BookOpeningPage({
+    super.key,
     required this.novel,
     required this.mode,
     required this.onOpen,
@@ -1494,10 +1500,11 @@ class _BookOpeningPage extends StatelessWidget {
 
   String _wordValue(int value) {
     if (value < 10000) return '$value';
-    return (value / 10000)
+    final text = (value / 10000)
         .toStringAsFixed(2)
         .replaceFirst(RegExp(r'0+$'), '')
         .replaceFirst(RegExp(r'\.$'), '');
+    return text;
   }
 
   String _wordLabel(int value) {
@@ -1505,16 +1512,22 @@ class _BookOpeningPage extends StatelessWidget {
     return '$unit / ${novel.isComplete ? '完本' : '连载'}';
   }
 
+  /// 类型列：多标签用「 · 」连接，单标签原样。截断交给 ellipsis。
+  String get _genreText {
+    final tags = novel.tags;
+    if (tags.length > 1) return tags.join(' · ');
+    if (tags.length == 1) return tags.first;
+    return novel.genre.trim();
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     final size = MediaQuery.sizeOf(context);
-    final coverWidth = (size.width * .34).clamp(104.0, 158.0);
+    final coverWidth = (size.width * .34).clamp(104.0, 320.0);
     final author = novel.author.trim();
-    final genre = isLocalBook(novel.id)
-        ? novel.tags.join(' · ')
-        : novel.genre.trim();
+    final genre = isLocalBook(novel.id) ? novel.tags.join(' · ') : _genreText;
     final summary = novel.summary.trim();
     final facts = [
       if (genre.isNotEmpty) _BookOpeningFact(value: genre, label: '类型'),
@@ -1544,7 +1557,8 @@ class _BookOpeningPage extends StatelessWidget {
           child: Column(
             children: [
               Expanded(
-                child: Center(
+                child: Align(
+                  alignment: Alignment.topCenter,
                   child: NotificationListener<ScrollNotification>(
                     onNotification: (event) {
                       if (mode != ReaderMode.scroll || event.depth != 0) {
@@ -1566,7 +1580,10 @@ class _BookOpeningPage extends StatelessWidget {
                       physics: const ClampingScrollPhysics(
                         parent: AlwaysScrollableScrollPhysics(),
                       ),
-                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      padding: EdgeInsets.only(
+                        top: size.height * .185,
+                        bottom: 16,
+                      ),
                       child: ConstrainedBox(
                         constraints: const BoxConstraints(maxWidth: 440),
                         child: Column(
@@ -1575,9 +1592,19 @@ class _BookOpeningPage extends StatelessWidget {
                             Container(
                               padding: const EdgeInsets.all(5),
                               decoration: BoxDecoration(
+                                color: scheme.surface,
                                 border: Border.all(
-                                  color: scheme.outlineVariant,
+                                  color: scheme.outlineVariant.withValues(
+                                    alpha: .55,
+                                  ),
                                 ),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: Colors.black.withValues(alpha: .10),
+                                    blurRadius: 10,
+                                    offset: const Offset(0, 4),
+                                  ),
+                                ],
                               ),
                               child: NovelCover(
                                 novel,
@@ -1632,8 +1659,8 @@ class _BookOpeningPage extends StatelessWidget {
                                     maxLines: 4,
                                     overflow: TextOverflow.ellipsis,
                                     style: const TextStyle(
-                                      fontSize: 15,
-                                      height: 1.7,
+                                      fontSize: 16,
+                                      height: 1.75,
                                     ),
                                   ),
                                 ),
@@ -1656,8 +1683,27 @@ class _BookOpeningPage extends StatelessWidget {
                   color: scheme.onSurfaceVariant,
                 ),
               ),
-              const SizedBox(height: 12),
-              GlassTextButton(onPressed: onOpen, child: const AppText('开始阅读')),
+              const SizedBox(height: 18),
+              JellyTapSurface(
+                key: const ValueKey('reader-book-opening-start'),
+                onTap: onOpen,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 8,
+                  ),
+                  child: AppText(
+                    '开始阅读',
+                    style: TextStyle(
+                      fontSize: 15,
+                      height: 1.4,
+                      fontWeight: FontWeight.w500,
+                      color: scheme.onSurface,
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 4),
             ],
           ),
         ),
@@ -6385,6 +6431,13 @@ class _DetailPageState extends State<DetailPage> with TickerProviderStateMixin {
             icon: CupertinoIcons.photo,
             onPressed: () => Navigator.pop(menu, 'cover'),
           ),
+          GlassMenuItem(
+            key: const ValueKey('detail-title-page'),
+            order: 6,
+            label: '查看扉页',
+            icon: CupertinoIcons.doc_text,
+            onPressed: () => Navigator.pop(menu, 'titlepage'),
+          ),
         ],
       ),
     );
@@ -6402,8 +6455,23 @@ class _DetailPageState extends State<DetailPage> with TickerProviderStateMixin {
         await _copyBookLink(bookUrl);
       case 'cover':
         await _changeCover();
+      case 'titlepage':
+        await _openTitlePage();
     }
   }
+
+  Future<void> _openTitlePage() => pushNovelPage<void>(
+    context,
+    BookTitlePage(
+      novel: novel,
+      reduceMotion: _reduceMotion,
+      openChapter: novel.chapters.isEmpty
+          ? null
+          : () => _openReader(context, _resumeChapter ?? 0),
+    ),
+    reduceMotion: _reduceMotion,
+    slot: 'title-page',
+  );
 
   Future<void> _changeCover() async {
     final book = novel;
@@ -8139,20 +8207,32 @@ class _ReaderPageState extends State<ReaderPage>
     final media = MediaQuery.of(context);
     // 菜单会切换系统导航栏；展开前锁定正文安全区，避免位移和重新分页。
     final hideStatus = _readerPreferences.hideSystemStatus;
-    if (_contentWindowInsets?.size != media.size ||
+    final windowChanged =
+        _contentWindowInsets?.size != media.size ||
         _contentWindowInsets?.ratio != media.devicePixelRatio ||
-        _contentWindowInsets?.hideStatus != hideStatus) {
+        _contentWindowInsets?.hideStatus != hideStatus;
+    if (windowChanged) {
       _contentInsetsLocked = false;
     }
-    if (!_contentInsetsLocked) {
-      _contentWindowInsets = (
-        size: media.size,
-        ratio: media.devicePixelRatio,
-        hideStatus: hideStatus,
-        padding: media.viewPadding,
+    var safe = _contentInsetsLocked
+        ? _contentWindowInsets!.padding
+        : media.viewPadding;
+    if (LocalPlatform.android && !windowChanged) {
+      // Android 阅读时会隐藏导航栏，只保留同一窗口观察到的最小底部安全区。
+      // 临时唤出导航栏不抬高页脚，收起菜单后的较小值也不能被旧锁定值挡住。
+      safe = safe.copyWith(
+        bottom: math.min(
+          _contentWindowInsets!.padding.bottom,
+          media.viewPadding.bottom,
+        ),
       );
     }
-    final safe = _contentWindowInsets!.padding;
+    _contentWindowInsets = (
+      size: media.size,
+      ratio: media.devicePixelRatio,
+      hideStatus: hideStatus,
+      padding: safe,
+    );
     return media.copyWith(
       viewPadding: safe,
       padding: EdgeInsets.fromLTRB(
@@ -12953,7 +13033,7 @@ class _ReaderPageState extends State<ReaderPage>
                                           ),
                                           reduceMotion:
                                               widget.state.reduceMotion,
-                                          child: _BookOpeningPage(
+                                          child: BookOpeningPage(
                                             novel: _sourceBook,
                                             mode: _readerMode,
                                             onOpen: _openReader,

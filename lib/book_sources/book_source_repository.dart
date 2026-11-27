@@ -715,23 +715,35 @@ class BookSourceRepository extends NovelRepository
   }
 
   @override
-  List<Novel> cachedCoverCandidates(Novel book, BookSourceSearchScope scope) {
+  List<Novel> cachedCoverCandidates(
+    Novel book,
+    BookSourceSearchScope scope, {
+    String? keyword,
+    bool checkAuthor = true,
+  }) {
     final enabled = store.enabled
         .where((source) => source.supported && scope.matches(source))
         .map((source) => source.key)
         .toSet();
     final title = sourceSearchTitleKey(
       sourceSearchKeyword(
-        book.source?.title.isNotEmpty == true ? book.source!.title : book.title,
+        keyword ??
+            (book.source?.title.isNotEmpty == true
+                ? book.source!.title
+                : book.title),
       ),
     );
+    if (title.isEmpty) return [];
     final items = <Novel>[];
     for (final entry in identities.entries) {
       final ref = entry.value;
       if (ref.coverUrl.isEmpty ||
           !enabled.contains(ref.sourceKey) ||
-          sourceSearchTitleKey(ref.title) != title ||
-          (book.author.trim().isNotEmpty &&
+          (keyword == null
+              ? sourceSearchTitleKey(ref.title) != title
+              : !sourceSearchTitleKey(ref.title).contains(title)) ||
+          (checkAuthor &&
+              book.author.trim().isNotEmpty &&
               !sameSourceAuthor(book.author, ref.author))) {
         continue;
       }
@@ -756,13 +768,14 @@ class BookSourceRepository extends NovelRepository
   Future<BookSourceCandidateSearchResult> searchSourceCandidates(
     Novel book, {
     required bool checkAuthor,
+    String? keyword,
     BookSourceSearchScope scope = const BookSourceSearchScope.all(),
     bool Function()? current,
     NovelSearchProgressCallback? onProgress,
   }) async {
     final sourceTitle = book.source?.title.trim() ?? '';
     final term = sourceSearchKeyword(
-      sourceTitle.isEmpty ? book.title : sourceTitle,
+      keyword ?? (sourceTitle.isEmpty ? book.title : sourceTitle),
     );
     if (term.isEmpty) {
       return const BookSourceCandidateSearchResult(
@@ -861,7 +874,11 @@ class BookSourceRepository extends NovelRepository
               .timeout(requestTimeout);
           if (stopped()) return;
           for (final row in result.items) {
-            if (sourceSearchTitleKey(_string(row['name'])) != titleKey) {
+            final candidateTitle = sourceSearchTitleKey(_string(row['name']));
+            // 换源仍要求同名；封面关键词允许命中分卷或带后缀的书名。
+            if (keyword == null
+                ? candidateTitle != titleKey
+                : !candidateTitle.contains(titleKey)) {
               continue;
             }
             final author = _string(row['author']);
@@ -944,11 +961,13 @@ class BookSourceRepository extends NovelRepository
     await prepare();
     _requireEngine();
     final stored = _refForNovel(novel);
-    final ref = stored.copyWith(
-      resourceType: store.source(stored.sourceKey)?.resourceType,
-    );
+    final resourceType = store.source(stored.sourceKey)?.resourceType;
+    // 未变的坐标沿用原对象，避免每次点书都等待整份索引的延迟保存。
+    final ref = resourceType == null || resourceType == stored.resourceType
+        ? stored
+        : stored.copyWith(resourceType: resourceType);
     if (OfficialBookService.isOfficialKey(ref.sourceKey)) {
-      await identities.remember(novel.id, ref);
+      await identities.remember(novel.id, ref, waitForSave: false);
       final data = await OfficialBookService.detail(ref);
       final nextRef = await identities.updateMeta(
         ref,
@@ -958,6 +977,7 @@ class BookSourceRepository extends NovelRepository
             ? novel.author
             : sourceAuthorName(data.author),
         coverUrl: data.coverUrl,
+        waitForSave: false,
       );
       final book = Novel(
         id: novel.id,
@@ -979,7 +999,7 @@ class BookSourceRepository extends NovelRepository
       return book;
     }
     _sourceFor(ref);
-    await identities.remember(novel.id, ref);
+    await identities.remember(novel.id, ref, waitForSave: false);
     final loaded = await transport
         .detail(
           sourceKey: ref.sourceKey,
@@ -1011,6 +1031,7 @@ class BookSourceRepository extends NovelRepository
       title: title,
       author: author,
       coverUrl: coverUrl,
+      waitForSave: false,
     );
     final book = Novel(
       id: novel.id,

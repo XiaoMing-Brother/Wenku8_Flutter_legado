@@ -58,10 +58,16 @@ abstract interface class BookSourceLibrary {
   Future<void> cancelSearch();
   String exportSources({Set<String>? keys});
   Future<Novel> switchSource(Novel current, Novel candidate);
-  List<Novel> cachedCoverCandidates(Novel book, BookSourceSearchScope scope);
+  List<Novel> cachedCoverCandidates(
+    Novel book,
+    BookSourceSearchScope scope, {
+    String? keyword,
+    bool checkAuthor = true,
+  });
   Future<BookSourceCandidateSearchResult> searchSourceCandidates(
     Novel book, {
     required bool checkAuthor,
+    String? keyword,
     BookSourceSearchScope scope = const BookSourceSearchScope.all(),
     bool Function()? current,
     NovelSearchProgressCallback? onProgress,
