@@ -131,7 +131,7 @@ class _ReaderBatteryMeter extends StatelessWidget {
       context,
     ).scale((style.fontSize ?? 12) * .72).clamp(8.0, 13.0);
     final height = (numberSize + 6).clamp(15.0, 21.0);
-    final width = height * 2.15;
+    final width = height * 1.9;
     return Semantics(
       label: '电量 $value%',
       excludeSemantics: true,

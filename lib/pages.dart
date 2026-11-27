@@ -1472,11 +1472,17 @@ class BookOpeningPage extends StatelessWidget {
     required this.novel,
     required this.mode,
     required this.onOpen,
+    this.fontFamily,
+    this.fontFamilyFallback = const [],
   });
 
   final Novel novel;
   final ReaderMode mode;
   final VoidCallback onOpen;
+
+  /// 与阅读正文一致的字体族；为空时退回主题默认字体。
+  final String? fontFamily;
+  final List<String> fontFamilyFallback;
 
   int? get _wordCount => switch (novel.wordCount) {
     final value? when value > 0 => value,
@@ -1509,33 +1515,46 @@ class BookOpeningPage extends StatelessWidget {
     return '$unit/${novel.isComplete ? '完本' : '连载'}';
   }
 
-  /// 类型列：多标签用「 · 」连接，单标签原样。截断交给 ellipsis。
+  /// 类型列：只显示第一个主标签（起点扉页类型列通常只放主分类）。
   String get _genreText {
     final tags = novel.tags;
-    if (tags.length > 1) return tags.join(' · ');
-    if (tags.length == 1) return tags.first;
+    if (tags.isNotEmpty) return tags.first;
     return novel.genre.trim();
   }
 
-  /// 卷首语：优先使用扉页寄语，缺省时退回简介首句。
+  /// 卷首语：优先使用扉页寄语。
+  ///
+  /// 起点这类书源没有单独的「扉页寄语」字段，简介里常混着更新公告
+  /// （如「动画特别篇已播出，欢迎观看」）。这里先按句切开，跳过明显是公告 /
+  /// 推广 / 更新提示的句子，取第一句真正的正文简介；都像公告时才退回原首句。
   String? get _epigraph {
     final summary = novel.summary.trim();
     if (summary.isEmpty) return null;
-    final firstLine = summary.split(RegExp(r'[\r\n。！？!?]')).first.trim();
-    if (firstLine.isEmpty) return null;
-    return firstLine.length > 24 ? firstLine.substring(0, 24) : firstLine;
+    final sentences = summary
+        .split(RegExp(r'[\r\n。！？!?]+'))
+        .map((s) => s.trim())
+        .where((s) => s.isNotEmpty)
+        .toList();
+    if (sentences.isEmpty) return null;
+    final promo = RegExp(
+      r'播出|欢迎|公告|更新|腾讯|优酷|爱奇艺|视频|动画|影视|敬请|请|活动|感谢|'
+      r'PS|ps|通知|上线|开播|定档|连载|完本|新书|推荐|收藏|月票|打赏',
+    );
+    String? pick;
+    for (final s in sentences) {
+      if (!promo.hasMatch(s) && s.length >= 4) {
+        pick = s;
+        break;
+      }
+    }
+    pick ??= sentences.first;
+    return pick.length > 24 ? pick.substring(0, 24) : pick;
   }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
-    final size = MediaQuery.sizeOf(context);
-    // 以 390dp 为基准的缩放因子：窄屏缩小字号避免溢出，宽屏略放大但封顶。
-    // 同时受系统字体缩放影响的上限由各 AppText 的 textScaler 自然叠加，这里只做
-    // 屏幕宽度自适应，保证「原生幻想」「2026.11.25」这类长值不会顶破三列。
-    final scale = (size.width / 390).clamp(0.82, 1.12);
-    final coverWidth = (size.width * .29).clamp(112.0, 320.0);
     final author = novel.author.trim();
     final genre = isLocalBook(novel.id) ? novel.tags.join(' · ') : _genreText;
     final facts = [
@@ -1544,177 +1563,172 @@ class BookOpeningPage extends StatelessWidget {
           value: genre,
           label: '类型',
           align: CrossAxisAlignment.start,
-          scale: scale,
         ),
       if (_updatedDate case final date?)
         _BookOpeningFact(
           value: date,
-          label: '更新',
+          label: '上架',
           align: CrossAxisAlignment.center,
-          scale: scale,
         ),
       if (_wordCount case final count?)
         _BookOpeningFact(
           value: _wordValue(count),
           label: _wordLabel(count),
           align: CrossAxisAlignment.end,
-          scale: scale,
         ),
     ];
     double dragDistance = 0;
-    double overscroll = 0;
-    final height = size.height;
-    return SafeArea(
-      key: const ValueKey('reader-book-opening'),
-      child: GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onHorizontalDragStart: (_) => dragDistance = 0,
-        onHorizontalDragUpdate: (details) {
-          dragDistance += details.primaryDelta ?? 0;
-        },
-        onHorizontalDragEnd: (_) {
-          if ((mode == ReaderMode.vertical ? dragDistance : -dragDistance) >=
-              42) {
-            onOpen();
-          }
-        },
-        child: NotificationListener<ScrollNotification>(
-          onNotification: (event) {
-            if (mode != ReaderMode.scroll || event.depth != 0) return false;
-            if (event is ScrollStartNotification) overscroll = 0;
-            if (event is OverscrollNotification && event.dragDetails != null) {
-              overscroll = event.overscroll > 0
-                  ? overscroll + event.overscroll
-                  : 0;
-            }
-            if (event is ScrollEndNotification && overscroll >= 42) {
+    // 扉页文字统一继承阅读正文的字体族，跟随用户在设置里选择的字体。
+    return DefaultTextStyle.merge(
+      style: TextStyle(
+        fontFamily: fontFamily,
+        fontFamilyFallback: fontFamilyFallback.isEmpty
+            ? null
+            : fontFamilyFallback,
+      ),
+      child: SafeArea(
+        key: const ValueKey('reader-book-opening'),
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          // 点击任意处进正文（不再依赖滚动 overscroll）。
+          onTap: onOpen,
+          onHorizontalDragStart: (_) => dragDistance = 0,
+          onHorizontalDragUpdate: (details) {
+            dragDistance += details.primaryDelta ?? 0;
+          },
+          onHorizontalDragEnd: (_) {
+            if ((mode == ReaderMode.vertical ? dragDistance : -dragDistance) >=
+                42) {
               onOpen();
             }
-            return false;
           },
-          child: SingleChildScrollView(
-            physics: const ClampingScrollPhysics(
-              parent: AlwaysScrollableScrollPhysics(),
-            ),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 24),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  SizedBox(height: height * .103),
-                  Center(
-                    child: Container(
-                      padding: const EdgeInsets.all(5),
-                      decoration: BoxDecoration(
-                        color: scheme.surface,
-                        border: Border.all(
-                          color: scheme.outlineVariant.withValues(alpha: .55),
-                        ),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withValues(alpha: .10),
-                            blurRadius: 12,
-                            offset: const Offset(0, 5),
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final height = constraints.maxHeight;
+              // 对照起点 App 扉页逐项比例定位：封面顶部 10.3%、高约 17.5%、宽约
+              // 29%（屏宽），整页内容按屏高比例排布、一屏内完整显示，不滚动。
+              final coverHeight = (height * .155).clamp(140.0, 340.0);
+              final coverWidth = coverHeight / 1.35;
+              final epigraph = _epigraph;
+              return Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 24),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    SizedBox(height: height * .103),
+                    Center(
+                      child: Container(
+                        padding: const EdgeInsets.all(5),
+                        decoration: BoxDecoration(
+                          color: scheme.surface,
+                          border: Border.all(
+                            color: scheme.outlineVariant.withValues(alpha: .55),
                           ),
-                        ],
-                      ),
-                      child: NovelCover(
-                        novel,
-                        width: coverWidth,
-                        height: coverWidth * 1.35,
-                      ),
-                    ),
-                  ),
-                  SizedBox(height: height * .048),
-                  AppText(
-                    novel.title,
-                    textAlign: TextAlign.center,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: 30 * scale,
-                      height: 1.25,
-                      fontWeight: FontWeight.w700,
-                      letterSpacing: 2,
-                      color: scheme.onSurface,
-                    ),
-                  ),
-                  if (author.isNotEmpty) ...[
-                    SizedBox(height: height * .038),
-                    AppText(
-                      author,
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        fontSize: 17 * scale,
-                        height: 1.4,
-                        letterSpacing: 1,
-                        color: scheme.onSurfaceVariant,
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withValues(alpha: .10),
+                              blurRadius: 12,
+                              offset: const Offset(0, 5),
+                            ),
+                          ],
+                        ),
+                        child: NovelCover(
+                          novel,
+                          width: coverWidth,
+                          height: coverHeight,
+                        ),
                       ),
                     ),
-                  ],
-                  if (facts.isNotEmpty) ...[
-                    SizedBox(height: height * .028),
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        for (final fact in facts) Expanded(child: fact),
-                      ],
-                    ),
-                  ],
-                  // A：寄语存在时才画「起始虚线 + 寄语 + 署名 + 收尾虚线」整组；
-                  // 没有寄语就整块不画，三列直接接留白与页脚，避免两条空线夹空白。
-                  if (_epigraph case final epigraph?) ...[
-                    SizedBox(height: height * .105),
-                    _openingDashedRule(scheme),
                     SizedBox(height: height * .030),
                     AppText(
-                      epigraph,
+                      novel.title,
+                      textAlign: TextAlign.center,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
                       style: TextStyle(
-                        fontSize: 20 * scale,
-                        height: 1.6,
-                        letterSpacing: .5,
+                        fontSize: 26,
+                        height: 1.25,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 2,
                         color: scheme.onSurface,
                       ),
                     ),
-                    SizedBox(height: height * .026),
+                    if (author.isNotEmpty) ...[
+                      SizedBox(height: height * .022),
+                      AppText(
+                        author,
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          fontSize: 16,
+                          height: 1.4,
+                          letterSpacing: 1,
+                          color: scheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
+                    if (facts.isNotEmpty) ...[
+                      SizedBox(height: height * .030),
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          for (final fact in facts) Expanded(child: fact),
+                        ],
+                      ),
+                    ],
+                    SizedBox(height: height * .045),
+                    if (epigraph != null) ...[
+                      _openingDashedRule(scheme),
+                      SizedBox(height: height * .030),
+                      AppText(
+                        epigraph,
+                        textAlign: TextAlign.left,
+                        style: TextStyle(
+                          fontSize: 17,
+                          height: 1.6,
+                          letterSpacing: .5,
+                          color: scheme.onSurface,
+                        ),
+                      ),
+                      SizedBox(height: height * .020),
+                      AppText(
+                        '— ${author.isEmpty ? novel.author : author}',
+                        textAlign: TextAlign.right,
+                        style: TextStyle(
+                          fontSize: 15,
+                          height: 1.4,
+                          letterSpacing: .5,
+                          color: scheme.onSurfaceVariant,
+                        ),
+                      ),
+                      SizedBox(height: height * .030),
+                      _openingDashedRule(scheme),
+                    ],
+                    // 弹性空白把版权页脚推到接近底部（对照图一页脚在 89% 处）。
+                    const Spacer(),
                     AppText(
-                      '— ${author.isEmpty ? novel.author : author}',
-                      textAlign: TextAlign.right,
+                      '— 本作品由起点中文网进行电子制作与发行 —',
+                      textAlign: TextAlign.center,
                       style: TextStyle(
-                        fontSize: 17 * scale,
-                        height: 1.4,
-                        letterSpacing: .5,
+                        fontSize: 12,
+                        height: 1.6,
                         color: scheme.onSurfaceVariant,
                       ),
                     ),
-                    SizedBox(height: height * .030),
-                    _openingDashedRule(scheme),
-                    SizedBox(height: height * .27),
-                  ] else
-                    SizedBox(height: height * .40),
-                  AppText(
-                    '— 本作品由起点中文网进行电子制作与发行 —',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      fontSize: 15 * scale,
-                      height: 1.7,
-                      color: scheme.onSurfaceVariant,
+                    const SizedBox(height: 4),
+                    AppText(
+                      '版权所有·侵权必究',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontSize: 12,
+                        height: 1.6,
+                        color: scheme.onSurfaceVariant,
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 6),
-                  AppText(
-                    '版权所有·侵权必究',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      fontSize: 15 * scale,
-                      height: 1.7,
-                      color: scheme.onSurfaceVariant,
-                    ),
-                  ),
-                  SizedBox(height: height * .06),
-                ],
-              ),
-            ),
+                    SizedBox(height: height * .05),
+                  ],
+                ),
+              );
+            },
           ),
         ),
       ),
@@ -1749,13 +1763,11 @@ class _BookOpeningFact extends StatelessWidget {
     required this.value,
     required this.label,
     this.align = CrossAxisAlignment.start,
-    this.scale = 1.0,
   });
 
   final String value;
   final String label;
   final CrossAxisAlignment align;
-  final double scale;
 
   @override
   Widget build(BuildContext context) {
@@ -1765,41 +1777,34 @@ class _BookOpeningFact extends StatelessWidget {
       CrossAxisAlignment.center => TextAlign.center,
       _ => TextAlign.left,
     };
-    final alignment = switch (align) {
-      CrossAxisAlignment.end => Alignment.centerRight,
-      CrossAxisAlignment.center => Alignment.center,
-      _ => Alignment.centerLeft,
-    };
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 6),
       child: Column(
         crossAxisAlignment: align,
         mainAxisSize: MainAxisSize.min,
         children: [
-          // 长值（如「原生幻想」「2026.11.25」）在窄屏或大字号下按需缩小，
-          // 不换行、不溢出三列。
-          FittedBox(
-            fit: BoxFit.scaleDown,
-            alignment: alignment,
-            child: AppText(
-              value,
-              maxLines: 1,
-              style: TextStyle(
-                fontSize: 24 * scale,
-                height: 1.25,
-                fontWeight: FontWeight.w500,
-                color: scheme.onSurface,
-              ),
+          // 三列字号统一、单行；过长的值（如多标签类型）用省略号截断，
+          // 与起点原版一致，而不是把字缩到极小破坏字号协调。
+          AppText(
+            value,
+            textAlign: textAlign,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontSize: 20,
+              height: 1.25,
+              fontWeight: FontWeight.w500,
+              color: scheme.onSurface,
             ),
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 22),
           AppText(
             label,
             textAlign: textAlign,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: TextStyle(
-              fontSize: 14 * scale,
+              fontSize: 14,
               height: 1.3,
               color: scheme.onSurfaceVariant,
             ),
@@ -13082,6 +13087,11 @@ class _ReaderPageState extends State<ReaderPage>
                                             novel: _sourceBook,
                                             mode: _readerMode,
                                             onOpen: _openReader,
+                                            fontFamily: _readerFontFamily,
+                                            fontFamilyFallback: widget.state
+                                                .readerFallbackFontFamiliesFor(
+                                                  widget.novel.id,
+                                                ),
                                           ),
                                         )
                                       : _article(context, chapter, appDark),
