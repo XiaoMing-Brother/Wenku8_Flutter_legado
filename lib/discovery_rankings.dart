@@ -61,27 +61,29 @@ class DiscoveryRankingsPageState extends State<DiscoveryRankingsPage> {
   int _generation = 0;
   final _firstPages =
       <String, ({DateTime saved, OfficialRankingPage result})>{};
-  // 番茄官方榜单目录（动态，来自 core）；为空时回落写死的 officialRankings。
+  // 番茄官方榜单目录（动态，来自 core）；不再使用写死的旧榜单兜底。
   List<OfficialRanking> _fanqieBoards = const [];
   List<OfficialCategory> _fanqieCoreCategories = const [];
   bool _fanqieCoreLoading = false;
+  bool _fanqieCatalogUnavailable = false;
+  Future<void>? _fanqieCoreFuture;
 
   List<OfficialRanking> get _rankings {
-    if (_site == OfficialSite.fanqie &&
-        !_fanqieLibrary &&
-        _fanqieBoards.isNotEmpty) {
+    if (_site == OfficialSite.fanqie && !_fanqieLibrary) {
       return _fanqieBoards;
     }
     return officialRankings.where((item) => item.site == _site).toList();
   }
 
-  OfficialRanking get _ranking {
-    for (final item in _rankings) {
+  OfficialRanking? get _ranking {
+    final rankings = _rankings;
+    for (final item in rankings) {
       if (item.id == _rankingId) {
         return _rankingWithCategory(item);
       }
     }
-    return _rankingWithCategory(_rankings.first);
+    if (rankings.isEmpty) return null;
+    return _rankingWithCategory(rankings.first);
   }
 
   String get _contentKey {
@@ -89,7 +91,9 @@ class DiscoveryRankingsPageState extends State<DiscoveryRankingsPage> {
       return 'fanqie-library-$_fanqieLibraryGender-'
           '$_fanqieLibraryCategoryId';
     }
-    return '${_ranking.id}-${_ranking.categoryId ?? ''}';
+    final ranking = _ranking;
+    if (ranking == null) return '${_site.name}-empty';
+    return '${ranking.id}-${ranking.categoryId ?? ''}';
   }
 
   String get _fanqieLibraryCategoryName {
@@ -118,22 +122,21 @@ class DiscoveryRankingsPageState extends State<DiscoveryRankingsPage> {
     };
   }
 
-  List<OfficialCategory> get _categories => switch (_site) {
-    OfficialSite.qidian => qidianCategories,
-    OfficialSite.fanqie =>
-      (_ranking.kind == 'core' && _fanqieCoreCategories.isNotEmpty)
-          ? _fanqieCoreCategories
-          : (_ranking.gender == '1'
-                ? fanqieMaleCategories
-                : fanqieFemaleCategories),
-    OfficialSite.qimao =>
-      _ranking.kind == 'new'
-          ? const []
-          : _ranking.gender == 'girl'
-          ? qimaoFemaleCategories
-          : qimaoMaleCategories,
-    OfficialSite.shuqi => const [],
-  };
+  List<OfficialCategory> get _categories {
+    final ranking = _ranking;
+    if (ranking == null) return const [];
+    return switch (_site) {
+      OfficialSite.qidian => qidianCategories,
+      OfficialSite.fanqie => _fanqieCoreCategories,
+      OfficialSite.qimao =>
+        ranking.kind == 'new'
+            ? const []
+            : ranking.gender == 'girl'
+            ? qimaoFemaleCategories
+            : qimaoMaleCategories,
+      OfficialSite.shuqi => const [],
+    };
+  }
 
   @override
   void initState() {
@@ -160,14 +163,25 @@ class DiscoveryRankingsPageState extends State<DiscoveryRankingsPage> {
 
   Future<void> _load({required bool reset, bool refresh = false}) async {
     final generation = ++_generation;
-    final ranking = _ranking;
     final library = _site == OfficialSite.fanqie && _fanqieLibrary;
+    final ranking = _ranking;
     final page = reset ? 1 : _page + 1;
     final key = _contentKey;
-    final cached = reset && !refresh ? _firstPages[key] : null;
     if (reset && _scrollController.hasClients && _scrollController.offset > 0) {
       _scrollController.jumpTo(0);
     }
+    if (!library && ranking == null) {
+      setState(() {
+        _loading = false;
+        _loaded = true;
+        _items = const [];
+        _error = null;
+        _page = 0;
+        _hasMore = false;
+      });
+      return;
+    }
+    final cached = reset && !refresh ? _firstPages[key] : null;
     setState(() {
       _loading = true;
       if (reset) {
@@ -193,7 +207,7 @@ class DiscoveryRankingsPageState extends State<DiscoveryRankingsPage> {
               categoryName: _fanqieLibraryCategoryName,
               page: page,
             )
-          : await OfficialBookService.ranking(ranking, page);
+          : await OfficialBookService.ranking(ranking!, page);
       if (!mounted || generation != _generation) return;
       if (reset && !fromCache) {
         _firstPages.remove(key);
@@ -253,14 +267,22 @@ class DiscoveryRankingsPageState extends State<DiscoveryRankingsPage> {
 
   Future<void> _selectSite(OfficialSite site) async {
     if (site == _site) return;
-    final first = officialRankings.firstWhere((item) => item.site == site);
+    OfficialRanking? first;
+    for (final item in officialRankings) {
+      if (item.site == site) {
+        first = item;
+        break;
+      }
+    }
+    final waitFanqieCatalog =
+        site == OfficialSite.fanqie && _fanqieBoards.isEmpty;
     setState(() {
       _site = site;
-      _rankingId = first.id;
+      _rankingId = first?.id ?? '';
       if (site == OfficialSite.qidian) {
         _qidianCategoryId = '';
       } else if (site == OfficialSite.fanqie) {
-        _fanqieCategoryId = first.gender == '1' ? '1141' : '1139';
+        _fanqieCategoryId = '';
         _fanqieLibrary = false;
         _fanqieLibraryGender = '-1';
         _fanqieLibraryCategoryId = '';
@@ -272,9 +294,12 @@ class DiscoveryRankingsPageState extends State<DiscoveryRankingsPage> {
       _page = 0;
       _hasMore = false;
       _loaded = false;
+      if (waitFanqieCatalog) _loading = true;
     });
     if (site == OfficialSite.fanqie) {
-      await _ensureFanqieCore();
+      if (waitFanqieCatalog) await _ensureFanqieCore();
+      if (!mounted || _site != site) return;
+      setState(_syncFanqieRankingSelection);
     }
     await _load(reset: true);
   }
@@ -282,15 +307,12 @@ class DiscoveryRankingsPageState extends State<DiscoveryRankingsPage> {
   Future<void> _selectRanking(OfficialRanking ranking) async {
     if (ranking.id == _rankingId && (_loaded || _loading)) return;
     final genderChanged =
-        ranking.site == OfficialSite.qimao && ranking.gender != _ranking.gender;
+        ranking.site == OfficialSite.qimao &&
+        ranking.gender != _ranking?.gender;
     setState(() {
       _rankingId = ranking.id;
       if (ranking.site == OfficialSite.qidian) {
         _qidianCategoryId = '';
-      } else if (ranking.site == OfficialSite.fanqie) {
-        if (ranking.kind != 'core') {
-          _fanqieCategoryId = ranking.gender == '1' ? '1141' : '1139';
-        }
       } else if (genderChanged) {
         _qimaoCategoryId = '';
       }
@@ -320,6 +342,7 @@ class DiscoveryRankingsPageState extends State<DiscoveryRankingsPage> {
 
   Future<void> _selectFanqieMode({required bool library}) async {
     if (library == _fanqieLibrary) return;
+    final waitFanqieCatalog = !library && _fanqieBoards.isEmpty;
     setState(() {
       _fanqieLibrary = library;
       _items = const [];
@@ -327,8 +350,13 @@ class DiscoveryRankingsPageState extends State<DiscoveryRankingsPage> {
       _page = 0;
       _hasMore = false;
       _loaded = false;
+      if (waitFanqieCatalog) _loading = true;
     });
-    if (!library) await _ensureFanqieCore();
+    if (!library) {
+      if (waitFanqieCatalog) await _ensureFanqieCore();
+      if (!mounted || _site != OfficialSite.fanqie || _fanqieLibrary) return;
+      setState(_syncFanqieRankingSelection);
+    }
     await _load(reset: true);
   }
 
@@ -367,30 +395,70 @@ class DiscoveryRankingsPageState extends State<DiscoveryRankingsPage> {
     await _load(reset: true);
   }
 
-  Future<void> _refresh() => _load(reset: true, refresh: true);
+  Future<void> _refresh() async {
+    final needsCatalog =
+        _site == OfficialSite.fanqie &&
+        !_fanqieLibrary &&
+        _fanqieBoards.isEmpty;
+    if (needsCatalog) {
+      setState(() {
+        _loading = true;
+        _fanqieCatalogUnavailable = false;
+        _error = null;
+      });
+      await _ensureFanqieCore(refresh: true);
+      if (!mounted || _site != OfficialSite.fanqie || _fanqieLibrary) return;
+      setState(_syncFanqieRankingSelection);
+    }
+    await _load(reset: true, refresh: true);
+  }
 
-  /// 拉取番茄官方榜单目录（动态）。核心不可用时静默保持写死兜底。
-  Future<void> _ensureFanqieCore() async {
-    if (_fanqieBoards.isNotEmpty) return;
-    if (_fanqieCoreLoading) return;
-    _fanqieCoreLoading = true;
+  /// 目录返回后才决定番茄默认榜，避免先渲染写死榜再被动态榜替换。
+  void _syncFanqieRankingSelection() {
+    if (_site != OfficialSite.fanqie ||
+        _fanqieLibrary ||
+        _fanqieBoards.isEmpty) {
+      return;
+    }
+    if (_fanqieBoards.any((ranking) => ranking.id == _rankingId)) return;
+    _rankingId = _fanqieBoards.first.id;
+    _fanqieCategoryId = '';
+  }
+
+  /// 拉取番茄官方榜单目录（动态）。核心不可用时展示失败态，不使用旧榜兜底。
+  Future<void> _ensureFanqieCore({bool refresh = false}) {
+    if (!refresh && _fanqieBoards.isNotEmpty) return Future.value();
+    final pending = _fanqieCoreFuture;
+    if (pending != null) return pending;
+    final future = _fetchFanqieCore(refresh: refresh);
+    _fanqieCoreFuture = future;
+    return future;
+  }
+
+  Future<void> _fetchFanqieCore({required bool refresh}) async {
+    if (mounted) {
+      setState(() {
+        _fanqieCoreLoading = true;
+        _fanqieCatalogUnavailable = false;
+      });
+    }
     try {
-      final set = await OfficialBookService.fanqieRankCatalog();
+      final set = await OfficialBookService.fanqieRankCatalog(refresh: refresh);
       if (!mounted) return;
       if (set != null && set.boards.isNotEmpty) {
         setState(() {
           _fanqieBoards = set.boards;
           _fanqieCoreCategories = set.categories;
-          if (!set.boards.any((r) => r.id == _rankingId)) {
-            _rankingId = set.boards.first.id;
-            _fanqieCategoryId = '';
-          }
+          _fanqieCatalogUnavailable = false;
         });
+      } else {
+        setState(() => _fanqieCatalogUnavailable = true);
       }
     } on Object {
-      // 核心不可用 → 保持写死的 officialRankings 兜底。
+      if (mounted) setState(() => _fanqieCatalogUnavailable = true);
     } finally {
-      _fanqieCoreLoading = false;
+      _fanqieCoreFuture = null;
+      if (mounted) setState(() => _fanqieCoreLoading = false);
     }
   }
 
@@ -468,6 +536,19 @@ class DiscoveryRankingsPageState extends State<DiscoveryRankingsPage> {
                 icon: CupertinoIcons.wifi_exclamationmark,
                 title: library ? '书库加载失败' : '榜单加载失败',
                 message: _errorText(_error!),
+                onRetry: _refresh,
+              ),
+            )
+          else if (!library &&
+              _site == OfficialSite.fanqie &&
+              _fanqieBoards.isEmpty &&
+              _fanqieCatalogUnavailable)
+            SliverFillRemaining(
+              hasScrollBody: false,
+              child: ContentNotice(
+                icon: CupertinoIcons.wifi_exclamationmark,
+                title: '番茄榜单加载失败',
+                message: '动态榜单目录暂时不可用，请检查网络后重试。',
                 onRetry: _refresh,
               ),
             )
@@ -570,9 +651,14 @@ class DiscoveryRankingsPageState extends State<DiscoveryRankingsPage> {
   Widget _headerSection(
     BuildContext context,
     List<OfficialRanking> rankings,
-    OfficialRanking ranking,
+    OfficialRanking? ranking,
   ) {
     final library = _site == OfficialSite.fanqie && _fanqieLibrary;
+    final catalogPending =
+        _site == OfficialSite.fanqie &&
+        !library &&
+        _fanqieBoards.isEmpty &&
+        _fanqieCoreLoading;
     final muted = Theme.of(context).colorScheme.onSurfaceVariant;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -644,17 +730,26 @@ class DiscoveryRankingsPageState extends State<DiscoveryRankingsPage> {
           ),
         ] else ...[
           const SizedBox(height: 8),
-          _chipRow([
-            for (final item in rankings)
-              GlassTextButton(
-                key: ValueKey('official-rank-${item.id}'),
-                compact: true,
-                selected: item.id == ranking.id,
-                onPressed: () => _selectRanking(item),
-                child: AppText(item.title),
+          if (catalogPending)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 10),
+              child: AppText(
+                '正在读取番茄榜单…',
+                style: TextStyle(fontSize: 12, color: muted),
               ),
-          ]),
-          if (_categories.isNotEmpty) ...[
+            )
+          else
+            _chipRow([
+              for (final item in rankings)
+                GlassTextButton(
+                  key: ValueKey('official-rank-${item.id}'),
+                  compact: true,
+                  selected: item.id == ranking?.id,
+                  onPressed: () => _selectRanking(item),
+                  child: AppText(item.title),
+                ),
+            ]),
+          if (!catalogPending && _categories.isNotEmpty) ...[
             const SizedBox(height: 8),
             SingleChildScrollView(
               scrollDirection: Axis.horizontal,
@@ -677,7 +772,7 @@ class DiscoveryRankingsPageState extends State<DiscoveryRankingsPage> {
                       child: GlassTextButton(
                         key: ValueKey('official-category-${category.id}'),
                         compact: true,
-                        selected: category.id == (ranking.categoryId ?? ''),
+                        selected: category.id == (ranking?.categoryId ?? ''),
                         onPressed: () => _selectCategory(category),
                         child: AppText(category.name),
                       ),

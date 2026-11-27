@@ -55,7 +55,6 @@ import 'book_sources/qimao_review_service.dart';
 import 'reader_paragraph_review.dart';
 import 'blocked_tags_controls.dart';
 import 'catalog.dart';
-import 'book_title_page.dart';
 import 'glass_dock.dart';
 import 'home_navigation.dart';
 import 'library_state.dart';
@@ -1509,7 +1508,7 @@ class BookOpeningPage extends StatelessWidget {
 
   String _wordLabel(int value) {
     final unit = value >= 10000 ? '万字' : '字';
-    return '$unit / ${novel.isComplete ? '完本' : '连载'}';
+    return '$unit/${novel.isComplete ? '完本' : '连载'}';
   }
 
   /// 类型列：多标签用「 · 」连接，单标签原样。截断交给 ellipsis。
@@ -1520,24 +1519,46 @@ class BookOpeningPage extends StatelessWidget {
     return novel.genre.trim();
   }
 
+  /// 卷首语：优先使用扉页寄语，缺省时退回简介首句。
+  String? get _epigraph {
+    final summary = novel.summary.trim();
+    if (summary.isEmpty) return null;
+    final firstLine = summary.split(RegExp(r'[\r\n。！？!?]')).first.trim();
+    if (firstLine.isEmpty) return null;
+    return firstLine.length > 24 ? firstLine.substring(0, 24) : firstLine;
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     final size = MediaQuery.sizeOf(context);
-    final coverWidth = (size.width * .34).clamp(104.0, 320.0);
+    final coverWidth = (size.width * .29).clamp(120.0, 320.0);
     final author = novel.author.trim();
     final genre = isLocalBook(novel.id) ? novel.tags.join(' · ') : _genreText;
-    final summary = novel.summary.trim();
     final facts = [
-      if (genre.isNotEmpty) _BookOpeningFact(value: genre, label: '类型'),
+      if (genre.isNotEmpty)
+        _BookOpeningFact(
+          value: genre,
+          label: '类型',
+          align: CrossAxisAlignment.start,
+        ),
       if (_updatedDate case final date?)
-        _BookOpeningFact(value: date, label: '更新'),
+        _BookOpeningFact(
+          value: date,
+          label: '更新',
+          align: CrossAxisAlignment.center,
+        ),
       if (_wordCount case final count?)
-        _BookOpeningFact(value: _wordValue(count), label: _wordLabel(count)),
+        _BookOpeningFact(
+          value: _wordValue(count),
+          label: _wordLabel(count),
+          align: CrossAxisAlignment.end,
+        ),
     ];
     double dragDistance = 0;
     double overscroll = 0;
+    final height = size.height;
     return SafeArea(
       key: const ValueKey('reader-book-opening'),
       child: GestureDetector(
@@ -1552,200 +1573,218 @@ class BookOpeningPage extends StatelessWidget {
             onOpen();
           }
         },
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(24, 24, 24, 24),
-          child: Column(
-            children: [
-              Expanded(
-                child: Align(
-                  alignment: Alignment.topCenter,
-                  child: NotificationListener<ScrollNotification>(
-                    onNotification: (event) {
-                      if (mode != ReaderMode.scroll || event.depth != 0) {
-                        return false;
-                      }
-                      if (event is ScrollStartNotification) overscroll = 0;
-                      if (event is OverscrollNotification &&
-                          event.dragDetails != null) {
-                        overscroll = event.overscroll > 0
-                            ? overscroll + event.overscroll
-                            : 0;
-                      }
-                      if (event is ScrollEndNotification && overscroll >= 42) {
-                        onOpen();
-                      }
-                      return false;
-                    },
-                    child: SingleChildScrollView(
-                      physics: const ClampingScrollPhysics(
-                        parent: AlwaysScrollableScrollPhysics(),
-                      ),
-                      padding: EdgeInsets.only(
-                        top: size.height * .185,
-                        bottom: 16,
-                      ),
-                      child: ConstrainedBox(
-                        constraints: const BoxConstraints(maxWidth: 440),
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Container(
-                              padding: const EdgeInsets.all(5),
-                              decoration: BoxDecoration(
-                                color: scheme.surface,
-                                border: Border.all(
-                                  color: scheme.outlineVariant.withValues(
-                                    alpha: .55,
-                                  ),
-                                ),
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: Colors.black.withValues(alpha: .10),
-                                    blurRadius: 10,
-                                    offset: const Offset(0, 4),
-                                  ),
-                                ],
-                              ),
-                              child: NovelCover(
-                                novel,
-                                width: coverWidth,
-                                height: coverWidth * 1.4,
-                              ),
-                            ),
-                            const SizedBox(height: 24),
-                            AppText(
-                              novel.title,
-                              textAlign: TextAlign.center,
-                              maxLines: 3,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                fontSize: 27,
-                                height: 1.28,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                            if (author.isNotEmpty) ...[
-                              const SizedBox(height: 8),
-                              AppText(
-                                author,
-                                textAlign: TextAlign.center,
-                                style: TextStyle(
-                                  fontSize: 14,
-                                  color: scheme.onSurfaceVariant,
-                                ),
-                              ),
-                            ],
-                            if (facts.isNotEmpty) ...[
-                              const SizedBox(height: 24),
-                              Row(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  for (final fact in facts)
-                                    Expanded(child: fact),
-                                ],
-                              ),
-                            ],
-                            if (summary.isNotEmpty) ...[
-                              const SizedBox(height: 20),
-                              Divider(height: 1, color: scheme.outlineVariant),
-                              Padding(
-                                padding: const EdgeInsets.symmetric(
-                                  vertical: 12,
-                                ),
-                                child: Align(
-                                  alignment: AlignmentDirectional.centerStart,
-                                  child: AppText(
-                                    summary,
-                                    maxLines: 4,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: const TextStyle(
-                                      fontSize: 16,
-                                      height: 1.75,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                              Divider(height: 1, color: scheme.outlineVariant),
-                            ],
-                          ],
+        child: NotificationListener<ScrollNotification>(
+          onNotification: (event) {
+            if (mode != ReaderMode.scroll || event.depth != 0) return false;
+            if (event is ScrollStartNotification) overscroll = 0;
+            if (event is OverscrollNotification && event.dragDetails != null) {
+              overscroll = event.overscroll > 0
+                  ? overscroll + event.overscroll
+                  : 0;
+            }
+            if (event is ScrollEndNotification && overscroll >= 42) {
+              onOpen();
+            }
+            return false;
+          },
+          child: SingleChildScrollView(
+            physics: const ClampingScrollPhysics(
+              parent: AlwaysScrollableScrollPhysics(),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 24),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  SizedBox(height: height * .103),
+                  Center(
+                    child: Container(
+                      padding: const EdgeInsets.all(5),
+                      decoration: BoxDecoration(
+                        color: scheme.surface,
+                        border: Border.all(
+                          color: scheme.outlineVariant.withValues(alpha: .55),
                         ),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withValues(alpha: .10),
+                            blurRadius: 12,
+                            offset: const Offset(0, 5),
+                          ),
+                        ],
+                      ),
+                      child: NovelCover(
+                        novel,
+                        width: coverWidth,
+                        height: coverWidth * 1.35,
                       ),
                     ),
                   ),
-                ),
-              ),
-              AppText(
-                '来源：${_searchSourceText(novel)}',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontSize: 12,
-                  height: 1.4,
-                  color: scheme.onSurfaceVariant,
-                ),
-              ),
-              const SizedBox(height: 18),
-              JellyTapSurface(
-                key: const ValueKey('reader-book-opening-start'),
-                onTap: onOpen,
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 8,
-                  ),
-                  child: AppText(
-                    '开始阅读',
+                  SizedBox(height: height * .048),
+                  AppText(
+                    novel.title,
+                    textAlign: TextAlign.center,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
                     style: TextStyle(
-                      fontSize: 15,
-                      height: 1.4,
-                      fontWeight: FontWeight.w500,
+                      fontSize: 30,
+                      height: 1.25,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 2,
                       color: scheme.onSurface,
                     ),
                   ),
-                ),
+                  if (author.isNotEmpty) ...[
+                    SizedBox(height: height * .038),
+                    AppText(
+                      author,
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontSize: 17,
+                        height: 1.4,
+                        letterSpacing: 1,
+                        color: scheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                  if (facts.isNotEmpty) ...[
+                    SizedBox(height: height * .028),
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        for (final fact in facts) Expanded(child: fact),
+                      ],
+                    ),
+                  ],
+                  // A：寄语存在时才画「起始虚线 + 寄语 + 署名 + 收尾虚线」整组；
+                  // 没有寄语就整块不画，三列直接接留白与页脚，避免两条空线夹空白。
+                  if (_epigraph case final epigraph?) ...[
+                    SizedBox(height: height * .105),
+                    _openingDashedRule(scheme),
+                    SizedBox(height: height * .030),
+                    AppText(
+                      epigraph,
+                      style: TextStyle(
+                        fontSize: 20,
+                        height: 1.6,
+                        letterSpacing: .5,
+                        color: scheme.onSurface,
+                      ),
+                    ),
+                    SizedBox(height: height * .026),
+                    AppText(
+                      '— ${author.isEmpty ? novel.author : author}',
+                      textAlign: TextAlign.right,
+                      style: TextStyle(
+                        fontSize: 17,
+                        height: 1.4,
+                        letterSpacing: .5,
+                        color: scheme.onSurfaceVariant,
+                      ),
+                    ),
+                    SizedBox(height: height * .030),
+                    _openingDashedRule(scheme),
+                    SizedBox(height: height * .27),
+                  ] else
+                    SizedBox(height: height * .40),
+                  AppText(
+                    '— 本作品由起点中文网进行电子制作与发行 —',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 15,
+                      height: 1.7,
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  AppText(
+                    '版权所有·侵权必究',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 15,
+                      height: 1.7,
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ),
+                  SizedBox(height: height * .06),
+                ],
               ),
-              const SizedBox(height: 4),
-            ],
+            ),
           ),
         ),
       ),
     );
   }
+
+  /// 扉页里的横向虚线分隔。
+  Widget _openingDashedRule(ColorScheme scheme) => LayoutBuilder(
+    builder: (context, constraints) {
+      const dash = 6.0;
+      const gap = 5.0;
+      final count = (constraints.maxWidth / (dash + gap)).floor();
+      return Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          for (var i = 0; i < count; i++)
+            SizedBox(
+              width: dash,
+              height: 1,
+              child: ColoredBox(
+                color: scheme.onSurfaceVariant.withValues(alpha: .45),
+              ),
+            ),
+        ],
+      );
+    },
+  );
 }
 
 class _BookOpeningFact extends StatelessWidget {
-  const _BookOpeningFact({required this.value, required this.label});
+  const _BookOpeningFact({
+    required this.value,
+    required this.label,
+    this.align = CrossAxisAlignment.start,
+  });
 
   final String value;
   final String label;
+  final CrossAxisAlignment align;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final textAlign = switch (align) {
+      CrossAxisAlignment.end => TextAlign.right,
+      CrossAxisAlignment.center => TextAlign.center,
+      _ => TextAlign.left,
+    };
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 6),
       child: Column(
+        crossAxisAlignment: align,
         mainAxisSize: MainAxisSize.min,
         children: [
           AppText(
             value,
-            textAlign: TextAlign.center,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(
-              fontSize: 18,
-              height: 1.35,
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-          const SizedBox(height: 7),
-          AppText(
-            label,
-            textAlign: TextAlign.center,
+            textAlign: textAlign,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: TextStyle(
-              fontSize: 12,
-              height: 1.35,
+              fontSize: 24,
+              height: 1.25,
+              fontWeight: FontWeight.w500,
+              color: scheme.onSurface,
+            ),
+          ),
+          const SizedBox(height: 10),
+          AppText(
+            label,
+            textAlign: textAlign,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontSize: 14,
+              height: 1.3,
               color: scheme.onSurfaceVariant,
             ),
           ),
@@ -2146,6 +2185,29 @@ class ShelfPage extends StatefulWidget {
 
 enum _ShelfSort { recentRead, recentAdded, title }
 
+/// 立体书架离开缓存区后仍保留在同一位置，避免滚回顶部时重建整排书脊、
+/// 重新解码封面并重播入场动画。
+class _KeepShelfPreviewAlive extends StatefulWidget {
+  const _KeepShelfPreviewAlive({required this.child});
+
+  final Widget child;
+
+  @override
+  State<_KeepShelfPreviewAlive> createState() => _KeepShelfPreviewAliveState();
+}
+
+class _KeepShelfPreviewAliveState extends State<_KeepShelfPreviewAlive>
+    with AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive => true;
+
+  @override
+  Widget build(BuildContext context) {
+    super.build(context);
+    return widget.child;
+  }
+}
+
 class _ShelfPageState extends State<ShelfPage>
     with SingleTickerProviderStateMixin {
   late final AnimationController _modeTransition;
@@ -2396,7 +2458,9 @@ class _ShelfPageState extends State<ShelfPage>
           return const ArchiveShelfSkeleton();
         }
         final books = ready ? known : snapshot.data ?? const <Novel>[];
-        if (books.isNotEmpty) return carousel(books);
+        if (books.isNotEmpty) {
+          return _KeepShelfPreviewAlive(child: carousel(books));
+        }
         return Padding(
           padding: const EdgeInsets.symmetric(vertical: 28),
           child: Column(
@@ -6431,13 +6495,6 @@ class _DetailPageState extends State<DetailPage> with TickerProviderStateMixin {
             icon: CupertinoIcons.photo,
             onPressed: () => Navigator.pop(menu, 'cover'),
           ),
-          GlassMenuItem(
-            key: const ValueKey('detail-title-page'),
-            order: 6,
-            label: '查看扉页',
-            icon: CupertinoIcons.doc_text,
-            onPressed: () => Navigator.pop(menu, 'titlepage'),
-          ),
         ],
       ),
     );
@@ -6455,23 +6512,8 @@ class _DetailPageState extends State<DetailPage> with TickerProviderStateMixin {
         await _copyBookLink(bookUrl);
       case 'cover':
         await _changeCover();
-      case 'titlepage':
-        await _openTitlePage();
     }
   }
-
-  Future<void> _openTitlePage() => pushNovelPage<void>(
-    context,
-    BookTitlePage(
-      novel: novel,
-      reduceMotion: _reduceMotion,
-      openChapter: novel.chapters.isEmpty
-          ? null
-          : () => _openReader(context, _resumeChapter ?? 0),
-    ),
-    reduceMotion: _reduceMotion,
-    slot: 'title-page',
-  );
 
   Future<void> _changeCover() async {
     final book = novel;

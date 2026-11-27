@@ -87,49 +87,6 @@ class OfficialCategory {
   final String name;
 }
 
-const fanqieMaleCategories = <OfficialCategory>[
-  OfficialCategory(id: '1141', name: '西方奇幻'),
-  OfficialCategory(id: '1140', name: '东方仙侠'),
-  OfficialCategory(id: '8', name: '科幻末世'),
-  OfficialCategory(id: '261', name: '都市日常'),
-  OfficialCategory(id: '124', name: '都市修真'),
-  OfficialCategory(id: '1014', name: '都市高武'),
-  OfficialCategory(id: '273', name: '历史古代'),
-  OfficialCategory(id: '27', name: '战神赘婿'),
-  OfficialCategory(id: '263', name: '都市种田'),
-  OfficialCategory(id: '258', name: '传统玄幻'),
-  OfficialCategory(id: '272', name: '历史脑洞'),
-  OfficialCategory(id: '539', name: '悬疑脑洞'),
-  OfficialCategory(id: '262', name: '都市脑洞'),
-  OfficialCategory(id: '257', name: '玄幻脑洞'),
-  OfficialCategory(id: '751', name: '悬疑灵异'),
-  OfficialCategory(id: '504', name: '抗战谍战'),
-  OfficialCategory(id: '746', name: '游戏体育'),
-  OfficialCategory(id: '718', name: '动漫衍生'),
-  OfficialCategory(id: '1016', name: '男频衍生'),
-];
-
-const fanqieFemaleCategories = <OfficialCategory>[
-  OfficialCategory(id: '1139', name: '古风世情'),
-  OfficialCategory(id: '8', name: '科幻末世'),
-  OfficialCategory(id: '746', name: '游戏体育'),
-  OfficialCategory(id: '1015', name: '女频衍生'),
-  OfficialCategory(id: '248', name: '玄幻言情'),
-  OfficialCategory(id: '23', name: '种田'),
-  OfficialCategory(id: '79', name: '年代'),
-  OfficialCategory(id: '267', name: '现言脑洞'),
-  OfficialCategory(id: '246', name: '宫斗宅斗'),
-  OfficialCategory(id: '539', name: '悬疑脑洞'),
-  OfficialCategory(id: '253', name: '古言脑洞'),
-  OfficialCategory(id: '24', name: '快穿'),
-  OfficialCategory(id: '749', name: '青春甜宠'),
-  OfficialCategory(id: '745', name: '星光璀璨'),
-  OfficialCategory(id: '747', name: '女频悬疑'),
-  OfficialCategory(id: '750', name: '职场婚恋'),
-  OfficialCategory(id: '748', name: '豪门总裁'),
-  OfficialCategory(id: '1017', name: '民国言情'),
-];
-
 /// 七猫分类使用 `频道:一级分类` 编码：0 男生原创、1 女生原创。
 /// 选择「全部」时保持空串，继续走官方榜单页。
 const qimaoMaleCategories = <OfficialCategory>[
@@ -228,60 +185,6 @@ const officialRankings = <OfficialRanking>[
     title: '新人榜',
     site: OfficialSite.qidian,
     kind: 'newauthor',
-  ),
-  OfficialRanking(
-    id: 'fanqie-male-read',
-    title: '男频阅读榜',
-    site: OfficialSite.fanqie,
-    kind: 'male-read',
-    gender: '1',
-    rankMold: '2',
-    categoryId: '1141',
-  ),
-  OfficialRanking(
-    id: 'fanqie-male-new',
-    title: '男频新书榜',
-    site: OfficialSite.fanqie,
-    kind: 'male-new',
-    gender: '1',
-    rankMold: '1',
-    categoryId: '1141',
-  ),
-  OfficialRanking(
-    id: 'fanqie-female-read',
-    title: '女频阅读榜',
-    site: OfficialSite.fanqie,
-    kind: 'female-read',
-    gender: '0',
-    rankMold: '2',
-    categoryId: '1139',
-  ),
-  OfficialRanking(
-    id: 'fanqie-female-new',
-    title: '女频新书榜',
-    site: OfficialSite.fanqie,
-    kind: 'female-new',
-    gender: '0',
-    rankMold: '1',
-    categoryId: '1139',
-  ),
-  OfficialRanking(
-    id: 'fanqie-male-complete',
-    title: '男频完本榜',
-    site: OfficialSite.fanqie,
-    kind: 'complete',
-    gender: '1',
-    rankMold: '2',
-    categoryId: '1141',
-  ),
-  OfficialRanking(
-    id: 'fanqie-female-complete',
-    title: '女频完本榜',
-    site: OfficialSite.fanqie,
-    kind: 'complete',
-    gender: '0',
-    rankMold: '2',
-    categoryId: '1139',
   ),
   // 七猫：榜单页按 /paihang/{boy|girl}/{hot|collect|new|over|update}/date/ 渲染，
   // 仅用于发现页浏览，点书走书源搜索。
@@ -913,81 +816,11 @@ class OfficialBookService {
     return books;
   }
 
-  /// 核心榜单：拉首页目录 → 匹配榜名 → 拉条目 → 映射 OfficialBook。
-  /// 目录取不到/匹配不到/无条目返回 null（降级 web）。
-  static Future<OfficialRankingPage?> _fanqieCoreRank(
-    OfficialRanking ranking,
-    int page,
-  ) async {
-    try {
-      final src = FanqieCoreSource.shared();
-      final catalog = await src.rankCatalog();
-      if (catalog.isEmpty) return null;
-      final tab = _matchRankTab(catalog, ranking.title);
-      if (tab == null) return null;
-      final items = await src.rankEntries(
-        catalog.cellId,
-        algo: tab.algo,
-        offset: (page - 1) * 20,
-      );
-      if (items.isEmpty) return null;
-      final books = <OfficialBook>[];
-      for (final e in items) {
-        if (e.id.isEmpty || e.title.isEmpty) continue;
-        var cover = e.cover;
-        if (cover.startsWith('http://')) {
-          cover = 'https://${cover.substring(7)}';
-        }
-        books.add(
-          OfficialBook(
-            site: OfficialSite.fanqie,
-            bookId: e.id,
-            title: _plainText(e.title),
-            author: _plainText(e.author),
-            kind: _plainText(e.category),
-            summary: _plainText(e.abstract),
-            coverUrl: cover,
-            bookUrl: 'https://fanqienovel.com/page/${e.id}',
-            wordCount: e.wordNumber == null ? null : '${e.wordNumber}',
-          ),
-        );
-      }
-      if (books.isEmpty) return null;
-      return OfficialRankingPage(
-        books: books,
-        hasMore: books.length >= 20,
-        page: page,
-      );
-    } on Object {
-      return null;
-    }
-  }
-
-  /// 按榜名 token 在目录里找对应 tab（阅读/新书/完本/推荐）。
-  /// 首页 `rank_with_category_data` 这张卡是男频榜（推荐/完本/巅峰/口碑），与 app 内置的
-  /// 「阅读/新书」榜命名并非一一对应。仅对**能确定对应**的榜走核心，其余回落 web，避免
-  /// 展示错误的榜：完本→完本榜；阅读≈推荐榜；新书/巅峰/口碑 及女频 → web。
-  static FanqieRankTab? _matchRankTab(FanqieRankCatalog catalog, String title) {
-    if (title.contains('女频')) return null;
-    if (title.contains('完本') || title.contains('完结')) {
-      for (final tab in catalog.tabs) {
-        if (tab.name.contains('完本') || tab.name.contains('完结')) return tab;
-      }
-      return null;
-    }
-    final target = title.contains('阅读') ? '推荐' : '';
-    if (target.isEmpty) return null;
-    for (final tab in catalog.tabs) {
-      if (tab.name.contains(target)) return tab;
-    }
-    return null;
-  }
-
   static Future<FanqieCoreRankSet?>? _fanqieRankSetFuture;
 
   /// 动态读取番茄官方榜单目录（首页 `rank_with_category_data` 的
-  /// `rank_algo_list` + `sub_info_list`）。返回 null 表示核心不可用，调用方应回落
-  /// 到写死的 `officialRankings`。结果进程内缓存；`refresh` 可强制重取。
+  /// `rank_algo_list` + `sub_info_list`）。返回 null 表示核心不可用。
+  /// 结果进程内缓存；`refresh` 可强制重取。
   static Future<FanqieCoreRankSet?> fanqieRankCatalog({bool refresh = false}) {
     if (!refresh && _fanqieRankSetFuture != null) return _fanqieRankSetFuture!;
     return _fanqieRankSetFuture = _fetchFanqieRankSet();
@@ -1495,67 +1328,19 @@ class OfficialBookService {
     OfficialRanking ranking,
     int page,
   ) async {
-    // 动态官方榜：直接按 cell id + rank_algo 取条目（不再依赖写死榜名）。
-    if (ranking.isDynamicCore) {
-      final dynamicPage = await _fanqieCoreRankByCell(
-        ranking.cellId!,
-        ranking.algo!,
-        page,
-        ranking.categoryId,
-      );
-      if (dynamicPage != null) return dynamicPage;
+    if (!ranking.isDynamicCore) {
+      throw const FormatException('番茄榜单目录未提供该榜单');
     }
-    // 核心优先（首页 catalogue → cell/change）；不可用/匹配不到则降级 web。
-    final core = await _fanqieCoreRank(ranking, page);
-    if (core != null) return core;
-    final complete = ranking.kind == 'complete';
-    final uri = Uri.https('fanqienovel.com', '/api/rank/category/list', {
-      'app_id': '2503',
-      'rank_list_type': '3',
-      'offset': complete ? '0' : '${(page - 1) * 20}',
-      'limit': complete ? '100' : '20',
-      'category_id': ranking.categoryId ?? '1139',
-      'rank_version': '',
-      'gender': ranking.gender ?? '0',
-      'rankMold': ranking.rankMold ?? '2',
-    });
-    final json = await _getJson(uri, headers: _fanqieHeaders);
-    final data = _map(json['data']);
-    final records = _list(data?['book_list']);
-    final fontMap = await _fanqieFontMap();
-    final allBooks = <OfficialBook>[];
-    for (final value in records) {
-      final item = _map(value);
-      if (item == null) continue;
-      if (complete && _string(item['creationStatus']) != '0') continue;
-      final bid = _string(item['bookId']);
-      if (bid.isEmpty) continue;
-      allBooks.add(
-        OfficialBook(
-          site: OfficialSite.fanqie,
-          bookId: bid,
-          title: _decodeFanqieText(_string(item['bookName']), fontMap),
-          author: _decodeFanqieText(_string(item['author']), fontMap),
-          kind: _decodeFanqieText(
-            _string(item['category'] ?? item['categoryV2']),
-            fontMap,
-          ),
-          summary: _decodeFanqieText(_string(item['abstract']), fontMap),
-          coverUrl: _string(item['thumbUri']),
-          bookUrl: 'https://fanqienovel.com/page/$bid',
-          wordCount: _string(item['wordNumber']),
-        ),
-      );
-    }
-    final books = complete
-        ? allBooks.skip((page - 1) * 20).take(20).toList(growable: false)
-        : allBooks;
-    final total = complete ? allBooks.length : (_int(data?['total_num']) ?? 0);
-    return OfficialRankingPage(
-      books: books,
-      hasMore: books.length >= 20 && (total <= 0 || page * 20 < total),
-      page: page,
+    final pageResult = await _fanqieCoreRankByCell(
+      ranking.cellId!,
+      ranking.algo!,
+      page,
+      ranking.categoryId,
     );
+    if (pageResult == null) {
+      throw const FormatException('番茄榜单加载失败');
+    }
+    return pageResult;
   }
 
   static Future<OfficialRankingPage> _qimaoRanking(

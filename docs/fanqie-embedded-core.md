@@ -79,9 +79,7 @@ flutter build apk --split-per-abi --target-platform=android-arm64
 - **正文经核心解密成功**：第 1 章 `id=7694519738617053721 len=2288 snip=苍穹之上，劫云密布。`
 - **番茄榜单已改为动态目录**：发现页番茄「排行榜」直接渲染官方 `rank_with_category_data`
   的 `推荐榜/完本榜/巅峰榜/口碑榜` 与子分类（全部/穿越/系统/都市/现代言情…），条目走核心
-  `cell/change`，中文正常无 □（真机已验证）。写死的旧榜仅在核心不可用时兜底。
-- 已知：核心榜单的**目录**已走核心，但条目映射用的榜名 token 与 app 内置榜（男频阅读/新书…）
-  没对齐 → 条目仍回落 web（展示正常）。需按真实 catalogue 的 `rank_name` 校准 `_matchRankTab`。
+  `cell/change`，中文正常无 □（真机已验证）。写死的旧榜已移除，核心不可用时显示加载失败与重试。
 
 ## 4. 端点映射（Dart 适配层 ↔ Rust handler）
 
@@ -131,17 +129,17 @@ flutter build apk --split-per-abi --target-platform=android-arm64
 - **榜单（动态目录，不再写死）**：发现页番茄榜优先调 `OfficialBookService.fanqieRankCatalog()`
   → `FanqieCoreSource.rankCatalog()` 从首页 `rank_with_category_data` 生成榜列表（`推荐榜/完本榜/
   巅峰榜/口碑榜`）与子分类；每个榜用 `OfficialRanking(cellId, algo)` 携带，`_fanqieRanking` 走
-  `rankEntries(cellId, algo)` 取 `cell_view.cell_data[].book_data`。核心不可用时才回落写死的
-  `officialRankings` + web `/api/rank/category/list`。
+  `rankEntries(cellId, algo)` 取 `cell_view.cell_data[].book_data`。已移除写死的旧榜和 web
+  `/api/rank/category/list` 回落；核心不可用时页面显示失败态，可下拉或点重试重新拉取目录。
 
 **已知限制：**
-- 番茄榜 tab/子分类默认来自 core 首页目录（`rank_with_category_data`）；核心不可用时回落
-  写死的 `officialRankings`（旧「阅读/新书」榜）走 web，保证始终有内容。目录缓存在进程内，
-  官方改版后重启 App 生效。
+- 番茄榜 tab/子分类只来自 core 首页目录（`rank_with_category_data`）；核心不可用时不再展示
+  旧榜，只显示失败态。目录缓存在进程内，官方改版后重启 App 生效。
 - 目录 tab 与子分类随账号/性别卡（`tab_type`/`req_rank_category_id`）返回，可能因卡不同而不同；
   如需固定性别可调 `rankCatalog(tabType)` 参数。
 
-**统一模式**：核心优先 → 解析失败/核心缺失 → 现有 web 逻辑（即 today 的行为）。
+**统一模式**：搜索、段评等能力核心优先 → 解析失败/核心缺失 → 现有 web 逻辑；榜单只走核心，
+目录或条目失败时展示失败态，不回落到旧榜。
 可用 `--dart-define=WENKU_FANQIE_CORE=false` 整体关闭核心（测试/无 Rust 构建环境）。
 
 ## 7. 许可与维护
